@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tizen 9.0+ package, using the NUI WebView.
+
+    Needed because Tizen 10.0 no longer ships Tizen.WebView.dll at all (verified
+    on the TV emulator: FileNotFoundException for Tizen.WebView 4.0.0.0). NUI's
+    WebView is public API from API 9, so:
+
+        Overscan5   tizen50            TV 5.0-...  Tizen.WebView
+        Overscan    net6.0-tizen8.0    TV 8.0      Tizen.WebView
+        OverscanNui net6.0-tizen8.0    TV 9.0+     NUI WebView
+
+    The TFM stays net6.0-tizen8.0 because the installed workload's ref pack is
+    API 9 (Samsung.Tizen.Ref 9.0.104) and already exposes NUI WebView; only the
+    manifest api-version differs (9.0), which is what gates installation.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0-tizen8.0</TargetFramework>
+    <RootNamespace>Overscan</RootNamespace>
+    <AssemblyName>Overscan</AssemblyName>
+    <DebugType>portable</DebugType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <StartupObject>Overscan.NuiProgram</StartupObject>
+    <!-- Without this the app only starts on a 6.0.x platform runtime; on Tizen
+         9/10 the launcher finds no framework and the icon does nothing. -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../src/common/**/*.cs" />
+    <Compile Include="../src/nui/**/*.cs" />
+  </ItemGroup>
+
+</Project>

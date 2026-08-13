@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Diagnostic probe for retail Tizen 5.0 (Samsung RU7020). Same TFM and toolchain
+    as Overscan5, but it walks the browser's startup one call at a time and
+    writes a breadcrumb around each, because that TV has no dlog, no shell, and no
+    pullable crash dumps. Its own package id, so it coexists with the browser.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>tizen50</TargetFramework>
+    <RootNamespace>Overscan</RootNamespace>
+    <AssemblyName>OverscanProbe</AssemblyName>
+    <DebugType>portable</DebugType>
+    <LangVersion>8.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <StartupObject>Overscan.ProbeProgram</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../src/common/**/*.cs" />
+    <Compile Include="../src/probe/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tizen.NET.Sdk" Version="1.1.9" />
+    <PackageReference Include="Tizen.NET" Version="5.0.0.14562" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tizen 5.0 package (classic Tizen.NET.Sdk). Target device: Samsung RU7020
+    (platform_version 5.0, armv7) — i.e. the TV we can test on directly.
+    Chromium engine on 5.0 is M63.
+
+    Requires the .NET Core 3.1 SDK to build: a .NET 5+ SDK fails with
+    NETSDK1013 "TargetFramework 'tizen50' was not recognized".
+
+    Same package id and AssemblyName as the tizen8 project, so only one of the
+    two can be installed at a time.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>tizen50</TargetFramework>
+    <RootNamespace>Overscan</RootNamespace>
+    <AssemblyName>Overscan</AssemblyName>
+    <DebugType>portable</DebugType>
+    <!-- tizen50 defaults to C# 7.3 under the 3.1 SDK. -->
+    <LangVersion>8.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../src/common/**/*.cs" />
+    <Compile Include="../src/elm/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Build tasks + tpk packaging for the tizen50 TFM. -->
+    <PackageReference Include="Tizen.NET.Sdk" Version="1.1.9" />
+    <!-- TizenFX API level 5, pinned to the last 5.0.0.x. -->
+    <PackageReference Include="Tizen.NET" Version="5.0.0.14562" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns="http://tizen.org/ns/packages" api-version="5.0" package="org.apps2samsung.overscanprobe" version="0.1.0">
+  <profile name="tv" />
+  <ui-application appid="org.apps2samsung.overscanprobe"
+                  exec="OverscanProbe.dll"
+                  type="dotnet"
+                  multiple="false"
+                  taskmanage="true"
+                  nodisplay="false"
+                  launch_mode="single"
+                  api-version="5.0">
+    <label>PROBE (diagnostics)</label>
+    <icon>OverscanProbe.png</icon>
+    <splash-screens />
+  </ui-application>
+  <privileges>
+    <privilege>http://tizen.org/privilege/internet</privilege>
+    <privilege>http://tizen.org/privilege/network.get</privilege>
+    <!-- The web engine (libchromium-ewk.so) depends on libmarlin.so.0 (Marlin
+         DRM), which a plain author-signed app may not open: dlopen reports
+         "Operation not permitted" on an existing file. Tizen applies Smack rules
+         from this list, and partner rules are keyed off the certificate, so the
+         cert and these entries have to match. drmplay is public level, drminfo is
+         partner level - hence the partner-signed test. -->
+    <privilege>http://developer.samsung.com/privilege/drmplay</privilege>
+    <privilege>http://developer.samsung.com/privilege/drminfo</privilege>
+    <privilege>http://tizen.org/privilege/tv.inputdevice</privilege>
+  </privileges>
+</manifest>

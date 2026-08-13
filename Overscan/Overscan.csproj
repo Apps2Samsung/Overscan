@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tizen 8.0 (.NET 6) package. Target devices: 2024-era Samsung TVs and the
+    Tizen 8/9 emulator. Chromium engine on 8.0 is M108.
+
+    All C# lives in ../src and is shared verbatim with Overscan5 (tizen50),
+    so it must stay within the TizenFX API-4/5 surface of Tizen.WebView.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0-tizen8.0</TargetFramework>
+    <RootNamespace>Overscan</RootNamespace>
+    <AssemblyName>Overscan</AssemblyName>
+    <DebugType>portable</DebugType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!--
+      Tizen.WebView is deprecated at API 10 and removed at API 12, so the ref
+      pack warns on every call. Using it is deliberate: the replacement (NUI
+      WebView) is public API only from API 9, and this app has to run on 5.0-8.0
+      TVs. When a 9.0+-only package is added, that one should use NUI WebView.
+    -->
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
+    <!--
+      Without this, runtimeconfig.json pins Microsoft.NETCore.App 6.0.0 with the
+      default roll-forward (minor only), so the app only starts on a device whose
+      platform runtime is 6.0.x — i.e. Tizen 8.0. On Tizen 9/10 the launcher finds
+      no matching framework and the app dies before drawing anything: tapping the
+      icon appears to do nothing at all. LatestMajor lets one package run on 8.0
+      and on newer platforms.
+    -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../src/common/**/*.cs" />
+    <Compile Include="../src/elm/**/*.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,157 @@
+name: Build packages
+
+# Overscan ships one .tpk per platform range, because the web-view binding
+# changed twice under us:
+#
+#   Overscan5      tizen50           TV 5.0-...   Tizen.WebView (ewk)   .NET Core 3.1 SDK
+#   Overscan       net6.0-tizen8.0   TV 8.0       Tizen.WebView (ewk)   .NET 6 SDK + tizen workload
+#   OverscanNui    net6.0-tizen8.0   TV 9.0+      NUI WebView           .NET 6 SDK + tizen workload
+#   OverscanProbe  tizen50           diagnostics  ladder harness        .NET Core 3.1 SDK
+#
+# The tizen50 projects need the .NET Core 3.1 SDK specifically: a .NET 5+ SDK
+# fails with NETSDK1013 "TargetFramework 'tizen50' was not recognized". They also
+# need ubuntu-22.04, because 3.1's runtime wants libssl1.1/libicu.
+#
+# Every artifact is DEFAULT-SIGNED. Re-sign before installing:
+#   * emulator          -> an emulator profile (`tizen package -t tpk -s <profile>`)
+#   * retail TV         -> a DUID-bound developer certificate (e.g. Apps2Samsung)
+#   * Overscan5 on 5.0  -> must be PARTNER-signed: the web engine links Marlin DRM
+#                          and an author-signed app cannot open it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a GitHub release with all packages"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ['src/**', 'Overscan/**', 'Overscan5/**', 'OverscanNui/**', 'OverscanProbe/**', '.github/workflows/build.yml']
+  pull_request:
+    paths: ['src/**', 'Overscan/**', 'Overscan5/**', 'OverscanNui/**', 'OverscanProbe/**']
+
+permissions:
+  contents: write
+
+jobs:
+  modern:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Overscan (TV 8.0, Tizen.WebView)
+            project: Overscan/Overscan.csproj
+            output: Overscan-tizen8.tpk
+            artifact: Overscan-tizen8
+          - name: OverscanNui (TV 9.0+, NUI WebView)
+            project: OverscanNui/OverscanNui.csproj
+            output: Overscan-nui.tpk
+            artifact: Overscan-nui
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install .NET 6 SDK
+        run: |
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+          bash dotnet-install.sh --channel 6.0 --install-dir "$HOME/.dotnet-local"
+          echo "$HOME/.dotnet-local" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet-local" >> "$GITHUB_ENV"
+
+      - name: Install Tizen .NET workload
+        run: curl -sSL https://raw.githubusercontent.com/Samsung/Tizen.NET/main/workload/scripts/workload-install.sh | bash
+
+      - name: Build
+        run: dotnet build ${{ matrix.project }} -c Release
+
+      - name: Collect .tpk
+        run: |
+          f=$(find "$(dirname '${{ matrix.project }}')/bin" -name '*.tpk' | head -n 1)
+          if [ -z "$f" ]; then echo "no .tpk produced" >&2; exit 1; fi
+          cp "$f" "${{ matrix.output }}"
+          echo "built $f"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.output }}
+
+  legacy:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Overscan5 (TV 5.0+, Tizen.WebView)
+            project: Overscan5/Overscan5.csproj
+            output: Overscan-tizen5.tpk
+            artifact: Overscan-tizen5
+          - name: OverscanProbe (diagnostics)
+            project: OverscanProbe/OverscanProbe.csproj
+            output: Overscan-probe.tpk
+            artifact: Overscan-probe
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '3.1.x'
+
+      - name: Build (Tizen.NET.Sdk packages during build)
+        run: dotnet build ${{ matrix.project }} -c Debug
+
+      - name: Collect .tpk
+        run: |
+          f=$(find "$(dirname '${{ matrix.project }}')/bin" -name '*.tpk' | head -n 1)
+          if [ -z "$f" ]; then echo "no .tpk produced" >&2; exit 1; fi
+          cp "$f" "${{ matrix.output }}"
+          echo "built $f"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.output }}
+
+  release:
+    name: Publish release
+    needs: [modern, legacy]
+    if: github.event_name == 'workflow_dispatch' && inputs.release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Overscan-*
+          merge-multiple: true
+
+      - name: Compute tag
+        id: tag
+        run: echo "tag=build-$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Overscan ${{ steps.tag.outputs.tag }}
+          files: Overscan-*.tpk
+          body: |
+            Default-signed Tizen packages — **re-sign before installing**.
+
+            | Package | TV platform | Web view | Engine |
+            | --- | --- | --- | --- |
+            | `Overscan-tizen5.tpk` | 5.0+ (armv7) | Tizen.WebView | M63 on 5.0 |
+            | `Overscan-tizen8.tpk` | 8.0 | Tizen.WebView | M108 |
+            | `Overscan-nui.tpk` | 9.0+ | NUI WebView | M130 on 10.0 |
+            | `Overscan-probe.tpk` | 5.0+ | diagnostics harness | — |
+
+            `Overscan-tizen5.tpk` must be **partner-signed**: on retail 5.0 the web
+            engine links Marlin DRM, and without a partner certificate plus the
+            declared DRM privileges `dlopen` fails with "Operation not permitted".
