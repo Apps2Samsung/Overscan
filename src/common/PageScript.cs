@@ -48,12 +48,39 @@ namespace Overscan
   function makeCursor() {
     var c = document.createElement('div');
     c.id = '__ovs_cursor';
+    /* An arrow, not a dot: on a TV a dot gets lost in page content, and an arrow
+       reads as 'this is a pointer' immediately. Drawn with borders so it needs no
+       image and no clip-path (the 2017 engines are fussy about both), and outlined
+       via drop-shadow so it stays visible on dark and light pages alike. */
     c.style.cssText =
-      'position:fixed;left:0;top:0;width:22px;height:22px;margin:-11px 0 0 -11px;' +
-      'border-radius:50%;background:rgba(255,255,255,0.92);' +
-      'border:3px solid rgba(0,0,0,0.85);box-shadow:0 0 6px rgba(0,0,0,0.6);' +
-      'z-index:2147483647;pointer-events:none;transition:transform 60ms linear;';
+      'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;' +
+      'pointer-events:none;border-style:solid;' +
+      'border-width:26px 15px 0 0;' +
+      'border-color:#ffffff transparent transparent transparent;' +
+      '-webkit-filter:drop-shadow(1px 1px 0 rgba(0,0,0,0.9)) drop-shadow(0 3px 5px rgba(0,0,0,0.45));' +
+      'filter:drop-shadow(1px 1px 0 rgba(0,0,0,0.9)) drop-shadow(0 3px 5px rgba(0,0,0,0.45));' +
+      '-webkit-transition:transform 70ms linear;transition:transform 70ms linear;';
     return c;
+  }
+
+  /* A ring that expands and fades where the click landed, so a press is not
+     silent when a page takes a moment to react. */
+  function pulse() {
+    try {
+      var p = document.createElement('div');
+      p.style.cssText =
+        'position:fixed;left:0;top:0;width:14px;height:14px;margin:-7px 0 0 -7px;' +
+        'border:3px solid rgba(72,160,255,0.95);border-radius:50%;' +
+        'z-index:2147483646;pointer-events:none;' +
+        'transform:translate(' + st.x + 'px,' + st.y + 'px) scale(1);' +
+        '-webkit-transition:all 320ms ease-out;transition:all 320ms ease-out;';
+      (document.body || document.documentElement).appendChild(p);
+      setTimeout(function () {
+        p.style.opacity = '0';
+        p.style.transform = 'translate(' + st.x + 'px,' + st.y + 'px) scale(3.2)';
+      }, 10);
+      setTimeout(function () { if (p.parentNode) { p.parentNode.removeChild(p); } }, 420);
+    } catch (_) {}
   }
 
   function root() { return document.body || document.documentElement; }
@@ -152,6 +179,7 @@ namespace Overscan
          Dispatching on that child does nothing, so climb to the real target. */
       var t = interactive(hit) || hit;
 
+      pulse();
       fire('mousedown', t);
       fire('mouseup', t);
       fire('click', t);

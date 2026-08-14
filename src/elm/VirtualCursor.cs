@@ -32,6 +32,7 @@ namespace Overscan
         private readonly string _bridge;
         private readonly Rectangle _ring;
         private readonly Rectangle _dot;
+        private readonly Rectangle _core;
 
         private double _x = 0.5;
         private double _y = 0.5;
@@ -45,8 +46,12 @@ namespace Overscan
             _web = web;
             _bridge = bridgeName;
 
-            _ring = new Rectangle(window) { Color = Color.FromRgba(0, 0, 0, 220) };
-            _dot = new Rectangle(window) { Color = Color.FromRgba(255, 255, 255, 240) };
+            // Three stacked rectangles make a target that stays legible on any page:
+            // dark ring, light body, accent centre. Rounded shapes are not available
+            // to an Evas rectangle.
+            _ring = new Rectangle(window) { Color = Color.FromRgba(0, 0, 0, 225) };
+            _dot = new Rectangle(window) { Color = Theme.Ink };
+            _core = new Rectangle(window) { Color = Theme.Accent };
         }
 
         public CursorVisual Visual { get; private set; } = CursorVisual.Dom;
@@ -106,6 +111,7 @@ namespace Overscan
         {
             _ring.Hide();
             _dot.Hide();
+            _core.Hide();
             Eval("try{window." + PageScript.Namespace + ".hide();}catch(e){}");
         }
 
@@ -123,6 +129,7 @@ namespace Overscan
             {
                 _ring.Hide();
                 _dot.Hide();
+                _core.Hide();
                 MoveInPage();
             }
         }
@@ -138,12 +145,15 @@ namespace Overscan
             int cx = area.X + (int)Math.Round(_x * area.Width);
             int cy = area.Y + (int)Math.Round(_y * area.Height);
 
-            _ring.Geometry = new Rect(cx - 14, cy - 14, 28, 28);
-            _dot.Geometry = new Rect(cx - 9, cy - 9, 18, 18);
+            _ring.Geometry = new Rect(cx - 15, cy - 15, 30, 30);
+            _dot.Geometry = new Rect(cx - 11, cy - 11, 22, 22);
+            _core.Geometry = new Rect(cx - 4, cy - 4, 8, 8);
             _ring.Show();
             _dot.Show();
+            _core.Show();
             _ring.RaiseTop();
             _dot.RaiseTop();
+            _core.RaiseTop();
         }
 
         private void Eval(string script)

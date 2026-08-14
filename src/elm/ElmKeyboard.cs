@@ -32,8 +32,10 @@ namespace Overscan
         };
 
         private readonly Rectangle _panel;
+        private readonly Rectangle _panelEdge;
         private readonly Label _entry;
         private readonly Rectangle[][] _cells;
+        private readonly Rectangle[][] _edges;
         private readonly Label[][] _labels;
 
         private int _row;
@@ -48,9 +50,15 @@ namespace Overscan
             int left = Math.Max(0, (screen.Width - width) / 2);
             int top = Math.Max(0, screen.Height - height - 48);
 
+            _panelEdge = new Rectangle(window)
+            {
+                Color = Theme.Edge,
+                Geometry = new Rect(left - 2, top - 2, width + 4, height + 4),
+            };
+
             _panel = new Rectangle(window)
             {
-                Color = Color.FromRgba(12, 12, 18, 245),
+                Color = Theme.PanelDeep,
                 Geometry = new Rect(left, top, width, height),
             };
 
@@ -60,11 +68,13 @@ namespace Overscan
             };
 
             _cells = new Rectangle[Rows.Length][];
+            _edges = new Rectangle[Rows.Length][];
             _labels = new Label[Rows.Length][];
 
             for (int r = 0; r < Rows.Length; r++)
             {
                 _cells[r] = new Rectangle[Rows[r].Length];
+                _edges[r] = new Rectangle[Rows[r].Length];
                 _labels[r] = new Label[Rows[r].Length];
 
                 for (int c = 0; c < Rows[r].Length; c++)
@@ -75,11 +85,19 @@ namespace Overscan
                         KeyWidth,
                         KeyHeight);
 
-                    _cells[r][c] = new Rectangle(window) { Geometry = cell };
+                    _edges[r][c] = new Rectangle(window)
+                    {
+                        Color = Theme.Edge,
+                        Geometry = cell,
+                    };
+                    _cells[r][c] = new Rectangle(window)
+                    {
+                        Geometry = new Rect(cell.X + 2, cell.Y + 2, cell.Width - 4, cell.Height - 4),
+                    };
                     _labels[r][c] = new Label(window)
                     {
-                        Geometry = new Rect(cell.X + 8, cell.Y + 20, cell.Width - 16, cell.Height - 24),
-                        Text = Markup(Rows[r][c], false),
+                        Geometry = new Rect(cell.X, cell.Y + 18, cell.Width, cell.Height - 20),
+                        Text = Label(Rows[r][c], false),
                     };
                 }
             }
@@ -98,10 +116,21 @@ namespace Overscan
             _text = initialText ?? string.Empty;
             IsVisible = true;
 
+            _panelEdge.Show();
+            _panelEdge.RaiseTop();
             _panel.Show();
             _panel.RaiseTop();
             _entry.Show();
             _entry.RaiseTop();
+
+            foreach (Rectangle[] row in _edges)
+            {
+                foreach (Rectangle edge in row)
+                {
+                    edge.Show();
+                    edge.RaiseTop();
+                }
+            }
 
             foreach (Rectangle[] row in _cells)
             {
@@ -129,6 +158,7 @@ namespace Overscan
         {
             IsVisible = false;
             _panel.Hide();
+            _panelEdge.Hide();
             _entry.Hide();
 
             foreach (Rectangle[] row in _cells)
@@ -136,6 +166,14 @@ namespace Overscan
                 foreach (Rectangle cell in row)
                 {
                     cell.Hide();
+                }
+            }
+
+            foreach (Rectangle[] row in _edges)
+            {
+                foreach (Rectangle edge in row)
+                {
+                    edge.Hide();
                 }
             }
 
@@ -239,28 +277,44 @@ namespace Overscan
 
         private void Paint()
         {
-            _entry.Text = Markup(
-                (Target == KeyboardTarget.Address ? "url> " : "page> ") +
-                (_text.Length == 0 ? "_" : _text), false);
+            string prompt = Target == KeyboardTarget.Address ? "Go to" : "Type into page";
+            _entry.Text =
+                Theme.Text(prompt + "   ", 24, Theme.Accent, true) +
+                Theme.Text(_text.Length == 0 ? "|" : _text + "|", 34, Theme.Ink, true);
 
             for (int r = 0; r < _cells.Length; r++)
             {
                 for (int c = 0; c < _cells[r].Length; c++)
                 {
                     bool selected = r == _row && c == _column;
-                    _cells[r][c].Color = selected
-                        ? Color.FromRgba(72, 148, 255, 255)
-                        : Color.FromRgba(40, 40, 48, 255);
-                    _labels[r][c].Text = Markup(Rows[r][c], selected);
+                    _cells[r][c].Color = selected ? Theme.Accent : FillFor(Rows[r][c]);
+                    _labels[r][c].Text = Label(Rows[r][c], selected);
+                    _edges[r][c].Color = selected ? Theme.Accent : Theme.Edge;
                 }
             }
         }
 
-        private static string Markup(string text, bool selected)
+        /// <summary>Action keys read as buttons; letters stay quiet.</summary>
+        private static Color FillFor(string key)
         {
-            string escaped = text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
-            return (selected ? "<color=#ffffff><b>" : "<color=#e8e8ec>") + escaped +
-                   (selected ? "</b></color>" : "</color>");
+            switch (key)
+            {
+                case "GO": return Theme.Positive;
+                case "close": return Theme.Negative;
+                case "back":
+                case "clear":
+                case "space":
+                case ".com": return Theme.KeyFillAlt;
+                default: return Theme.KeyFill;
+            }
         }
+
+        private static string Label(string text, bool selected)
+        {
+            bool wide = text.Length > 1;
+            return Theme.Text(text, wide ? 22 : 30, selected ? Theme.Ink : Theme.InkMuted,
+                              selected || wide, "center");
+        }
+
     }
 }

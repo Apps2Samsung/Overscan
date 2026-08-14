@@ -23,7 +23,6 @@ namespace Overscan
         private const int TopBarHeight = 68;
 
         private Window _window;
-        private Box _mainBox;
         private Label _urlLabel;
         private ElmKeyboard _keyboard;
         private Label _status;
@@ -31,7 +30,16 @@ namespace Overscan
         private Rectangle _diagBackdrop;
         private Label _hints;
         private Rectangle _hintsBackdrop;
+        private Rectangle _hintsEdge;
         private bool _hintsVisible;
+        private Rectangle _barBg;
+        private Rectangle _barEdge;
+        private Rectangle _progress;
+        private bool _chromeVisible;
+        private bool _loading;
+        private int _marquee;
+        private DateTime _lastActivity = DateTime.UtcNow;
+        private IntPtr _tick;
         private WebView _web;
         private VirtualCursor _cursor;
 
@@ -143,15 +151,14 @@ namespace Overscan
                 DiagLog.Add("Chromium initialized, refcount=" +
                             refCount.ToString(CultureInfo.InvariantCulture));
 
+                // Full-window geometry, not a Box child: the page gets the whole
+                // panel and the chrome floats over it, so nothing is letterboxed.
+                Size screen = _window.ScreenSize;
                 _web = new WebView(_window)
                 {
-                    AlignmentX = -1,
-                    AlignmentY = -1,
-                    WeightX = 1,
-                    WeightY = 1,
+                    Geometry = new Rect(0, 0, screen.Width, screen.Height),
                 };
                 _web.Show();
-                _mainBox.PackEnd(_web);
                 // A focused web view lets the page raise the platform IME (and the
                 // page's own autofocus then eats the remote). Keys stay with us
                 // until key 4 hands them over deliberately.
@@ -174,21 +181,26 @@ namespace Overscan
 
         private void ShowEngineFailure()
         {
+            Size screen = _window.ScreenSize;
+
+            var backdrop = new Rectangle(_window)
+            {
+                Color = Theme.PanelDeep,
+                Geometry = new Rect(0, 0, screen.Width, screen.Height),
+            };
+            backdrop.Show();
+
             var message = new Label(_window)
             {
-                AlignmentX = -1,
-                AlignmentY = -1,
-                WeightX = 1,
-                WeightY = 1,
+                Geometry = new Rect(120, 200, screen.Width - 240, screen.Height - 400),
                 LineWrapType = WrapType.Mixed,
             };
-            message.Text = Markup(
-                "The web engine did not start.\n\n" +
-                _engineFailure + "\n\n" +
-                "chromium-efl could not be initialized or the view could not be\n" +
-                "created in this app. Press 3 for the full log, Back to exit.");
+            message.Text =
+                Theme.Text("The web engine did not start", 44, Theme.Ink, true) +
+                Theme.Text("\n\n" + (_engineFailure ?? "(unknown)") + "\n\n", 26, Theme.InkMuted) +
+                Theme.Text("Press 3 for the full log, Back to exit.", 28, Theme.Accent);
             message.Show();
-            _mainBox.PackEnd(message);
+            message.RaiseTop();
             UpdateStatus();
         }
 
@@ -207,27 +219,12 @@ namespace Overscan
                 AlignmentY = -1,
                 WeightX = 1,
                 WeightY = 1,
-                Color = Color.FromRgb(18, 18, 20),
+                Color = Color.FromRgb(10, 11, 14),
             };
             background.Show();
             _window.AddResizeObject(background);
 
-            var conformant = new Conformant(_window);
-            conformant.Show();
-
-            var mainBox = new Box(_window)
-            {
-                AlignmentX = -1,
-                AlignmentY = -1,
-                WeightX = 1,
-                WeightY = 1,
-            };
-            mainBox.Show();
-            conformant.SetContent(mainBox);
-
-            mainBox.PackEnd(BuildTopBar());
-            _mainBox = mainBox;
-
+            BuildChrome();
             BuildDiagOverlay();
             BuildHints();
 
@@ -247,47 +244,134 @@ namespace Overscan
                     DiagLog.Add("keygrab " + key + " failed: " + ex.Message);
                 }
             }
+
+            // Drives the chrome's auto-hide and the loading marquee.
+            _tick = EcoreMainloop.AddTimer(0.15, OnTick);
         }
 
-        private Box BuildTopBar()
+        /// <summary>
+        /// A translucent strip floating over the page: URL on the left, state on the
+        /// right, a loading marquee along the bottom edge. It hides itself a few
+        /// seconds after the last keypress so the page is unobstructed, which is
+        /// what you want on a screen this size.
+        ///
+        /// A Label, never an Entry: on a real TV an Entry takes focus at startup and
+        /// the platform IME appears over the page and eats every remote key. Text
+        /// input goes through ElmKeyboard instead.
+        /// </summary>
+        private void BuildChrome()
         {
-            var topBar = new Box(_window)
-            {
-                AlignmentX = -1,
-                AlignmentY = 0,
-                WeightX = 1,
-                WeightY = 0,
-                IsHorizontal = true,
-                MinimumHeight = TopBarHeight,
-            };
-            topBar.Show();
+            Size screen = _window.ScreenSize;
 
-            // A Label, NOT an Entry: on a real TV an Entry grabs focus at startup
-            // and the platform IME appears over the page and eats every remote key.
-            // Text input goes through ElmKeyboard instead.
+            _barBg = new Rectangle(_window)
+            {
+                Color = Theme.Panel,
+                Geometry = new Rect(0, 0, screen.Width, Theme.BarHeight),
+            };
+
+            _barEdge = new Rectangle(_window)
+            {
+                Color = Theme.Edge,
+                Geometry = new Rect(0, Theme.BarHeight, screen.Width, 2),
+            };
+
+            int urlWidth = (screen.Width * 62 / 100) - Theme.Pad;
             _urlLabel = new Label(_window)
             {
-                AlignmentX = -1,
-                AlignmentY = -1,
-                WeightX = 2,
-                WeightY = 1,
-                MinimumHeight = TopBarHeight,
+                Geometry = new Rect(Theme.Pad, 10, urlWidth, Theme.BarHeight - 20),
             };
-            _urlLabel.Show();
 
             _status = new Label(_window)
             {
-                AlignmentX = -1,
-                AlignmentY = -1,
-                WeightX = 3,
-                WeightY = 1,
-                MinimumHeight = TopBarHeight,
+                Geometry = new Rect(Theme.Pad + urlWidth, 10,
+                                    screen.Width - urlWidth - (Theme.Pad * 2), Theme.BarHeight - 20),
             };
-            _status.Show();
 
-            topBar.PackEnd(_urlLabel);
-            topBar.PackEnd(_status);
-            return topBar;
+            _progress = new Rectangle(_window)
+            {
+                Color = Theme.Accent,
+                Geometry = new Rect(0, Theme.BarHeight - 2, 0, 4),
+            };
+
+            ShowChrome();
+        }
+
+        /// <summary>Reveals the chrome and restarts its idle countdown.</summary>
+        private void ShowChrome()
+        {
+            _lastActivity = DateTime.UtcNow;
+            if (_chromeVisible)
+            {
+                return;
+            }
+
+            _chromeVisible = true;
+            _barBg.Show();
+            _barEdge.Show();
+            _urlLabel.Show();
+            _status.Show();
+            RaiseChrome();
+        }
+
+        private void HideChrome()
+        {
+            _chromeVisible = false;
+            _barBg.Hide();
+            _barEdge.Hide();
+            _urlLabel.Hide();
+            _status.Hide();
+            _progress.Hide();
+        }
+
+        private void RaiseChrome()
+        {
+            _barBg.RaiseTop();
+            _barEdge.RaiseTop();
+            _urlLabel.RaiseTop();
+            _status.RaiseTop();
+            if (_loading)
+            {
+                _progress.RaiseTop();
+            }
+        }
+
+        /// <summary>
+        /// Ecore timer: animates the loading marquee and hides the chrome when idle.
+        /// A determinate progress bar is not possible here — LoadProgress is API 6+ —
+        /// so a moving accent bar stands in for "something is happening", which
+        /// matters when a page takes 17 seconds on a 2019 panel.
+        /// </summary>
+        private bool OnTick()
+        {
+            if (_loading && _chromeVisible)
+            {
+                Size screen = _window.ScreenSize;
+                int span = screen.Width / 5;
+                _marquee = (_marquee + (span / 4)) % (screen.Width + span);
+                int x = _marquee - span;
+                int width = span;
+                if (x < 0)
+                {
+                    width += x;
+                    x = 0;
+                }
+
+                if (width > 0)
+                {
+                    _progress.Geometry = new Rect(x, Theme.BarHeight - 2, width, 4);
+                    _progress.Show();
+                    _progress.RaiseTop();
+                }
+            }
+
+            bool busy = _loading || (_keyboard != null && _keyboard.IsVisible) || _diagVisible;
+            if (_chromeVisible && !busy &&
+                DateTime.UtcNow - _lastActivity > TimeSpan.FromSeconds(4))
+            {
+                HideChrome();
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -298,31 +382,52 @@ namespace Overscan
         private void BuildHints()
         {
             Size screen = _window.ScreenSize;
-            int width = 430;
-            int height = 250;
+            int width = 470;
+            int height = 430;
+            int left = screen.Width - width - 40;
+            int top = screen.Height - height - 40;
+
+            _hintsEdge = new Rectangle(_window)
+            {
+                Color = Theme.Edge,
+                Geometry = new Rect(left - 2, top - 2, width + 4, height + 4),
+            };
 
             _hintsBackdrop = new Rectangle(_window)
             {
-                Color = Color.FromRgba(0, 0, 0, 190),
-                Geometry = new Rect(screen.Width - width - 32, screen.Height - height - 32, width, height),
+                Color = Theme.PanelDeep,
+                Geometry = new Rect(left, top, width, height),
             };
 
             _hints = new Label(_window)
             {
-                Geometry = new Rect(screen.Width - width - 16, screen.Height - height - 16,
-                                    width - 32, height - 32),
+                Geometry = new Rect(left + Theme.Pad, top + Theme.Pad,
+                                    width - (Theme.Pad * 2), height - (Theme.Pad * 2)),
                 LineWrapType = WrapType.Mixed,
             };
-            _hints.Text = Markup(
-                "0  address bar\n" +
-                "1  user agent\n" +
-                "2  cursor style\n" +
-                "3  diagnostics\n" +
-                "4  keys to page\n" +
-                "5  type in field\n" +
-                "6  viewport fix\n" +
-                "7  hide this");
 
+            string[][ ] rows =
+            {
+                new[] { "0", "address bar" },
+                new[] { "1", "identify as…" },
+                new[] { "2", "pointer style" },
+                new[] { "3", "diagnostics" },
+                new[] { "4", "keys to page" },
+                new[] { "5", "type in field" },
+                new[] { "6", "fit page" },
+                new[] { "7", "hide this" },
+            };
+
+            var text = new System.Text.StringBuilder();
+            text.Append(Theme.Text("Remote", 26, Theme.Accent, true)).Append("<br/><br/>");
+            foreach (string[] row in rows)
+            {
+                text.Append(Theme.Text(row[0] + "   ", 28, Theme.Ink, true))
+                    .Append(Theme.Text(row[1], 26, Theme.InkMuted))
+                    .Append("<br/>");
+            }
+
+            _hints.Text = text.ToString();
             ShowHints(true);
         }
 
@@ -331,8 +436,10 @@ namespace Overscan
             _hintsVisible = visible;
             if (visible)
             {
+                _hintsEdge.Show();
                 _hintsBackdrop.Show();
                 _hints.Show();
+                _hintsEdge.RaiseTop();
                 _hintsBackdrop.RaiseTop();
                 _hints.RaiseTop();
             }
@@ -340,6 +447,7 @@ namespace Overscan
             {
                 _hints.Hide();
                 _hintsBackdrop.Hide();
+                _hintsEdge.Hide();
             }
         }
 
@@ -351,7 +459,7 @@ namespace Overscan
 
             _diagBackdrop = new Rectangle(_window)
             {
-                Color = Color.FromRgba(0, 0, 0, 232),
+                Color = Theme.PanelDeep,
                 Geometry = area,
             };
 
@@ -376,10 +484,17 @@ namespace Overscan
 
             _web.AddJavaScriptMessageHandler(BridgeName, OnBridgeMessage);
 
-            _web.LoadStarted += (s, e) => DiagLog.Add("load started");
+            _web.LoadStarted += (s, e) =>
+            {
+                DiagLog.Add("load started");
+                _loading = true;
+                ShowChrome();
+            };
             _web.LoadFinished += (s, e) =>
             {
                 DiagLog.Add("load finished: " + _web.Url);
+                _loading = false;
+                _progress.Hide();
                 _cursor.Reinstall();
                 _web.Eval(PageScript.Probe(BridgeName));
                 ApplyViewportFix();
@@ -389,6 +504,8 @@ namespace Overscan
             _web.LoadError += (s, e) =>
             {
                 DiagLog.Add("load error " + e.Code + ": " + e.Description);
+                _loading = false;
+                _progress.Hide();
                 UpdateStatus();
             };
             _web.UrlChanged += (s, e) =>
@@ -458,6 +575,7 @@ namespace Overscan
         private void OnKeyDown(object sender, EvasKeyEventArgs e)
         {
             string key = e.KeyName;
+            ShowChrome();
 
             // With no engine, only the log and the way out still work.
             if (_web == null)
@@ -658,7 +776,7 @@ namespace Overscan
             _diagVisible = !_diagVisible;
             if (_diagVisible)
             {
-                _diag.Text = Markup(DiagnosticsText());
+                _diag.Text = Theme.Text(DiagnosticsText(), 20, Theme.Ink);
                 _diagBackdrop.Show();
                 _diag.Show();
                 _diagBackdrop.RaiseTop();
@@ -741,12 +859,11 @@ namespace Overscan
         {
             if (_web == null)
             {
-                _status.Text = Markup("web engine unavailable   |   [3] log  [Back] exit");
+                _status.Text = Theme.Text("web engine unavailable", 28, Theme.Negative, true, "right");
                 return;
             }
 
             string title = string.IsNullOrEmpty(_web.Title) ? "(untitled)" : _web.Title;
-            _urlLabel.Text = Markup(_cachedUrl == "-" ? "(no page)" : _cachedUrl);
             _cachedTitle = title;
             _cachedUrl = _web.Url ?? "-";
             Rect geometry = _web.Geometry;
@@ -754,11 +871,56 @@ namespace Overscan
             _cachedGeometry = geometry.Width + "x" + geometry.Height + " at " +
                               geometry.X + "," + geometry.Y + "   (window " +
                               screen.Width + "x" + screen.Height + ")";
-            // Deliberately short: this is read from across a room.
-            string line = _presets[_presetIndex].Label +
-                          "   |   " + (_keysToPage ? "keys: page" : "cursor " + _cursor.Visual) +
-                          (_viewportFix ? "   |   vp fix" : string.Empty);
-            _status.Text = Markup(line);
+
+            _urlLabel.Text = FormatUrl(_cachedUrl);
+
+            // Right-hand side stays terse: this is read from across a room.
+            string state = ShortPreset(_presets[_presetIndex].Label) +
+                           "   ·   " + (_keysToPage ? "page keys" : "cursor") +
+                           (_viewportFix ? "   ·   fit" : string.Empty);
+            _status.Text = Theme.Text(state, 24, Theme.InkMuted, false, "right");
+        }
+
+        /// <summary>
+        /// Host emphasised, the rest dimmed — at TV distance a full URL in one
+        /// weight is a grey smear, and the host is the part that identifies where
+        /// you are.
+        /// </summary>
+        private static string FormatUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url) || url == "-")
+            {
+                return Theme.Text("Overscan", 32, Theme.InkMuted, true);
+            }
+
+            string rest = url;
+            string scheme = string.Empty;
+            int schemeAt = url.IndexOf("://", StringComparison.Ordinal);
+            if (schemeAt > 0)
+            {
+                scheme = url.Substring(0, schemeAt + 3);
+                rest = url.Substring(schemeAt + 3);
+            }
+
+            int slash = rest.IndexOf('/');
+            string host = slash < 0 ? rest : rest.Substring(0, slash);
+            string path = slash < 0 ? string.Empty : rest.Substring(slash);
+
+            if (path.Length > 60)
+            {
+                path = path.Substring(0, 57) + "…";
+            }
+
+            return Theme.Text(scheme, 22, Theme.InkMuted) +
+                   Theme.Text(host, 32, Theme.Ink, true) +
+                   Theme.Text(path, 24, Theme.InkMuted);
+        }
+
+        /// <summary>"Desktop Chrome 63 (engine-matched)" -> "Desktop Chrome 63".</summary>
+        private static string ShortPreset(string label)
+        {
+            int bracket = label.IndexOf(" (", StringComparison.Ordinal);
+            return bracket < 0 ? label : label.Substring(0, bracket);
         }
 
         private string DiagnosticsText()
