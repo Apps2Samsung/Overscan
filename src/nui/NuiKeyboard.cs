@@ -50,15 +50,16 @@ namespace Overscan
             {
                 Position2D = new Position2D(left, top),
                 Size2D = new Size2D(width, height),
-                BackgroundColor = new Color(0.05f, 0.05f, 0.07f, 0.96f),
+                BackgroundColor = NuiTheme.PanelDeep,
+                CornerRadius = NuiTheme.Radius,
             };
 
             _entry = new TextLabel
             {
                 Position2D = new Position2D(Gap * 2, Gap * 2),
                 Size2D = new Size2D(width - (Gap * 4), 64),
-                PointSize = 14,
-                TextColor = Color.White,
+                PointSize = 16,
+                TextColor = NuiTheme.Ink,
                 Text = string.Empty,
             };
             _root.Add(_entry);
@@ -75,9 +76,10 @@ namespace Overscan
                             Gap + (c * (KeyWidth + Gap)),
                             96 + (r * (KeyHeight + Gap))),
                         Size2D = new Size2D(KeyWidth, KeyHeight),
-                        PointSize = 11,
+                        PointSize = Rows[r][c].Length > 1 ? 10 : 14,
                         HorizontalAlignment = HorizontalAlignment.Center,
                         VerticalAlignment = VerticalAlignment.Center,
+                        CornerRadius = 8f,
                         Text = Rows[r][c],
                     };
                     _keys[r][c] = key;
@@ -200,20 +202,33 @@ namespace Overscan
             Paint();
         }
 
+        /// <summary>Action keys read as buttons; letters stay quiet.</summary>
+        private static Color FillFor(string key)
+        {
+            switch (key)
+            {
+                case "GO": return NuiTheme.Positive;
+                case "close": return NuiTheme.Negative;
+                case "back":
+                case "clear":
+                case "space":
+                case ".com": return NuiTheme.KeyFillAlt;
+                default: return NuiTheme.KeyFill;
+            }
+        }
+
         private void Paint()
         {
-            _entry.Text = (Target == KeyboardTarget.Address ? "url> " : "page> ") +
-                          (_text.Length == 0 ? "_" : _text);
+            _entry.Text = (Target == KeyboardTarget.Address ? "Go to   " : "Type into page   ") +
+                          (_text.Length == 0 ? "|" : _text + "|");
 
             for (int r = 0; r < _keys.Length; r++)
             {
                 for (int c = 0; c < _keys[r].Length; c++)
                 {
                     bool selected = r == _row && c == _column;
-                    _keys[r][c].BackgroundColor = selected
-                        ? new Color(0.28f, 0.58f, 1f, 1f)
-                        : new Color(0.16f, 0.16f, 0.19f, 1f);
-                    _keys[r][c].TextColor = Color.White;
+                    _keys[r][c].BackgroundColor = selected ? NuiTheme.Accent : FillFor(Rows[r][c]);
+                    _keys[r][c].TextColor = selected ? NuiTheme.Ink : NuiTheme.InkMuted;
                 }
             }
         }

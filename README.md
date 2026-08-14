@@ -14,6 +14,7 @@ engine in an app that behaves like a desktop browser:
   itself as desktop Chrome.
 - **JavaScript stays on**, so pages aren't broken or half-rendered.
 - **The remote works like a mouse** — the D-pad moves a pointer, OK clicks.
+- **Favourites and history**, on a start screen built for a TV.
 - **You can type** with an on-screen keyboard driven by the D-pad, into the
   address bar *and* into search boxes on the page.
 
@@ -63,6 +64,25 @@ browser simply won't start. Newer sets don't have this restriction.
 | **5** | Type into the text box you last clicked |
 | **6** | Page-fit correction (for stretched rendering) |
 | **7** | Show/hide the key hints |
+| **8** | Keep this page in favourites (press again to remove) |
+| **9** | Back to the start screen |
+| **Info** | Images on/off — the biggest speed-up on an old set |
+
+## Does it load pages faster?
+
+No — and on a slow TV it can be slower. Overscan uses the TV's own web engine, so
+the rendering speed is exactly the same; what changes is *which version of a site*
+you get, and the desktop version is usually the heaviest one. If YouTube takes two
+minutes in the built-in browser, the desktop YouTube will not be quicker.
+
+What does help on an older set:
+
+- **Press `Info` to turn images off.** The engine can't be made faster, but it can
+  be given far less to do, and this is the biggest single win.
+- **Press `1` to pick the mobile version** of a site. Mobile pages are much lighter
+  than desktop ones and often render better on an old engine.
+- **Use a site's TV interface where one exists** — `youtube.com/tv` is built for
+  exactly this hardware and is dramatically faster than the desktop site.
 
 ## Known limits
 
@@ -74,7 +94,7 @@ browser simply won't start. Newer sets don't have this restriction.
 - **Rendering is stretched on Tizen 5.0** — the engine lays pages out at one size
   and paints them at another. Key `6` toggles a correction; this is
   [an open bug](https://github.com/Apps2Samsung/Overscan/issues).
-- **No history, favourites or downloads** yet.
+- **No downloads or file uploads** yet.
 - The TV's own on-screen keyboard can still flash up briefly on sites that focus
   their search box as soon as they load.
 

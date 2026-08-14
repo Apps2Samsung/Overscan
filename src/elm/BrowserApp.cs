@@ -39,6 +39,10 @@ namespace Overscan
         private bool _loading;
         private int _marquee;
         private DateTime _lastActivity = DateTime.UtcNow;
+        private DateTime _flashUntil = DateTime.MinValue;
+        private bool _atHome;
+        private bool _hintsWanted = true;
+        private bool _imagesOn = true;
         private IntPtr _tick;
         private WebView _web;
         private VirtualCursor _cursor;
@@ -122,8 +126,17 @@ namespace Overscan
             _presets[0] = UserAgents.MatchingEngine(_engineUserAgentRaw);
             DiagLog.Add("engine UA: " + _engineUserAgent);
 
-            ApplyPreset(0);
-            Navigate(HomeUrl);
+            Store.Init(DirectoryInfo.Data);
+            _viewportFix = Store.GetBool("viewportFix", false);
+            _hintsWanted = Store.GetBool("hints", true);
+            ShowHints(_hintsWanted);
+            if (Store.GetInt("cursorVisual", 0) == 1)
+            {
+                _cursor.ToggleVisual();
+            }
+
+            ApplyPreset(Math.Min(Store.GetInt("uaPreset", 0), _presets.Length - 1));
+            ShowHome();
         }
 
         protected override void OnTerminate()
@@ -364,6 +377,12 @@ namespace Overscan
                 }
             }
 
+            if (_flashUntil != DateTime.MinValue && DateTime.UtcNow > _flashUntil)
+            {
+                _flashUntil = DateTime.MinValue;
+                UpdateStatus();
+            }
+
             bool busy = _loading || (_keyboard != null && _keyboard.IsVisible) || _diagVisible;
             if (_chromeVisible && !busy &&
                 DateTime.UtcNow - _lastActivity > TimeSpan.FromSeconds(4))
@@ -479,7 +498,8 @@ namespace Overscan
                 // (Only members present since API 4 are used here, so the same
                 // source compiles for the tizen50 build.)
                 settings.JavaScriptEnabled = true;
-                settings.LoadImageAutomatically = true;
+                _imagesOn = Store.GetBool("images", true);
+                settings.LoadImageAutomatically = _imagesOn;
             }
 
             _web.AddJavaScriptMessageHandler(BridgeName, OnBridgeMessage);
@@ -499,6 +519,7 @@ namespace Overscan
                 _web.Eval(PageScript.Probe(BridgeName));
                 ApplyViewportFix();
                 ReportMetrics();
+                Store.RecordVisit(_web.Url, _web.Title);
                 UpdateStatus();
             };
             _web.LoadError += (s, e) =>
@@ -640,7 +661,6 @@ namespace Overscan
                     break;
 
                 case RemoteKeys.Menu:
-                case RemoteKeys.Info:
                 case RemoteKeys.Search:
                 case RemoteKeys.Num0:
                     OpenAddressBar();
@@ -648,11 +668,13 @@ namespace Overscan
 
                 case RemoteKeys.Num1:
                     ApplyPreset((_presetIndex + 1) % _presets.Length);
+                    Store.Set("uaPreset", _presetIndex);
                     _web.Reload();
                     break;
 
                 case RemoteKeys.Num2:
                     _cursor.ToggleVisual();
+                    Store.Set("cursorVisual", _cursor.Visual == CursorVisual.Native ? 1 : 0);
                     break;
 
                 case RemoteKeys.Num3:
@@ -663,13 +685,28 @@ namespace Overscan
                     ToggleKeyRouting();
                     break;
 
+                case RemoteKeys.Num8:
+                    ToggleFavourite();
+                    break;
+
+                case RemoteKeys.Num9:
+                    ShowHome();
+                    break;
+
+                case RemoteKeys.Info:
+                    ToggleImages();
+                    break;
+
                 case RemoteKeys.Num7:
-                    ShowHints(!_hintsVisible);
+                    _hintsWanted = !_hintsVisible;
+                    ShowHints(_hintsWanted);
+                    Store.Set("hints", _hintsWanted);
                     break;
 
                 case RemoteKeys.Num6:
                     _viewportFix = !_viewportFix;
                     DiagLog.Add("viewport fix " + (_viewportFix ? "ON" : "OFF"));
+                    Store.Set("viewportFix", _viewportFix);
                     ApplyViewportFix();
                     ReportMetrics();
                     UpdateStatus();
@@ -725,6 +762,75 @@ namespace Overscan
             {
                 DiagLog.Add("metrics failed: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Loads the generated start screen. It is a page, not a native screen, so
+        /// the pointer and everything else work on it unchanged.
+        /// </summary>
+        private void ShowHome()
+        {
+            try
+            {
+                _atHome = true;
+                _web.LoadHtml(HomePage.Build(Store.AllFavourites, Store.RecentHistory, Urls.Home),
+                              HomePage.BaseUrl);
+                _cursor.Center();
+                DiagLog.Add("home screen shown");
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("home screen failed: " + ex.Message);
+                Navigate(Urls.Home);
+            }
+        }
+
+        /// <summary>
+        /// Images off is the single biggest speed-up available on an old set — the
+        /// engine cannot be made faster, but it can be given much less to do.
+        /// </summary>
+        private void ToggleImages()
+        {
+            _imagesOn = !_imagesOn;
+            Store.Set("images", _imagesOn);
+            try
+            {
+                Settings settings = _web.GetSettings();
+                if (settings != null)
+                {
+                    settings.LoadImageAutomatically = _imagesOn;
+                }
+
+                Flash(_imagesOn ? "Images on" : "Images off — faster");
+                _web.Reload();
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("image toggle failed: " + ex.Message);
+            }
+        }
+
+        private void ToggleFavourite()
+        {
+            if (_atHome)
+            {
+                return;
+            }
+
+            bool kept = Store.ToggleFavourite(_cachedUrl, _cachedTitle);
+            DiagLog.Add((kept ? "kept " : "removed ") + _cachedUrl);
+            Flash(kept ? "Kept this page" : "Removed from favourites");
+        }
+
+        /// <summary>
+        /// Briefly replaces the status text. There is no notification surface on a TV,
+        /// and an action with no feedback feels broken.
+        /// </summary>
+        private void Flash(string message)
+        {
+            ShowChrome();
+            _flashUntil = DateTime.UtcNow.AddSeconds(2.5);
+            _status.Text = Theme.Text(message, 28, Theme.Accent, true, "right");
         }
 
         private void OnKeyboardCommitted(string text, KeyboardTarget target)
@@ -816,6 +922,7 @@ namespace Overscan
         private void Navigate(string input)
         {
             string url = Urls.Normalize(input);
+            _atHome = false;
             DiagLog.Add("navigate: " + url);
             _web.LoadUrl(url);
             _cursor.Center();
@@ -833,6 +940,12 @@ namespace Overscan
             if (_web.CanGoBack())
             {
                 _web.GoBack();
+                return;
+            }
+
+            if (!_atHome)
+            {
+                ShowHome();
                 return;
             }
 
@@ -872,12 +985,20 @@ namespace Overscan
                               geometry.X + "," + geometry.Y + "   (window " +
                               screen.Width + "x" + screen.Height + ")";
 
-            _urlLabel.Text = FormatUrl(_cachedUrl);
+            _urlLabel.Text = FormatUrl(_atHome ? "-" : _cachedUrl);
+
+            if (_flashUntil != DateTime.MinValue)
+            {
+                return;
+            }
+
 
             // Right-hand side stays terse: this is read from across a room.
-            string state = ShortPreset(_presets[_presetIndex].Label) +
+            string state = (!_atHome && Store.IsFavourite(_cachedUrl) ? "★   ·   " : string.Empty) +
+                           ShortPreset(_presets[_presetIndex].Label) +
                            "   ·   " + (_keysToPage ? "page keys" : "cursor") +
-                           (_viewportFix ? "   ·   fit" : string.Empty);
+                           (_viewportFix ? "   ·   fit" : string.Empty) +
+                           (_imagesOn ? string.Empty : "   ·   no images");
             _status.Text = Theme.Text(state, 24, Theme.InkMuted, false, "right");
         }
 

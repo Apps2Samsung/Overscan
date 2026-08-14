@@ -35,6 +35,13 @@ namespace Overscan
             _web = web;
         }
 
+        /// <summary>
+        /// Raised with what the click hit. The app uses the script's FIELD: prefix to
+        /// open the on-screen keyboard for a text field, since fields are never
+        /// focused (focusing one raises the platform IME).
+        /// </summary>
+        public event Action<string> Clicked;
+
         public void Reinstall()
         {
             // The ElmSharp build needs a bridge name for click feedback; NUI gets
@@ -73,7 +80,15 @@ namespace Overscan
             {
                 _web.EvaluateJavaScript(
                     "String(window." + PageScript.Namespace + " && window." + PageScript.Namespace + ".click())",
-                    result => DiagLog.Add("click -> " + (result ?? "(null)")));
+                    result =>
+                    {
+                        DiagLog.Add("click -> " + (result ?? "(null)"));
+                        Action<string> handler = Clicked;
+                        if (handler != null)
+                        {
+                            handler(result);
+                        }
+                    });
             }
             catch (Exception ex)
             {

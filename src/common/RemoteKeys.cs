@@ -37,6 +37,8 @@ namespace Overscan
         public const string Num5 = "5";
         public const string Num6 = "6";
         public const string Num7 = "7";
+        public const string Num8 = "8";
+        public const string Num9 = "9";
 
         /// <summary>
         /// Keys the window must explicitly grab, otherwise the TV's own
@@ -46,7 +48,7 @@ namespace Overscan
         public static readonly string[] Grabbed =
         {
             Back, Menu, Info, Search, More, ChannelUp, ChannelDown,
-            Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7,
+            Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
         };
     }
 }
