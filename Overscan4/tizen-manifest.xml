@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns="http://tizen.org/ns/packages" api-version="4.0" package="org.apps2samsung.overscan" version="0.1.0">
+  <profile name="tv" />
+  <ui-application appid="org.apps2samsung.overscan"
+                  exec="Overscan.dll"
+                  type="dotnet"
+                  multiple="false"
+                  taskmanage="true"
+                  nodisplay="false"
+                  launch_mode="single"
+                  api-version="4.0">
+    <label>Overscan</label>
+    <icon>Overscan.png</icon>
+    <splash-screens />
+  </ui-application>
+  <privileges>
+    <privilege>http://tizen.org/privilege/internet</privilege>
+    <privilege>http://tizen.org/privilege/network.get</privilege>
+    <!-- REQUIRED on retail sets, and this build must be PARTNER-signed. The web
+         engine links Marlin DRM (libmarlin.so.0); without these an author-signed
+         app gets "Operation not permitted" opening it and the web view never
+         starts. Verified on a Samsung UE55RU7020 (Tizen 5.0): with a partner cert
+         plus these entries, dlopen succeeds, Chromium.Initialize returns
+         refcount=1 and a page loads. drmplay is public level, drminfo partner. -->
+    <privilege>http://developer.samsung.com/privilege/drmplay</privilege>
+    <privilege>http://developer.samsung.com/privilege/drminfo</privilege>
+    <privilege>http://tizen.org/privilege/tv.inputdevice</privilege>
+  </privileges>
+</manifest>

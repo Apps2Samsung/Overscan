@@ -7,6 +7,7 @@ cannot be logged.
 ## Source layout
 
 ```
+Overscan4/      tizen40,         manifest api-version 4.0, ewk   (oldest possible)
 src/common/     engine-agnostic: user agents, injected page script, diagnostics, URL helpers
 src/elm/        ElmSharp + Tizen.WebView (ewk) UI  — TV 5.0-8.0
 src/nui/        NUI + NUI WebView UI               — TV 9.0+
@@ -21,6 +22,15 @@ OverscanProbe/  tizen50,         diagnostics
 `src/common` is compiled into every package, so it must stay inside the TizenFX
 **API 5** surface: no `ScrollPosition`, `ScrollBy`, `Scale`/`SetScale`,
 `LoadProgress`, `EvalAsync` or `Settings.ScriptsCanOpenWindows` — all API 6+.
+
+## The floor: Tizen 4.0
+
+Samsung added .NET to TVs with the **2018** range (Tizen 4.0), so 2017 and earlier
+sets cannot run a `.tpk` at all — there is no runtime for it to start in. TizenFX
+agrees from the other direction: its branches begin at **API 4**. `Overscan4`
+therefore targets the oldest platform that can exist, and the only thing a 2017 set
+could ever have is a `.wgt` UA-overriding launcher without its own chrome (see
+issue #11).
 
 ## Two web-view bindings, neither covering the whole range
 
@@ -43,7 +53,7 @@ built-in browser uses. Samsung's published mapping, plus one measurement:
 
 | TV platform | Chromium |
 | --- | --- |
-| 3.0 | M47 |
+| 3.0 | M47 | (no .NET runtime — cannot run Overscan) |
 | 4.0 | M56 |
 | 5.0 | M63 |
 | 5.5 | M69 |

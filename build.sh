@@ -5,6 +5,7 @@
 #   ./build.sh          # all three
 #   ./build.sh tizen8   # net6.0-tizen8.0, Tizen.WebView  -> TV 8.0
 #   ./build.sh tizen5   # tizen50, Tizen.WebView          -> TV 5.0+
+#   ./build.sh tizen4   # tizen40, Tizen.WebView          -> TV 4.0+ (2018, oldest possible)
 #   ./build.sh nui      # net6.0-tizen8.0, NUI WebView    -> TV 9.0+
 #
 # Toolchain notes (both were installed with dot.net/v1/dotnet-install.sh):
@@ -43,6 +44,15 @@ build_nui() {
   cp OverscanNui/bin/Release/net6.0-tizen8.0/*.tpk dist/Overscan-nui.tpk
 }
 
+build_tizen4() {
+  echo "== Overscan4 (tizen40, Tizen.WebView, TV 4.0+ / 2018 sets)"
+  DOTNET_ROOT="$HOME/.dotnet-31" \
+  DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
+  LD_LIBRARY_PATH="$OPENSSL11:${LD_LIBRARY_PATH:-}" \
+    "$DOTNET31" build Overscan4/Overscan4.csproj -c Debug
+  cp Overscan4/bin/Debug/tizen40/*.tpk dist/Overscan-tizen4.tpk
+}
+
 build_tizen5() {
   echo "== Overscan5 (tizen50)"
   DOTNET_ROOT="$HOME/.dotnet-31" \
@@ -55,8 +65,9 @@ build_tizen5() {
 case "$target" in
   tizen8) build_tizen8 ;;
   tizen5) build_tizen5 ;;
+  tizen4) build_tizen4 ;;
   nui)    build_nui ;;
-  both|all) build_tizen8; build_tizen5; build_nui ;;
+  both|all) build_tizen8; build_tizen5; build_tizen4; build_nui ;;
   *) echo "usage: $0 [all|tizen8|tizen5|nui]" >&2; exit 2 ;;
 esac
 

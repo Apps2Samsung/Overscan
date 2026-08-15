@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tizen 4.0 package — 2018 TV models, the OLDEST sets that can run this at all.
+    Samsung added .NET to TVs with the 2018 range; 2017 (Tizen 3.0) has no .NET
+    runtime, and TizenFX itself starts at API 4, so there is nothing below this.
+
+    Same ewk binding and the same shared source as Overscan5; only the TFM,
+    TizenFX version and manifest api-version differ. Engine here is Chromium M56.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>tizen40</TargetFramework>
+    <RootNamespace>Overscan</RootNamespace>
+    <AssemblyName>Overscan</AssemblyName>
+    <DebugType>portable</DebugType>
+    <LangVersion>8.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../src/common/**/*.cs" />
+    <Compile Include="../src/elm/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tizen.NET.Sdk" Version="1.1.9" />
+    <!-- TizenFX API level 4, the last 4.0.x. -->
+    <PackageReference Include="Tizen.NET" Version="4.0.1.14164" />
+  </ItemGroup>
+
+</Project>
