@@ -7,21 +7,24 @@ cannot be logged.
 ## Source layout
 
 ```
-Overscan4/      tizen40,         manifest api-version 4.0, ewk   (oldest possible)
 src/common/     engine-agnostic: user agents, injected page script, diagnostics, URL helpers
 src/elm/        ElmSharp + Tizen.WebView (ewk) UI  — TV 5.0-8.0
 src/nui/        NUI + NUI WebView UI               — TV 9.0+
 src/probe/      diagnostic ladder harness (its own package)
 
+Overscan4/      tizen40,         manifest api-version 4.0, ewk   (oldest possible)
 Overscan/       net6.0-tizen8.0, manifest api-version 8.0, ewk
 Overscan5/      tizen50,         manifest api-version 5.0, ewk   (classic Tizen.NET.Sdk)
 OverscanNui/    net6.0-tizen8.0, manifest api-version 9.0, NUI WebView
 OverscanProbe/  tizen50,         diagnostics
 ```
 
-`src/common` is compiled into every package, so it must stay inside the TizenFX
-**API 5** surface: no `ScrollPosition`, `ScrollBy`, `Scale`/`SetScale`,
-`LoadProgress`, `EvalAsync` or `Settings.ScriptsCanOpenWindows` — all API 6+.
+`src/common` and `src/elm` are compiled into every ewk package, so they must stay
+inside the TizenFX **API 4** surface — the floor moved down when `Overscan4` was
+added. Off limits: `ScrollPosition`, `ScrollBy`, `Scale`/`SetScale`,
+`LoadProgress`, `EvalAsync` and `Settings.ScriptsCanOpenWindows` (API 6+), and
+anything else introduced after API 4. Check a member against the API4 branch of
+TizenFX before using it.
 
 ## The floor: Tizen 4.0
 
@@ -53,7 +56,7 @@ built-in browser uses. Samsung's published mapping, plus one measurement:
 
 | TV platform | Chromium |
 | --- | --- |
-| 3.0 | M47 | (no .NET runtime — cannot run Overscan) |
+| 3.0 | M47 — no .NET runtime, cannot run Overscan |
 | 4.0 | M56 |
 | 5.0 | M63 |
 | 5.5 | M69 |
