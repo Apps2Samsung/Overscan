@@ -1,3 +1,5 @@
+<img src="docs/img/overscan.png" alt="" width="104" align="right">
+
 # Overscan
 
 A web browser you can sideload onto a Samsung TV — the one the TV should have
