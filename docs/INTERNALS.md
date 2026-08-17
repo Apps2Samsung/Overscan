@@ -188,6 +188,19 @@ on every set, and can type into *page* fields, which the IME cannot.
 Keys we act on set `EvasEventFlag.OnHold` (EFL's "consumed" marker), otherwise the
 page scrolls behind the keyboard while the D-pad moves between letters.
 
+### Keyboard layouts
+
+`KeyboardLayouts` holds the four grids — QWERTY, AZERTY, QWERTZ, ABCDEF — and the
+remembered choice (`keyboardLayout` in `settings.tsv`), shared by both keyboards so
+the ElmSharp and NUI builds behave the same. The `layout` key at the end of the
+action row cycles them and wears the current layout's name.
+
+All four grids are deliberately the same shape (rows of 10, 10, 10, 10, 11): the
+keyboards build their cells once in the constructor and only swap the labels when
+the layout changes, so a grid with different row lengths would leave cells pointing
+at keys that are no longer there. Whatever letters a layout leaves over, the row is
+padded out with `-`, `_`, `?`, `=` so every key exists in every layout.
+
 ## Emulator notes
 
 - **The TV emulator needs a modern `-cpu` model or it panics.** With the default

@@ -18,7 +18,8 @@ engine in an app that behaves like a desktop browser:
 - **The remote works like a mouse** — the D-pad moves a pointer, OK clicks.
 - **Favourites and history**, on a start screen built for a TV.
 - **You can type** with an on-screen keyboard driven by the D-pad, into the
-  address bar *and* into search boxes on the page.
+  address bar *and* into search boxes on the page. QWERTY, AZERTY, QWERTZ or
+  alphabetical, whichever you're quickest on.
 
 Requested in [tizen-community-packages#24](https://github.com/Apps2Samsung/tizen-community-packages/issues/24).
 
@@ -74,6 +75,10 @@ browser simply won't start. Newer sets don't have this restriction.
 | **8** | Keep this page in favourites (press again to remove) |
 | **9** | Back to the start screen |
 | **Info** | Images on/off — the biggest speed-up on an old set |
+
+The last key on the keyboard's bottom row switches its layout — **QWERTY**
+(the default), then AZERTY, QWERTZ and the alphabetical grid. It shows the layout
+you're on, and the choice is remembered.
 
 ## Does it load pages faster?
 

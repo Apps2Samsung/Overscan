@@ -22,15 +22,6 @@ namespace Overscan
         private const int Gap = 8;
         private const int EntryHeight = 96;
 
-        private static readonly string[][] Rows =
-        {
-            new[] { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j" },
-            new[] { "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" },
-            new[] { "u", "v", "w", "x", "y", "z", "-", "_", "?", "=" },
-            new[] { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" },
-            new[] { ".", "/", ":", "&", "space", ".com", "back", "clear", "GO", "close" },
-        };
-
         private readonly Rectangle _panel;
         private readonly Rectangle _panelEdge;
         private readonly Label _entry;
@@ -38,14 +29,26 @@ namespace Overscan
         private readonly Rectangle[][] _edges;
         private readonly Label[][] _labels;
 
+        /// <summary>
+        /// The current grid. Only the labels change when the layout is switched —
+        /// every layout has the same shape, so the cells below stay valid.
+        /// </summary>
+        private string[][] _rows = KeyboardLayouts.Rows;
+
         private int _row;
         private int _column;
         private string _text = string.Empty;
 
         public ElmKeyboard(Window window)
         {
-            int width = (KeyWidth * 10) + (Gap * 11);
-            int height = (KeyHeight * Rows.Length) + (Gap * (Rows.Length + 1)) + EntryHeight;
+            int columns = 0;
+            foreach (string[] row in _rows)
+            {
+                columns = Math.Max(columns, row.Length);
+            }
+
+            int width = (KeyWidth * columns) + (Gap * (columns + 1));
+            int height = (KeyHeight * _rows.Length) + (Gap * (_rows.Length + 1)) + EntryHeight;
             Size screen = window.ScreenSize;
             int left = Math.Max(0, (screen.Width - width) / 2);
             int top = Math.Max(0, screen.Height - height - 48);
@@ -67,17 +70,17 @@ namespace Overscan
                 Geometry = new Rect(left + (Gap * 2), top + (Gap * 2), width - (Gap * 4), EntryHeight - (Gap * 2)),
             };
 
-            _cells = new Rectangle[Rows.Length][];
-            _edges = new Rectangle[Rows.Length][];
-            _labels = new Label[Rows.Length][];
+            _cells = new Rectangle[_rows.Length][];
+            _edges = new Rectangle[_rows.Length][];
+            _labels = new Label[_rows.Length][];
 
-            for (int r = 0; r < Rows.Length; r++)
+            for (int r = 0; r < _rows.Length; r++)
             {
-                _cells[r] = new Rectangle[Rows[r].Length];
-                _edges[r] = new Rectangle[Rows[r].Length];
-                _labels[r] = new Label[Rows[r].Length];
+                _cells[r] = new Rectangle[_rows[r].Length];
+                _edges[r] = new Rectangle[_rows[r].Length];
+                _labels[r] = new Label[_rows[r].Length];
 
-                for (int c = 0; c < Rows[r].Length; c++)
+                for (int c = 0; c < _rows[r].Length; c++)
                 {
                     var cell = new Rect(
                         left + Gap + (c * (KeyWidth + Gap)),
@@ -97,7 +100,7 @@ namespace Overscan
                     _labels[r][c] = new Label(window)
                     {
                         Geometry = new Rect(cell.X, cell.Y + 18, cell.Width, cell.Height - 20),
-                        Text = Label(Rows[r][c], false),
+                        Text = Label(_rows[r][c], false),
                     };
                 }
             }
@@ -194,23 +197,23 @@ namespace Overscan
             switch (key)
             {
                 case RemoteKeys.Left:
-                    _column = _column > 0 ? _column - 1 : Rows[_row].Length - 1;
+                    _column = _column > 0 ? _column - 1 : _rows[_row].Length - 1;
                     break;
                 case RemoteKeys.Right:
-                    _column = (_column + 1) % Rows[_row].Length;
+                    _column = (_column + 1) % _rows[_row].Length;
                     break;
                 case RemoteKeys.Up:
-                    _row = _row > 0 ? _row - 1 : Rows.Length - 1;
-                    _column = Math.Min(_column, Rows[_row].Length - 1);
+                    _row = _row > 0 ? _row - 1 : _rows.Length - 1;
+                    _column = Math.Min(_column, _rows[_row].Length - 1);
                     break;
                 case RemoteKeys.Down:
-                    _row = (_row + 1) % Rows.Length;
-                    _column = Math.Min(_column, Rows[_row].Length - 1);
+                    _row = (_row + 1) % _rows.Length;
+                    _column = Math.Min(_column, _rows[_row].Length - 1);
                     break;
 
                 case RemoteKeys.Ok:
                 case RemoteKeys.OkKeypad:
-                    Press(Rows[_row][_column]);
+                    Press(_rows[_row][_column]);
                     return true;
 
                 case RemoteKeys.Back:
@@ -254,6 +257,9 @@ namespace Overscan
                 case "clear":
                     _text = string.Empty;
                     break;
+                case KeyboardLayouts.CycleKey:
+                    _rows = KeyboardLayouts.Next();
+                    break;
                 case "close":
                     Close();
                     return;
@@ -287,8 +293,8 @@ namespace Overscan
                 for (int c = 0; c < _cells[r].Length; c++)
                 {
                     bool selected = r == _row && c == _column;
-                    _cells[r][c].Color = selected ? Theme.Accent : FillFor(Rows[r][c]);
-                    _labels[r][c].Text = Label(Rows[r][c], selected);
+                    _cells[r][c].Color = selected ? Theme.Accent : FillFor(_rows[r][c]);
+                    _labels[r][c].Text = Label(_rows[r][c], selected);
                     _edges[r][c].Color = selected ? Theme.Accent : Theme.Edge;
                 }
             }
@@ -304,13 +310,16 @@ namespace Overscan
                 case "back":
                 case "clear":
                 case "space":
+                case KeyboardLayouts.CycleKey:
                 case ".com": return Theme.KeyFillAlt;
                 default: return Theme.KeyFill;
             }
         }
 
-        private static string Label(string text, bool selected)
+        /// <summary>The layout key wears the name of the layout it is showing.</summary>
+        private static string Label(string key, bool selected)
         {
+            string text = key == KeyboardLayouts.CycleKey ? KeyboardLayouts.Name : key;
             bool wide = text.Length > 1;
             return Theme.Text(text, wide ? 22 : 30, selected ? Theme.Ink : Theme.InkMuted,
                               selected || wide, "center");
