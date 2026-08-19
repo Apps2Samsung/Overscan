@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tizen 6.0 package — covers the 2021-2023 sets (6.0, 6.5, 7.0).
+    A package installs only where its manifest api-version is <= the TV's platform
+    version, so the api-version 8.0 build is rejected on those sets with
+    [118, -4]. This one declares 6.0 and therefore installs on 6.0 and upwards.
+
+    Same ewk binding and shared source as Overscan4/Overscan5; the runtime on those
+    platforms predates .NET 6, which is why this is a classic tizenXX target rather
+    than the net6.0-tizen8.0 one.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>tizen60</TargetFramework>
+    <RootNamespace>Overscan</RootNamespace>
+    <AssemblyName>Overscan</AssemblyName>
+    <DebugType>portable</DebugType>
+    <LangVersion>8.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../src/common/**/*.cs" />
+    <Compile Include="../src/elm/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tizen.NET.Sdk" Version="1.1.9" />
+    <PackageReference Include="Tizen.NET" Version="6.0.0.14995" />
+  </ItemGroup>
+
+</Project>

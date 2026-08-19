@@ -3,8 +3,12 @@ name: Build packages
 # Overscan ships one .tpk per platform range, because the web-view binding
 # changed twice under us:
 #
-#   Overscan4      tizen40           TV 4.0 (2018) Tizen.WebView (ewk)  .NET Core 3.1 SDK
-#   Overscan5      tizen50           TV 5.0-...   Tizen.WebView (ewk)   .NET Core 3.1 SDK
+#   Overscan4      tizen40           TV 4.0        Tizen.WebView (ewk)  .NET Core 3.1 SDK
+#   Overscan5      tizen50           TV 5.0-5.5    Tizen.WebView (ewk)  .NET Core 3.1 SDK
+#   Overscan6      tizen60           TV 6.0-7.0    Tizen.WebView (ewk)  .NET Core 3.1 SDK
+#
+# A package installs only where its manifest api-version is <= the TV's platform
+# version, which is why the 8.0 build cannot serve 6.0/6.5/7.0 sets ([118, -4]).
 #   Overscan       net6.0-tizen8.0   TV 8.0       Tizen.WebView (ewk)   .NET 6 SDK + tizen workload
 #   OverscanNui    net6.0-tizen8.0   TV 9.0+      NUI WebView           .NET 6 SDK + tizen workload
 #   OverscanProbe  tizen50           diagnostics  ladder harness        .NET Core 3.1 SDK
@@ -29,9 +33,9 @@ on:
   push:
     tags: ['v*']
     branches: [main]
-    paths: ['src/**', 'Overscan/**', 'Overscan4/**', 'Overscan5/**', 'OverscanNui/**', 'OverscanProbe/**', '.github/workflows/build.yml']
+    paths: ['src/**', 'Overscan/**', 'Overscan4/**', 'Overscan5/**', 'Overscan6/**', 'OverscanNui/**', 'OverscanProbe/**', '.github/workflows/build.yml']
   pull_request:
-    paths: ['src/**', 'Overscan/**', 'Overscan4/**', 'Overscan5/**', 'OverscanNui/**', 'OverscanProbe/**']
+    paths: ['src/**', 'Overscan/**', 'Overscan4/**', 'Overscan5/**', 'Overscan6/**', 'OverscanNui/**', 'OverscanProbe/**']
 
 permissions:
   contents: write
@@ -94,7 +98,11 @@ jobs:
             project: Overscan5/Overscan5.csproj
             output: Overscan-tizen5.tpk
             artifact: Overscan-tizen5
-          - name: Overscan4 (TV 4.0+, 2018 sets)
+          - name: Overscan6 (TV 6.0-7.0, 2021-2023 sets)
+            project: Overscan6/Overscan6.csproj
+            output: Overscan-tizen6.tpk
+            artifact: Overscan-tizen6
+          - name: Overscan4 (TV 4.0, 2018 sets)
             project: Overscan4/Overscan4.csproj
             output: Overscan-tizen4.tpk
             artifact: Overscan-tizen4
@@ -160,8 +168,9 @@ jobs:
             | Package | TV platform | Web view | Engine |
             | --- | --- | --- | --- |
             | `Overscan-tizen4.tpk` | 4.0 (2018) | Tizen.WebView | M56 |
-            | `Overscan-tizen5.tpk` | 5.0+ (armv7) | Tizen.WebView | M63 on 5.0 |
-            | `Overscan-tizen8.tpk` | 8.0 | Tizen.WebView | M108 |
+            | `Overscan-tizen5.tpk` | 5.0-5.5 (2019-20) | Tizen.WebView | M63 / M69 |
+            | `Overscan-tizen6.tpk` | 6.0-7.0 (2021-23) | Tizen.WebView | M76 / M85 / M94 |
+            | `Overscan-tizen8.tpk` | 8.0 (2024) | Tizen.WebView | M108 |
             | `Overscan-nui.tpk` | 9.0+ | NUI WebView | M130 on 10.0 |
             | `Overscan-probe.tpk` | 5.0+ | diagnostics harness | — |
 

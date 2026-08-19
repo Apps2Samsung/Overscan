@@ -15,6 +15,7 @@ src/probe/      diagnostic ladder harness (its own package)
 Overscan4/      tizen40,         manifest api-version 4.0, ewk   (oldest possible)
 Overscan/       net6.0-tizen8.0, manifest api-version 8.0, ewk
 Overscan5/      tizen50,         manifest api-version 5.0, ewk   (classic Tizen.NET.Sdk)
+Overscan6/      tizen60,         manifest api-version 6.0, ewk   (2021-2023 sets)
 OverscanNui/    net6.0-tizen8.0, manifest api-version 9.0, NUI WebView
 OverscanProbe/  tizen50,         diagnostics
 ```
@@ -25,6 +26,18 @@ added. Off limits: `ScrollPosition`, `ScrollBy`, `Scale`/`SetScale`,
 `LoadProgress`, `EvalAsync` and `Settings.ScriptsCanOpenWindows` (API 6+), and
 anything else introduced after API 4. Check a member against the API4 branch of
 TizenFX before using it.
+
+## Why one package per platform range
+
+A TV installs a package only when its manifest `api-version` is **at or below** the
+TV's platform version; above it the install is refused with `[118, -4]`. So a build
+declaring 8.0 cannot serve a 2021-2023 set, however compatible the code is — hence
+separate 4.0, 5.0, 6.0 and 8.0 manifests rather than one package with the newest
+api-version.
+
+The runtime is the other half of it: 6.0/7.0 sets predate .NET 6, so those targets
+have to be classic `tizenXX` builds on the .NET Core 3.1 SDK. Only 8.0+ can take
+`net6.0-tizen8.0`.
 
 ## The floor: Tizen 4.0
 

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns="http://tizen.org/ns/packages" api-version="6.0" package="org.apps2samsung.overscan" version="0.1.0">
+  <profile name="tv" />
+  <ui-application appid="org.apps2samsung.overscan"
+                  exec="Overscan.dll"
+                  type="dotnet"
+                  multiple="false"
+                  taskmanage="true"
+                  nodisplay="false"
+                  launch_mode="single"
+                  api-version="6.0">
+    <label>Overscan</label>
+    <icon>Overscan.png</icon>
+    <splash-screens />
+  </ui-application>
+  <privileges>
+    <privilege>http://tizen.org/privilege/internet</privilege>
+    <privilege>http://tizen.org/privilege/network.get</privilege>
+    <privilege>http://tizen.org/privilege/tv.inputdevice</privilege>
+  </privileges>
+</manifest>

@@ -29,12 +29,18 @@ Requested in [tizen-community-packages#24](https://github.com/Apps2Samsung/tizen
 | --- | --- | --- |
 | 2018 (Tizen 4.0) | `Overscan-tizen4.tpk` | The oldest TVs that can run this. Chromium 56, so expect real limits. Untested. |
 | 2019–2020 (Tizen 5.0–5.5) | `Overscan-tizen5.tpk` | Needs a **partner certificate** to sign — see below. Old engine, so expect some sites to misbehave. |
-| 2021–2024 (Tizen 6.0–8.0) | `Overscan-tizen8.tpk` | Not yet tested on hardware. |
+| 2021–2023 (Tizen 6.0–7.0) | `Overscan-tizen6.tpk` | Not yet tested on hardware. |
+| 2024 (Tizen 8.0) | `Overscan-tizen8.tpk` | Not yet tested on hardware. |
 | 2025+ (Tizen 9.0–10.0) | `Overscan-nui.tpk` | Tested on the Tizen 10 emulator. Modern engine — sites generally just work. |
 
 **2017 and older sets (Tizen 3.0, 2.x) cannot run Overscan.** Samsung only added
 .NET to TVs with the 2018 range, so there is no runtime for the app to start in —
 this is a platform limit, not something a build can work around.
+
+Pick the package for **your** platform, not a newer one: a TV refuses to install a
+package whose `api-version` is above its own platform version (you get
+`[118, -4]`). Older packages do install on newer sets, but you lose whatever that
+generation added.
 
 Grab the packages from the [latest release](https://github.com/Apps2Samsung/Overscan/releases).
 Not sure which platform your set is? `sdb capability` prints `platform_version`.
@@ -118,7 +124,7 @@ What does help on an older set:
 ```
 
 You'll need the .NET 6 SDK with the `tizen` workload, plus the .NET Core 3.1 SDK
-for the older package. CI builds all four on every push — see
+for the older packages. CI builds all of them on every push — see
 [`.github/workflows/build.yml`](.github/workflows/build.yml).
 
 ## How it works, briefly
