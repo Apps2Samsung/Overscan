@@ -7,6 +7,12 @@ namespace Overscan
     /// inside the page: we position an overlay element and dispatch the
     /// mouse/pointer events ourselves. Anchors and buttons activate normally,
     /// because a dispatched click still runs the element's default action.
+    ///
+    /// The one place a dispatched event cannot reach is inside a cross-origin
+    /// <c>&lt;iframe&gt;</c> — a captcha, an embedded sign-in. A same-origin frame
+    /// is entered here (see <c>descend</c>); a cross-origin one is reported back as
+    /// <c>FRAME:</c> so the ewk build can push a real Evas mouse event through
+    /// <c>NativeMouse</c> (which only the ewk build has) instead.
     /// </summary>
     internal static class PageScript
     {
@@ -90,23 +96,58 @@ namespace Overscan
     st.el.style.transform = 'translate(' + st.x + 'px,' + st.y + 'px)';
   }
 
-  function fire(type, target) {
+  /* x and y default to the cursor, but a click inside a same-origin frame has to
+     report coordinates in *that* frame's space or the page reads them wrongly. */
+  function fire(type, target, x, y) {
     if (!target) { return; }
+    if (x === undefined) { x = st.x; }
+    if (y === undefined) { y = st.y; }
     var e;
     var init = { bubbles: true, cancelable: true, view: window,
-                 clientX: st.x, clientY: st.y, button: 0, buttons: type === 'mousedown' ? 1 : 0 };
+                 clientX: x, clientY: y, button: 0, buttons: type === 'mousedown' ? 1 : 0 };
     try {
       e = new MouseEvent(type, init);
     } catch (_) {
       e = document.createEvent('MouseEvents');
       e.initMouseEvent(type, true, true, window, type === 'click' ? 1 : 0,
-                       0, 0, st.x, st.y, false, false, false, false, 0, null);
+                       0, 0, x, y, false, false, false, false, 0, null);
     }
     try { target.dispatchEvent(e); } catch (_) {}
   }
 
   function at() {
     try { return document.elementFromPoint(st.x, st.y); } catch (_) { return null; }
+  }
+
+  function isFrame(node) {
+    var tag = node && node.tagName;
+    return tag === 'IFRAME' || tag === 'FRAME' || tag === 'OBJECT' || tag === 'EMBED';
+  }
+
+  /* Hit-tests inside a frame the page is allowed to touch, translating the
+     cursor into the frame's own coordinates. Returns null for a cross-origin
+     frame — reading contentDocument there throws, and nothing in this script can
+     reach inside it. That case is handled natively instead (see NativeMouse).
+     Loops, because a captcha is often a frame inside a frame. */
+  function descend(frame, x, y) {
+    for (var depth = 0; depth < 4; depth++) {
+      var doc;
+      try { doc = frame.contentDocument; } catch (_) { return null; }
+      if (!doc || !doc.elementFromPoint) { return null; }
+
+      var box;
+      try { box = frame.getBoundingClientRect(); } catch (_) { return null; }
+      x = x - box.left - (frame.clientLeft || 0);
+      y = y - box.top - (frame.clientTop || 0);
+
+      var el;
+      try { el = doc.elementFromPoint(x, y); } catch (_) { return null; }
+      if (!el) { return null; }
+      if (isFrame(el)) { frame = el; continue; }
+      return { el: el, x: x, y: y };
+    }
+
+    return null;
   }
 
   var CLICKABLE = 'a,button,input,select,textarea,summary,label,' +
@@ -174,15 +215,35 @@ namespace Overscan
       var hit = at();
       if (!hit) { return 'nothing under cursor'; }
 
+      /* An embedded frame is checked before anything else: elementFromPoint stops
+         at the frame element, so a captcha, an embedded sign-in or a payment
+         widget would otherwise get a click dispatched on its container and
+         nothing at all would happen (issue #15). */
+      var x = st.x;
+      var y = st.y;
+      if (isFrame(hit)) {
+        var inner = descend(hit, st.x, st.y);
+        if (!inner) {
+          /* Cross-origin: unreachable from script. Ask the native side to feed a
+             real mouse event, which chromium routes into the frame itself. */
+          pulse();
+          return 'FRAME:' + hit.tagName;
+        }
+
+        hit = inner.el;
+        x = inner.x;
+        y = inner.y;
+      }
+
       /* elementFromPoint returns the topmost node, which on icon buttons is a
          decorative <svg>/<path>/<span> whose parent carries the behaviour.
          Dispatching on that child does nothing, so climb to the real target. */
       var t = interactive(hit) || hit;
 
       pulse();
-      fire('mousedown', t);
-      fire('mouseup', t);
-      fire('click', t);
+      fire('mousedown', t, x, y);
+      fire('mouseup', t, x, y);
+      fire('click', t, x, y);
 
       /* A text field is deliberately NOT focused here — focusing raises the TV's
          IME. It is marked instead: outlined so the user can see where text will

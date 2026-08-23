@@ -128,6 +128,39 @@ Two consequences in the code:
 NUI would not rescue 5.0 either: `libdali-web-engine-chromium-plugin.so` is in the
 same directory and depends on the same chain.
 
+## `ewk_init()` returning 0 is a failure, not a number
+
+`Chromium.Initialize()` is `ewk_init()`, which returns the engine's **reference
+count**: 1 after a successful first call, and **0** from every one of its own
+error paths. The code used to log the number and carry on.
+
+That is the whole of issues #13 and #14. On a Q80 (5.5) and on a 2018 set the
+report read
+
+```
+Chromium initialized, refcount=0
+WebView created
+```
+
+and then nothing — the icon disappeared about 15 seconds later. A `WebView` built
+on an engine that never came up wedges start-up, `OnCreate` never returns, and the
+launcher kills the app: an app that installs, launches and vanishes with no error
+anywhere. On the RU7020, where it works, the same line reads `refcount=1`.
+
+So a zero now fails the start-up deliberately and draws the failure screen. Before
+giving up it retries once with `ewk_set_arguments` called first — TizenFX has no
+binding for it, so it is `dlsym`'d off the handle `NativeEngine.Preload` already
+holds. Two reasons that is worth a try rather than superstition: every ewk sample
+sets the argument vector before `ewk_init`, and for a .NET app `argv[0]` is the
+shared `dotnet-launcher` rather than anything app-shaped. The engine leaves its
+count at zero after a failed init, so calling `ewk_init` again genuinely re-runs
+it instead of just incrementing.
+
+**What is not the cause:** the DRM wall above. `dlopen` of
+`libchromium-ewk.so` succeeds with `RTLD_NOW` on both reporting sets, which means
+`libmarlin.so.0` resolved — the partner certificate did its job. The engine is
+present, permitted, and still refuses to start in an app process on that firmware.
+
 ## Two silent failures that look identical
 
 Both present as "the icon does nothing" — no window, no error, no trace:
@@ -159,7 +192,25 @@ observability is built into the app:
   from the server thread hangs the request.
 - **`Breadcrumbs`** — append-only file, one open/append/close per line, so a native
   crash that kills the process before the socket binds still identifies itself: the
-  next launch reports where the last one died.
+  next launch reports where the last one died. The **browser** drops these too now,
+  not only the probe: #13 and #14 both produced a log that stopped at `WebView
+  created` with five uninstrumented calls after it, so no report could say which one
+  took the app down. Every step of start-up has its own line, and the report prints
+  the previous run's trail above this one's.
+
+  Two things the report itself got wrong, found by those issues:
+
+  - It read `_cursor.Visual` with no null check, so calling it during start-up threw
+    a `NullReferenceException` and replaced the evidence with a stack trace. The
+    provider runs on the DiagServer thread while the main thread may be anywhere in
+    `OnCreate`, so **every field it touches must be null-checked**.
+  - `_web == null` was rendered as `engine: FAILED TO START`, which is also what a
+    view that simply has not been built yet looks like from that thread. It now says
+    *still starting* unless a failure was actually recorded.
+
+  The log's ring buffer was 12 lines, which an instrumented start-up overflows — the
+  beginning of a failed launch is the interesting part, so it holds 60 now and the
+  on-screen overlay asks for the tail that fits its box.
 - **`OverscanProbe`** — a separate package that walks startup one call at a time
   (`Elementary.Initialize` → window → widgets → `Chromium.Initialize` → web view →
   UA → `LoadUrl`), plus filesystem and `dlopen` reconnaissance. This is what found
@@ -191,6 +242,35 @@ Details that matter:
   `input`/`change`, otherwise React-style frameworks ignore it. Enter is sent as
   real key events, falling back to `form.requestSubmit()`.
 
+### The one thing a script cannot click: another origin's frame
+
+`elementFromPoint` stops at an `<iframe>`, and a click dispatched on the frame
+element does nothing inside it. So a captcha, an embedded sign-in or a payment
+widget is simply dead to the injected pointer — issue #15, on Instagram's captcha.
+
+Two halves to it:
+
+- **Same-origin frames are entered from the script.** `descend()` hit-tests inside
+  `contentDocument` with coordinates translated by the frame's bounding box, and
+  loops, because a widget is often a frame inside a frame. `fire()` therefore takes
+  explicit coordinates: an event dispatched inside a frame has to report the
+  position in *that* frame's space.
+- **A cross-origin frame is unreachable from any script we can run**, so the click
+  has to be a real one. EFL does expose an input path an app may drive:
+  `evas_event_feed_mouse_move`/`_down`/`_up` push an event through the canvas's own
+  hit-testing, the ewk view receives it exactly as it receives the TV's pointer, and
+  chromium routes it into whichever frame is under the point. The events are
+  trusted, so a captcha accepts them. `EvasObject.Handle` is public in API 4, so
+  `evas_object_evas_get` on it gives the canvas; `NativeMouse` does the rest, and
+  every part of it is best-effort.
+
+The script reports `FRAME:<tag>` back over the bridge and the native side follows up
+with the real click, rather than the native path being used for everything. That is
+deliberate: **a real click on a text field focuses it, and a focused field raises
+the TV's IME**, which then swallows the remote — the exact failure the in-page
+pointer exists to avoid. NUI has no canvas to feed, so on 9.0+ those frames stay
+unclickable and the app says so.
+
 ### Why our own keyboard rather than the platform IME
 
 An ElmSharp `Entry` takes focus at startup on a real TV, the platform IME appears
@@ -208,11 +288,41 @@ remembered choice (`keyboardLayout` in `settings.tsv`), shared by both keyboards
 the ElmSharp and NUI builds behave the same. The `layout` key at the end of the
 action row cycles them and wears the current layout's name.
 
-All four grids are deliberately the same shape (rows of 10, 10, 10, 10, 11): the
+Three things change what is showing: the layout, `shift` and `sym`. Only the layout
+is remembered — coming back to a keyboard stuck on punctuation would be baffling.
+Shift releases itself after one letter, as on a phone: one capital is what a name
+or a password rule usually wants, and leaving it latched turns the rest of the word
+into shouting.
+
+Every grid is deliberately the same shape (rows of 10, 10, 10, 10, 14): the
 keyboards build their cells once in the constructor and only swap the labels when
-the layout changes, so a grid with different row lengths would leave cells pointing
-at keys that are no longer there. Whatever letters a layout leaves over, the row is
-padded out with `-`, `_`, `?`, `=` so every key exists in every layout.
+the grid changes, so a grid with different row lengths would leave cells pointing
+at keys that are no longer there. That is also why the shifted variants and the
+symbol page are built to the same rows-of-ten shape rather than being packed
+tighter. Whatever letters a layout leaves over, the row is padded out with `-`,
+`_`, `?`, `=` so every key exists in every layout.
+
+The action row grew from 11 keys to 14 (`@`, `shift`, `sym`, `start`), which is why
+a key is 104px wide rather than 116 — fourteen of the old ones overflow a 1080p
+panel. Rows are centred rather than left-aligned, or a 10-key letter row leaves a
+ragged hole beside a 14-key action row.
+
+`@` sits on the action row and not on the symbol page: signing in to anything needs
+it constantly, and having to find a second page for it was the substance of
+issue #15.
+
+### Where the browser opens
+
+`startupUrl` in `settings.tsv`, set by the keyboard's `start` key: type an address,
+press `start` instead of `GO`, and that is what the app loads at launch. Pressing
+`start` with an empty entry clears it and the generated start screen comes back.
+
+It lives on the keyboard rather than on a remote key because every digit was
+already taken, and because the thing being saved is exactly what you have just
+typed. `Store.Init` therefore has to run **before** the keyboard is constructed —
+`KeyboardLayouts` resolves its remembered layout the first time it is touched, and
+both builds used to initialise the store afterwards, silently discarding the user's
+layout choice.
 
 ## Emulator notes
 

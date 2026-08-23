@@ -11,7 +11,10 @@ namespace Overscan
     /// </summary>
     internal static class DiagLog
     {
-        private const int Capacity = 12;
+        // Start-up alone now drops a dozen breadcrumbs, and the interesting part of
+        // a failed launch is the *beginning* of it: at 12 lines the first pages of
+        // a report evicted exactly the lines that said where the app got to.
+        private const int Capacity = 60;
         private static readonly Queue<string> Lines = new Queue<string>();
         private static readonly object Sync = new object();
 
@@ -34,11 +37,27 @@ namespace Overscan
 
         public static string Dump()
         {
+            return Tail(Capacity);
+        }
+
+        /// <summary>
+        /// The last <paramref name="count"/> lines. The on-screen overlay has a
+        /// fixed box to draw in, so it asks for what fits rather than everything.
+        /// </summary>
+        public static string Tail(int count)
+        {
             lock (Sync)
             {
+                int skip = Lines.Count - count;
                 var sb = new StringBuilder();
+                int index = 0;
                 foreach (string line in Lines)
                 {
+                    if (index++ < skip)
+                    {
+                        continue;
+                    }
+
                     sb.Append(line).Append('\n');
                 }
 

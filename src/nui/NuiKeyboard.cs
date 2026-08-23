@@ -15,7 +15,9 @@ namespace Overscan
     /// </summary>
     internal sealed class NuiKeyboard
     {
-        private const int KeyWidth = 116;
+        // 14 keys on the action row (shift, sym and start joined it) at 116px each
+        // overflow a 1080p panel, so the key is narrower than it was.
+        private const int KeyWidth = 104;
         private const int KeyHeight = 74;
         private const int Gap = 8;
 
@@ -71,12 +73,17 @@ namespace Overscan
             for (int r = 0; r < _rows.Length; r++)
             {
                 _keys[r] = new TextLabel[_rows[r].Length];
+                // Centred, not left-aligned: the letter rows are 10 keys and the
+                // action row is 14, so left alignment leaves a hole on the right.
+                int rowWidth = (KeyWidth * _rows[r].Length) + (Gap * (_rows[r].Length - 1));
+                int rowLeft = (width - rowWidth) / 2;
+
                 for (int c = 0; c < _rows[r].Length; c++)
                 {
                     var key = new TextLabel
                     {
                         Position2D = new Position2D(
-                            Gap + (c * (KeyWidth + Gap)),
+                            rowLeft + (c * (KeyWidth + Gap)),
                             96 + (r * (KeyHeight + Gap))),
                         Size2D = new Size2D(KeyWidth, KeyHeight),
                         HorizontalAlignment = HorizontalAlignment.Center,
@@ -99,11 +106,18 @@ namespace Overscan
         /// <summary>Raised with the finished text when GO is pressed.</summary>
         public event Action<string, KeyboardTarget> Committed;
 
+        /// <summary>
+        /// Raised when the `start` key is pressed: what was typed becomes the page
+        /// the browser opens at launch. An empty entry clears it again.
+        /// </summary>
+        public event Action<string> StartPageSet;
+
         public void Open(KeyboardTarget target, string initialText)
         {
             Target = target;
             _text = initialText ?? string.Empty;
             IsVisible = true;
+            _rows = KeyboardLayouts.Reset();
             _root.Show();
             _root.RaiseToTop();
             Paint();
@@ -185,6 +199,29 @@ namespace Overscan
                 case KeyboardLayouts.CycleKey:
                     _rows = KeyboardLayouts.Next();
                     break;
+                case KeyboardLayouts.ShiftKey:
+                    _rows = KeyboardLayouts.ToggleShift();
+                    break;
+                case KeyboardLayouts.SymbolsKey:
+                    _rows = KeyboardLayouts.ToggleSymbols();
+                    break;
+                case KeyboardLayouts.StartPageKey:
+                    // Only meaningful for an address: "make this page's search box
+                    // the start page" is not a thing.
+                    if (Target != KeyboardTarget.Address)
+                    {
+                        break;
+                    }
+
+                    string wanted = _text;
+                    Close();
+                    Action<string> startHandler = StartPageSet;
+                    if (startHandler != null)
+                    {
+                        startHandler(wanted);
+                    }
+
+                    return;
                 case "close":
                     Close();
                     return;
@@ -200,32 +237,58 @@ namespace Overscan
                     return;
                 default:
                     _text += label;
+
+                    // Shift applies to the next character only, as on a phone.
+                    string[][] released = KeyboardLayouts.ReleaseShift();
+                    if (released != null)
+                    {
+                        _rows = released;
+                    }
+
                     break;
             }
 
             Paint();
         }
 
-        /// <summary>Action keys read as buttons; letters stay quiet.</summary>
+        /// <summary>
+        /// Action keys read as buttons; letters stay quiet. A modifier that is on
+        /// is filled green — the grid alone cannot say whether the letters showing
+        /// are the shifted ones.
+        /// </summary>
         private static Color FillFor(string key)
         {
             switch (key)
             {
                 case "GO": return NuiTheme.Positive;
                 case "close": return NuiTheme.Negative;
+                case KeyboardLayouts.ShiftKey:
+                    return KeyboardLayouts.Shift ? NuiTheme.Positive : NuiTheme.KeyFillAlt;
+                case KeyboardLayouts.SymbolsKey:
+                    return KeyboardLayouts.Symbols ? NuiTheme.Positive : NuiTheme.KeyFillAlt;
                 case "back":
                 case "clear":
                 case "space":
                 case KeyboardLayouts.CycleKey:
+                case KeyboardLayouts.StartPageKey:
                 case ".com": return NuiTheme.KeyFillAlt;
                 default: return NuiTheme.KeyFill;
             }
         }
 
-        /// <summary>The layout key wears the name of the layout it is showing.</summary>
+        /// <summary>
+        /// The layout key wears the name of the layout it is showing, and the
+        /// symbol key wears the page it switches *to*.
+        /// </summary>
         private static string LabelFor(string key)
         {
-            return key == KeyboardLayouts.CycleKey ? KeyboardLayouts.Name : key;
+            switch (key)
+            {
+                case KeyboardLayouts.CycleKey: return KeyboardLayouts.Name;
+                case KeyboardLayouts.SymbolsKey: return KeyboardLayouts.Symbols ? "abc" : "sym";
+                case KeyboardLayouts.ShiftKey: return KeyboardLayouts.Shift ? "SHIFT" : "shift";
+                default: return key;
+            }
         }
 
         private void Paint()
