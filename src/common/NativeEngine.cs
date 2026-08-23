@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace Overscan
@@ -37,6 +38,15 @@ namespace Overscan
         [DllImport("libdl.so.2")]
         private static extern IntPtr dlerror();
 
+        [DllImport("libdl.so.2")]
+        private static extern IntPtr dlsym(IntPtr handle, string symbol);
+
+        /// <summary>The engine's own entry point, called only to retry a failed init.</summary>
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void SetArgumentsDelegate(int argc, IntPtr argv);
+
+        private static IntPtr _handle;
+
         /// <summary>The path that loaded, or null.</summary>
         public static string LoadedFrom { get; private set; }
 
@@ -54,6 +64,7 @@ namespace Overscan
                     IntPtr handle = dlopen(candidate, RtldNow | RtldGlobal);
                     if (handle != IntPtr.Zero)
                     {
+                        _handle = handle;
                         LoadedFrom = candidate;
                         DiagLog.Add("engine preloaded from " + candidate);
                         return;
@@ -69,6 +80,75 @@ namespace Overscan
             }
 
             DiagLog.Add("engine not preloaded; relying on P/Invoke resolution");
+        }
+
+        /// <summary>
+        /// Hands chromium-efl the process's command line, which
+        /// <c>Chromium.Initialize()</c> does not do.
+        ///
+        /// Only called after <c>ewk_init()</c> has already reported failure. The
+        /// engine's browser-process start-up reads argv, and for a .NET app argv[0]
+        /// is the shared <c>dotnet-launcher</c> rather than an app binary; the ewk
+        /// samples all call <c>ewk_set_arguments</c> first, so a set where init
+        /// refuses is worth one retry with the arguments supplied. TizenFX exposes
+        /// no binding for it, hence dlsym on the handle we already hold.
+        ///
+        /// Returns what happened, for the report. Never throws.
+        /// </summary>
+        public static string SetArguments()
+        {
+            if (_handle == IntPtr.Zero)
+            {
+                return "no engine handle to set arguments on";
+            }
+
+            IntPtr argv = IntPtr.Zero;
+            var strings = new List<IntPtr>();
+            try
+            {
+                IntPtr symbol = dlsym(_handle, "ewk_set_arguments");
+                if (symbol == IntPtr.Zero)
+                {
+                    return "ewk_set_arguments not exported";
+                }
+
+                // argv[0] is the only entry the engine actually reads, and passing
+                // our own arguments through risks handing chromium a switch it
+                // would act on, so the vector is deliberately just the executable.
+                strings.Add(Marshal.StringToHGlobalAnsi("Overscan"));
+                strings.Add(IntPtr.Zero);
+
+                argv = Marshal.AllocHGlobal(IntPtr.Size * strings.Count);
+                for (int i = 0; i < strings.Count; i++)
+                {
+                    Marshal.WriteIntPtr(argv, i * IntPtr.Size, strings[i]);
+                }
+
+                var call = (SetArgumentsDelegate)Marshal.GetDelegateForFunctionPointer(
+                    symbol, typeof(SetArgumentsDelegate));
+                call(1, argv);
+                return "ewk_set_arguments called";
+            }
+            catch (Exception ex)
+            {
+                return "ewk_set_arguments failed — " + ex.GetType().Name + ": " + ex.Message;
+            }
+            finally
+            {
+                // The engine copies what it needs during init; freeing after the
+                // retry would mean tracking the allocation across a call that can
+                // abort the process, and this runs at most once per launch.
+                if (argv == IntPtr.Zero)
+                {
+                    foreach (IntPtr text in strings)
+                    {
+                        if (text != IntPtr.Zero)
+                        {
+                            Marshal.FreeHGlobal(text);
+                        }
+                    }
+                }
+            }
         }
     }
 }

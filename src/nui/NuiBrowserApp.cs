@@ -58,6 +58,9 @@ namespace Overscan
         private DateTime _lastActivity = DateTime.UtcNow;
         private DateTime _flashUntil = DateTime.MinValue;
 
+        /// <summary>The page to open at launch, or null for the start screen.</summary>
+        private string _startupUrl;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -67,12 +70,18 @@ namespace Overscan
             _window.BackgroundColor = new Color(0.039f, 0.043f, 0.055f, 1f);
             DiagLog.Add("window " + _window.WindowSize.Width + "x" + _window.WindowSize.Height);
 
+            // Before the keyboard is built: it resolves its remembered layout the
+            // first time KeyboardLayouts is touched, so initialising the store
+            // afterwards silently threw the user's layout choice away.
+            Store.Init(DirectoryInfo.Data);
+
             BuildChrome();
             BuildOverlay();
             BuildHints();
 
             _keyboard = new NuiKeyboard(_window);
             _keyboard.Committed += OnKeyboardCommitted;
+            _keyboard.StartPageSet += OnStartPageSet;
             _window.KeyEvent += OnWindowKey;
 
             if (!TryStartEngine())
@@ -87,13 +96,23 @@ namespace Overscan
             _presets[0] = UserAgents.MatchingEngine(_engineUserAgentRaw);
             DiagLog.Add("engine UA: " + _engineUserAgent);
 
-            Store.Init(DirectoryInfo.Data);
             _viewportFix = Store.GetBool("viewportFix", false);
             _hintsWanted = Store.GetBool("hints", true);
+            _startupUrl = Store.Get("startupUrl", null);
             ShowHints(_hintsWanted);
 
             ApplyPreset(Math.Min(Store.GetInt("uaPreset", 0), _presets.Length - 1));
-            ShowHome();
+
+            // A start page, if one was set with the keyboard's `start` key (issue
+            // #15): otherwise the same address gets typed on a remote every launch.
+            if (string.IsNullOrEmpty(_startupUrl))
+            {
+                ShowHome();
+            }
+            else
+            {
+                Navigate(_startupUrl);
+            }
 
             var timer = new Timer(150);
             timer.Tick += (s, e) => OnTick();
@@ -514,15 +533,54 @@ namespace Overscan
         }
 
         /// <summary>
-        /// The page script marks text fields with a FIELD: prefix. A field cannot be
-        /// focused (that raises the IME), so opening the grid is how text gets in.
+        /// What the page script reported about the click. A FIELD: prefix means a
+        /// text field: it cannot be focused (that raises the IME), so opening the
+        /// grid is how text gets in. FRAME: means the click landed on a frame from
+        /// another origin, which no script can reach into.
         /// </summary>
         private void OnPageClicked(string result)
         {
-            if (result != null && result.StartsWith("FIELD:", StringComparison.Ordinal))
+            if (result == null)
+            {
+                return;
+            }
+
+            if (result.StartsWith("FIELD:", StringComparison.Ordinal))
             {
                 _keyboard.Open(KeyboardTarget.PageField, string.Empty);
             }
+            else if (result.StartsWith("FRAME:", StringComparison.Ordinal))
+            {
+                // A cross-origin frame — a captcha, an embedded sign-in. Nothing in
+                // the page script can reach inside it. The ewk build feeds a real
+                // Evas mouse event here (see NativeMouse); the NUI web view is a
+                // DALi actor with no canvas to feed, so on 9.0+ the honest thing is
+                // to say so rather than look broken.
+                DiagLog.Add("click landed on a cross-origin frame: " + result);
+                Flash("Can't click inside this frame");
+            }
+        }
+
+        /// <summary>
+        /// Remembers what was typed as the page to open at launch (issue #15). An
+        /// empty entry clears it and the start screen comes back.
+        /// </summary>
+        private void OnStartPageSet(string text)
+        {
+            if (string.IsNullOrEmpty((text ?? string.Empty).Trim()))
+            {
+                _startupUrl = null;
+                Store.Set("startupUrl", string.Empty);
+                DiagLog.Add("start page cleared");
+                Flash("Start page cleared");
+                return;
+            }
+
+            _startupUrl = Urls.Normalize(text);
+            Store.Set("startupUrl", _startupUrl);
+            DiagLog.Add("start page = " + _startupUrl);
+            Flash("Opens here from now on");
+            Navigate(_startupUrl);
         }
 
         private void OnKeyboardCommitted(string text, KeyboardTarget target)

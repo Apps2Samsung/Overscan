@@ -63,6 +63,20 @@ namespace Overscan
         private string _engineFailure;
 
         /// <summary>
+        /// False until OnCreate has finished. DiagServer answers on its own thread
+        /// and can therefore render a report *during* start-up; without this it
+        /// reported a view that does not exist yet as "FAILED TO START", which is
+        /// how issue #14 ended up with a failure screenshot and no reason on it.
+        /// </summary>
+        private volatile bool _started;
+
+        /// <summary>What the engine's own init reported, for the report.</summary>
+        private string _engineInit = "(not reached)";
+
+        /// <summary>The page to open at launch, or null for the start screen.</summary>
+        private string _startupUrl;
+
+        /// <summary>
         /// URL and title cached on the main thread. DiagServer answers on its own
         /// thread, and EFL/ewk objects are no more thread-safe than DALi, so the
         /// report must never touch the live web view.
@@ -85,9 +99,14 @@ namespace Overscan
             base.OnCreate();
 
             DiagServer.ReportProvider = DiagnosticsText;
-            DiagLog.Add("OnCreate: building UI");
+
+            // Before the UI: the keyboard resolves its remembered layout the first
+            // time KeyboardLayouts is touched, so a Store initialised after it was
+            // built silently threw the user's layout choice away.
+            Store.Init(DirectoryInfo.Data);
+            Breadcrumbs.Drop("OnCreate: building UI");
             BuildUi();
-            DiagLog.Add("OnCreate: UI built");
+            Breadcrumbs.Drop("OnCreate: UI built");
 
             // Bringing up chromium-efl is the one step we expect to be able to
             // fail: there are reports of an app-created Tizen.WebView crashing on
@@ -124,11 +143,11 @@ namespace Overscan
             _engineUserAgentRaw = SafeUserAgent();
             _engineUserAgent = _engineUserAgentRaw ?? "(unavailable)";
             _presets[0] = UserAgents.MatchingEngine(_engineUserAgentRaw);
-            DiagLog.Add("engine UA: " + _engineUserAgent);
+            Breadcrumbs.Drop("engine UA: " + _engineUserAgent);
 
-            Store.Init(DirectoryInfo.Data);
             _viewportFix = Store.GetBool("viewportFix", false);
             _hintsWanted = Store.GetBool("hints", true);
+            _startupUrl = Store.Get("startupUrl", null);
             ShowHints(_hintsWanted);
             if (Store.GetInt("cursorVisual", 0) == 1)
             {
@@ -136,7 +155,22 @@ namespace Overscan
             }
 
             ApplyPreset(Math.Min(Store.GetInt("uaPreset", 0), _presets.Length - 1));
-            ShowHome();
+
+            // A start page, if one was set with the keyboard's `start` key. Asked
+            // for in issue #15: a browser that always opens on its own start screen
+            // makes you type the same address every single time.
+            if (string.IsNullOrEmpty(_startupUrl))
+            {
+                ShowHome();
+            }
+            else
+            {
+                Breadcrumbs.Drop("opening start page " + _startupUrl);
+                Navigate(_startupUrl);
+            }
+
+            _started = true;
+            Breadcrumbs.Drop("OnCreate: complete");
         }
 
         protected override void OnTerminate()
@@ -159,10 +193,10 @@ namespace Overscan
                 // cannot resolve libchromium-ewk.so at all. Proven on the RU7020.
                 NativeEngine.Preload();
 
-                DiagLog.Add("Chromium.Initialize()");
-                int refCount = Chromium.Initialize();
-                DiagLog.Add("Chromium initialized, refcount=" +
-                            refCount.ToString(CultureInfo.InvariantCulture));
+                if (!InitializeChromium())
+                {
+                    return false;
+                }
 
                 // Full-window geometry, not a Box child: the page gets the whole
                 // panel and the chrome floats over it, so nothing is letterboxed.
@@ -176,20 +210,81 @@ namespace Overscan
                 // page's own autofocus then eats the remote). Keys stay with us
                 // until key 4 hands them over deliberately.
                 _web.SetFocus(false);
-                DiagLog.Add("WebView created");
+                Breadcrumbs.Drop("WebView created");
 
+                // Every step from here gets its own breadcrumb. Issues #13 and #14
+                // both produced a log that stopped dead at "WebView created" with
+                // five uninstrumented calls after it, so the reports could not say
+                // which one took the app down.
                 _cursor = new VirtualCursor(_window, _web, BridgeName);
+                Breadcrumbs.Drop("cursor built");
                 _keyboard = new ElmKeyboard(_window);
                 _keyboard.Committed += OnKeyboardCommitted;
+                _keyboard.StartPageSet += OnStartPageSet;
+                Breadcrumbs.Drop("keyboard built");
                 _web.KeyDown += OnKeyDown;
+                Breadcrumbs.Drop("key handler attached");
                 return true;
             }
             catch (Exception ex)
             {
                 _engineFailure = ex.GetType().Name + ": " + ex.Message;
-                DiagLog.Add("ENGINE FAILURE " + _engineFailure);
+                Breadcrumbs.Drop("ENGINE FAILURE " + _engineFailure);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Brings chromium-efl up, and insists that it actually came up.
+        ///
+        /// <c>ewk_init()</c> returns the engine's reference count, so a successful
+        /// first call returns 1; it returns **0** from every one of its own error
+        /// paths. That distinction is the whole of issues #13 and #14: on a Q80
+        /// (5.5) and on a 2018 set the call returned 0, the old code logged the
+        /// number and carried on, and the WebView built on a dead engine then wedged
+        /// start-up until the launcher killed the app ~15 seconds later — an app
+        /// that installs, launches and vanishes with nothing to read.
+        ///
+        /// So a zero is a failure. Before giving up it is worth one retry with the
+        /// argument vector supplied, which the ewk samples all set and TizenFX
+        /// never does; the engine leaves its count at zero after a failed init, so
+        /// calling again genuinely re-runs it rather than just incrementing.
+        /// </summary>
+        private bool InitializeChromium()
+        {
+            Breadcrumbs.Drop("Chromium.Initialize()");
+            int refCount = Chromium.Initialize();
+            _engineInit = "refcount=" + refCount.ToString(CultureInfo.InvariantCulture);
+            Breadcrumbs.Drop("Chromium initialized, " + _engineInit);
+
+            if (refCount > 0)
+            {
+                return true;
+            }
+
+            string argv = NativeEngine.SetArguments();
+            Breadcrumbs.Drop("engine init returned 0 — retrying (" + argv + ")");
+            refCount = Chromium.Initialize();
+            _engineInit = "refcount=0, then " + refCount.ToString(CultureInfo.InvariantCulture) +
+                          " after " + argv;
+            Breadcrumbs.Drop("Chromium re-initialized, refcount=" +
+                             refCount.ToString(CultureInfo.InvariantCulture));
+
+            if (refCount > 0)
+            {
+                return true;
+            }
+
+            _engineFailure =
+                "the TV's web engine refused to start (ewk_init returned 0).\n\n" +
+                "The engine library loaded" +
+                (NativeEngine.LoadedFrom == null ? " by name" : " from " + NativeEngine.LoadedFrom) +
+                ", so this is not the DRM permission wall — the package is signed\n" +
+                "correctly and the engine is present, but the firmware would not\n" +
+                "bring it up in an app process.\n\n" +
+                "Retry with the argument vector set: " + argv;
+            Breadcrumbs.Drop("ENGINE FAILURE ewk_init returned 0 twice");
+            return false;
         }
 
         private void ShowEngineFailure()
@@ -211,7 +306,11 @@ namespace Overscan
             message.Text =
                 Theme.Text("The web engine did not start", 44, Theme.Ink, true) +
                 Theme.Text("\n\n" + (_engineFailure ?? "(unknown)") + "\n\n", 26, Theme.InkMuted) +
-                Theme.Text("Press 3 for the full log, Back to exit.", 28, Theme.Accent);
+                Theme.Text("engine init: " + _engineInit + "\n" +
+                           "engine lib : " + (NativeEngine.LoadedFrom ?? "(not preloaded)") + "\n\n",
+                           24, Theme.InkMuted) +
+                Theme.Text("Press 3 for the full log, Back to exit.\n" +
+                           "The same report is on http://<this TV>:8081", 28, Theme.Accent);
             message.Show();
             message.RaiseTop();
             UpdateStatus();
@@ -491,6 +590,7 @@ namespace Overscan
 
         private void ConfigureWebView()
         {
+            Breadcrumbs.Drop("reading view settings");
             Settings settings = _web.GetSettings();
             if (settings != null)
             {
@@ -502,6 +602,7 @@ namespace Overscan
                 settings.LoadImageAutomatically = _imagesOn;
             }
 
+            Breadcrumbs.Drop("attaching script bridge");
             _web.AddJavaScriptMessageHandler(BridgeName, OnBridgeMessage);
 
             _web.LoadStarted += (s, e) =>
@@ -536,6 +637,7 @@ namespace Overscan
             };
             _web.TitleChanged += (s, e) => UpdateStatus();
 
+            Breadcrumbs.Drop("configuring cookies");
             Context context = _web.GetContext();
             CookieManager cookies = context == null ? null : context.GetCookieManager();
             if (cookies != null)
@@ -543,6 +645,8 @@ namespace Overscan
                 cookies.SetCookieAcceptPolicy(CookieAcceptPolicy.Always);
                 cookies.SetPersistentStorage(DirectoryInfo.Data, CookiePersistentStorage.SqlLite);
             }
+
+            Breadcrumbs.Drop("view configured");
         }
 
         private void OnBridgeMessage(JavaScriptMessage message)
@@ -581,6 +685,13 @@ namespace Overscan
                     if (_lastClick.StartsWith("FIELD:", StringComparison.Ordinal))
                     {
                         _keyboard.Open(KeyboardTarget.PageField, string.Empty);
+                    }
+                    else if (_lastClick.StartsWith("FRAME:", StringComparison.Ordinal))
+                    {
+                        // A cross-origin frame: script cannot reach inside it, so
+                        // the click has to be a real one. This is the captcha case
+                        // from issue #15.
+                        ClickThroughFrame();
                     }
 
                     break;
@@ -855,6 +966,54 @@ namespace Overscan
             }
         }
 
+        /// <summary>
+        /// Feeds a real mouse click at the cursor, for a frame the injected script
+        /// cannot see into. The cursor's position is a fraction of the viewport, and
+        /// the page is painted into the view, so the same fraction of the view's
+        /// geometry is the point on the canvas.
+        /// </summary>
+        private void ClickThroughFrame()
+        {
+            try
+            {
+                Rect area = _web.Geometry;
+                int x = area.X + (int)Math.Round(_cursor.FractionX * area.Width);
+                int y = area.Y + (int)Math.Round(_cursor.FractionY * area.Height);
+
+                if (!NativeMouse.Click(_web, x, y))
+                {
+                    Flash("This frame cannot be clicked");
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("frame click failed: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Remembers what was typed as the page to open at launch. Issue #15: the
+        /// browser opening on its own start screen every time means retyping the
+        /// same address on a remote control, which is nobody's idea of a good time.
+        /// </summary>
+        private void OnStartPageSet(string text)
+        {
+            if (string.IsNullOrEmpty((text ?? string.Empty).Trim()))
+            {
+                _startupUrl = null;
+                Store.Set("startupUrl", string.Empty);
+                DiagLog.Add("start page cleared");
+                Flash("Start page cleared");
+                return;
+            }
+
+            _startupUrl = Urls.Normalize(text);
+            Store.Set("startupUrl", _startupUrl);
+            DiagLog.Add("start page = " + _startupUrl);
+            Flash("Opens here from now on");
+            Navigate(_startupUrl);
+        }
+
         private void OpenAddressBar()
         {
             _keyboard.Open(KeyboardTarget.Address, _cachedUrl == "-" ? string.Empty : _cachedUrl);
@@ -882,7 +1041,7 @@ namespace Overscan
             _diagVisible = !_diagVisible;
             if (_diagVisible)
             {
-                _diag.Text = Theme.Text(DiagnosticsText(), 20, Theme.Ink);
+                _diag.Text = Theme.Text(DiagnosticsText(false), 20, Theme.Ink);
                 _diagBackdrop.Show();
                 _diag.Show();
                 _diagBackdrop.RaiseTop();
@@ -1044,32 +1203,73 @@ namespace Overscan
             return bracket < 0 ? label : label.Substring(0, bracket);
         }
 
+        /// <summary>
+        /// The report served on :8081 and drawn by key 3.
+        ///
+        /// Called from the DiagServer thread while the main thread may be anywhere
+        /// in start-up, so **every field it touches must be null-checked**: reading
+        /// _cursor.Visual mid-start-up is what made the report itself throw a
+        /// NullReferenceException in issue #13, losing the one piece of evidence
+        /// the user had. It also may only read cached strings, never the live view.
+        /// </summary>
         private string DiagnosticsText()
         {
+            return DiagnosticsText(true);
+        }
+
+        /// <summary>
+        /// <paramref name="full"/> is false for the on-screen overlay, which has a
+        /// fixed box to draw in and cannot show the previous run's whole trail.
+        /// </summary>
+        private string DiagnosticsText(bool full)
+        {
+            string trail = full
+                ? "\nprevious run (last line is where it died)\n" + Breadcrumbs.Previous +
+                  "\nthis run\n" + DiagLog.Dump()
+                : "\nlog\n" + DiagLog.Tail(10);
+
             if (_web == null)
             {
+                // "Still starting" and "failed" look identical from this thread
+                // unless we say which it is — issue #14's report said FAILED TO
+                // START with reason (unknown) while start-up was merely in flight.
+                bool failed = _engineFailure != null;
                 return "Overscan diagnostics\n" +
                        "\n" +
-                       "engine    : FAILED TO START\n" +
-                       "reason    : " + (_engineFailure ?? "(unknown)") + "\n" +
-                       "\n" +
-                       "log\n" + DiagLog.Dump();
+                       "engine    : " + (failed ? "FAILED TO START" : "still starting") + "\n" +
+                       "reason    : " + (_engineFailure ?? "(no failure recorded yet)") + "\n" +
+                       "engine init: " + _engineInit + "\n" +
+                       "engine lib : " + (NativeEngine.LoadedFrom ?? "(not preloaded)") + "\n" +
+                       "trail file : " + Breadcrumbs.Location + "\n" +
+                       trail;
             }
+
+            UserAgentPreset preset =
+                _presets != null && _presetIndex >= 0 && _presetIndex < _presets.Length
+                    ? _presets[_presetIndex]
+                    : null;
+            string forced = preset == null
+                ? "(not chosen yet)"
+                : preset.Value ?? "(engine default)";
 
             return "Overscan diagnostics\n" +
                    "\n" +
+                   "state     : " + (_started ? "running" : "still starting") + "\n" +
                    "engine UA : " + _engineUserAgent + "\n" +
-                   "forced UA : " + (_presets[_presetIndex].Value ?? "(engine default)") + "\n" +
+                   "engine init: " + _engineInit + "\n" +
+                   "forced UA : " + forced + "\n" +
                    "page sees : " + _lastProbe + "\n" +
                    "view geom : " + _cachedGeometry + "\n" +
                    "page metr : " + _lastMetrics + "\n" +
                    "vp fix    : " + (_viewportFix ? "ON" : "off") + "  (key 6)\n" +
                    "last click: " + _lastClick + "\n" +
-                   "cursor    : " + _cursor.Visual + ", keys -> " + (_keysToPage ? "page" : "cursor") + "\n" +
+                   "frame click: " + NativeMouse.LastResult + "\n" +
+                   "start page: " + (string.IsNullOrEmpty(_startupUrl) ? "(start screen)" : _startupUrl) + "\n" +
+                   "cursor    : " + (_cursor == null ? "(not built)" : _cursor.Visual.ToString()) +
+                   ", keys -> " + (_keysToPage ? "page" : "cursor") + "\n" +
                    "title     : " + _cachedTitle + "\n" +
                    "url       : " + _cachedUrl + "\n" +
-                   "\n" +
-                   "log\n" + DiagLog.Dump();
+                   trail;
         }
 
         /// <summary>

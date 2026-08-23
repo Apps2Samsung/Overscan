@@ -6,12 +6,22 @@ namespace Overscan
 {
     internal static class Program
     {
+        private const string PackageId = "org.apps2samsung.overscan";
+
         private static void Main(string[] args)
         {
             // First statement in the process: on a locked-down TV this socket is
             // the only way to find out anything at all (see DiagServer).
             DiagServer.Start();
-            DiagLog.Add("Main entered");
+
+            // Breadcrumbs before anything else that can die natively: a crash that
+            // takes the process down leaves no log and no socket, and the last line
+            // on disk is then the only thing that says where it happened. The
+            // browser used to leave this to OverscanProbe, which meant the two
+            // "installs, launches, disappears" reports (#13, #14) had nothing to
+            // read but a log that stopped mid-start-up.
+            Breadcrumbs.Init(PackageId);
+            Breadcrumbs.Drop("Main entered");
 
             try
             {
@@ -20,14 +30,14 @@ namespace Overscan
                 // 10, so on a newer platform this is a place that can fail.
                 Elementary.Initialize();
                 Elementary.ThemeOverlay();
-                DiagLog.Add("Elementary initialized");
+                Breadcrumbs.Drop("Elementary initialized");
 
                 new BrowserApp().Run(args);
-                DiagLog.Add("app loop returned");
+                Breadcrumbs.Drop("app loop returned");
             }
             catch (Exception ex)
             {
-                DiagLog.Add("FATAL in Main: " + ex.GetType().Name + ": " + ex.Message);
+                Breadcrumbs.Drop("FATAL in Main: " + ex.GetType().Name + ": " + ex.Message);
                 DiagLog.Add("stack: " + ex.StackTrace);
 
                 // Stay alive so the report can still be read over :8081. Without

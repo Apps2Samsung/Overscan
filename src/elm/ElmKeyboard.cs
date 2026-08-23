@@ -17,7 +17,10 @@ namespace Overscan
     /// </summary>
     internal sealed class ElmKeyboard
     {
-        private const int KeyWidth = 116;
+        // The action row is 14 keys wide now (shift, sym and start joined it), so
+        // a key can no longer be 116px: 14 of those plus the gaps overflow a 1080p
+        // panel. Everything else is laid out from these two numbers.
+        private const int KeyWidth = 104;
         private const int KeyHeight = 74;
         private const int Gap = 8;
         private const int EntryHeight = 96;
@@ -80,10 +83,16 @@ namespace Overscan
                 _edges[r] = new Rectangle[_rows[r].Length];
                 _labels[r] = new Label[_rows[r].Length];
 
+                // Rows are centred rather than left-aligned: the letter rows are
+                // 10 keys and the action row is 14, so aligning them all left
+                // would leave a ragged hole on the right of every letter row.
+                int rowWidth = (KeyWidth * _rows[r].Length) + (Gap * (_rows[r].Length - 1));
+                int rowLeft = left + ((width - rowWidth) / 2);
+
                 for (int c = 0; c < _rows[r].Length; c++)
                 {
                     var cell = new Rect(
-                        left + Gap + (c * (KeyWidth + Gap)),
+                        rowLeft + (c * (KeyWidth + Gap)),
                         top + EntryHeight + (r * (KeyHeight + Gap)),
                         KeyWidth,
                         KeyHeight);
@@ -113,11 +122,18 @@ namespace Overscan
         /// <summary>Raised with the finished text when GO is pressed.</summary>
         public event Action<string, KeyboardTarget> Committed;
 
+        /// <summary>
+        /// Raised when the `start` key is pressed: what was typed becomes the page
+        /// the browser opens at launch. An empty entry clears it again.
+        /// </summary>
+        public event Action<string> StartPageSet;
+
         public void Open(KeyboardTarget target, string initialText)
         {
             Target = target;
             _text = initialText ?? string.Empty;
             IsVisible = true;
+            _rows = KeyboardLayouts.Reset();
 
             _panelEdge.Show();
             _panelEdge.RaiseTop();
@@ -260,6 +276,29 @@ namespace Overscan
                 case KeyboardLayouts.CycleKey:
                     _rows = KeyboardLayouts.Next();
                     break;
+                case KeyboardLayouts.ShiftKey:
+                    _rows = KeyboardLayouts.ToggleShift();
+                    break;
+                case KeyboardLayouts.SymbolsKey:
+                    _rows = KeyboardLayouts.ToggleSymbols();
+                    break;
+                case KeyboardLayouts.StartPageKey:
+                    // Only meaningful for an address: "make this page's search box
+                    // the start page" is not a thing.
+                    if (Target != KeyboardTarget.Address)
+                    {
+                        break;
+                    }
+
+                    string wanted = _text;
+                    Close();
+                    Action<string> startHandler = StartPageSet;
+                    if (startHandler != null)
+                    {
+                        startHandler(wanted);
+                    }
+
+                    return;
                 case "close":
                     Close();
                     return;
@@ -275,6 +314,16 @@ namespace Overscan
                     return;
                 default:
                     _text += label;
+
+                    // Shift applies to the next character only, as on a phone: one
+                    // capital is what a name or a password rule usually needs, and
+                    // leaving it latched turns the rest of the word into shouting.
+                    string[][] released = KeyboardLayouts.ReleaseShift();
+                    if (released != null)
+                    {
+                        _rows = released;
+                    }
+
                     break;
             }
 
@@ -300,29 +349,53 @@ namespace Overscan
             }
         }
 
-        /// <summary>Action keys read as buttons; letters stay quiet.</summary>
+        /// <summary>
+        /// Action keys read as buttons; letters stay quiet. A modifier that is
+        /// currently on is filled green, because the grid alone cannot say whether
+        /// the letters showing are the shifted ones.
+        /// </summary>
         private static Color FillFor(string key)
         {
             switch (key)
             {
                 case "GO": return Theme.Positive;
                 case "close": return Theme.Negative;
+                case KeyboardLayouts.ShiftKey:
+                    return KeyboardLayouts.Shift ? Theme.Positive : Theme.KeyFillAlt;
+                case KeyboardLayouts.SymbolsKey:
+                    return KeyboardLayouts.Symbols ? Theme.Positive : Theme.KeyFillAlt;
                 case "back":
                 case "clear":
                 case "space":
                 case KeyboardLayouts.CycleKey:
+                case KeyboardLayouts.StartPageKey:
                 case ".com": return Theme.KeyFillAlt;
                 default: return Theme.KeyFill;
             }
         }
 
-        /// <summary>The layout key wears the name of the layout it is showing.</summary>
+        /// <summary>
+        /// The layout key wears the name of the layout it is showing, and the
+        /// symbol key wears the page it switches *to* — the phone idiom, so it is
+        /// never ambiguous which way it goes.
+        /// </summary>
         private static string Label(string key, bool selected)
         {
-            string text = key == KeyboardLayouts.CycleKey ? KeyboardLayouts.Name : key;
+            string text = KeyText(key);
             bool wide = text.Length > 1;
-            return Theme.Text(text, wide ? 22 : 30, selected ? Theme.Ink : Theme.InkMuted,
+            return Theme.Text(text, wide ? 21 : 28, selected ? Theme.Ink : Theme.InkMuted,
                               selected || wide, "center");
+        }
+
+        private static string KeyText(string key)
+        {
+            switch (key)
+            {
+                case KeyboardLayouts.CycleKey: return KeyboardLayouts.Name;
+                case KeyboardLayouts.SymbolsKey: return KeyboardLayouts.Symbols ? "abc" : "sym";
+                case KeyboardLayouts.ShiftKey: return KeyboardLayouts.Shift ? "SHIFT" : "shift";
+                default: return key;
+            }
         }
 
     }

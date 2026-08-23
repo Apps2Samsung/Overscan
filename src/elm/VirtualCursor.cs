@@ -56,6 +56,21 @@ namespace Overscan
 
         public CursorVisual Visual { get; private set; } = CursorVisual.Dom;
 
+        /// <summary>
+        /// Where the pointer is, as a fraction of the viewport. Needed by the
+        /// native click path, which has to turn it back into canvas pixels.
+        /// </summary>
+        public double FractionX
+        {
+            get { return _x; }
+        }
+
+        /// <summary>See <see cref="FractionX"/>.</summary>
+        public double FractionY
+        {
+            get { return _y; }
+        }
+
         public void ToggleVisual()
         {
             Visual = Visual == CursorVisual.Dom ? CursorVisual.Native : CursorVisual.Dom;

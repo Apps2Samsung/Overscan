@@ -19,7 +19,9 @@ engine in an app that behaves like a desktop browser:
 - **Favourites and history**, on a start screen built for a TV.
 - **You can type** with an on-screen keyboard driven by the D-pad, into the
   address bar *and* into search boxes on the page. QWERTY, AZERTY, QWERTZ or
-  alphabetical, whichever you're quickest on.
+  alphabetical, whichever you're quickest on, with capitals and a full symbol
+  page — an e-mail address and a password both fit.
+- **It can open on the page you want**, instead of its own start screen.
 
 Requested in [tizen-community-packages#24](https://github.com/Apps2Samsung/tizen-community-packages/issues/24).
 
@@ -82,9 +84,18 @@ browser simply won't start. Newer sets don't have this restriction.
 | **9** | Back to the start screen |
 | **Info** | Images on/off — the biggest speed-up on an old set |
 
-The last key on the keyboard's bottom row switches its layout — **QWERTY**
-(the default), then AZERTY, QWERTZ and the alphabetical grid. It shows the layout
-you're on, and the choice is remembered.
+### The on-screen keyboard
+
+The bottom row is where everything that isn't a letter lives:
+
+| Key | What it does |
+| --- | --- |
+| **@** | Always one press away — you need it for every sign-in |
+| **shift** | Capitals. Releases itself after one letter, like a phone |
+| **sym** | A whole page of punctuation — brackets, quotes, maths, currency — press it again (it now reads `abc`) to go back |
+| **start** | Makes what you typed the page Overscan opens on. Press it with nothing typed to go back to the start screen |
+| **layout** | **QWERTY** (the default), then AZERTY, QWERTZ and the alphabetical grid. It shows the layout you're on, and the choice is remembered |
+
 
 ## Does it load pages faster?
 
@@ -113,6 +124,11 @@ What does help on an older set:
   and paints them at another. Key `6` toggles a correction; this is
   [an open bug](https://github.com/Apps2Samsung/Overscan/issues).
 - **No downloads or file uploads** yet.
+- **Captchas and other embedded frames** are clicked through a different path
+  than the rest of the page — a real mouse event fed to the TV's canvas, because
+  nothing an app injects into a page can reach inside a frame served from another
+  site. On the 9.0+ build there is no canvas to feed, so those frames stay
+  unclickable there.
 - The TV's own on-screen keyboard can still flash up briefly on sites that focus
   their search box as soon as they load.
 
@@ -133,7 +149,8 @@ Overscan is a .NET app that hosts the TV's own web engine and adds the things a 
 browser needs: a pointer driven from the remote, an on-screen keyboard, and a
 user-agent override. The pointer and typing are implemented as JavaScript injected
 into each page, because the TV's engine gives an app no way to synthesise mouse
-input.
+input — except through EFL's own canvas, which is how clicks reach inside an
+embedded frame.
 
 Because the web-view API changed twice across TV generations, there are three
 builds from one shared source tree rather than one universal package.
