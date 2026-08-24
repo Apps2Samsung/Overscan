@@ -282,6 +282,13 @@ published list of Samsung TV partner privileges to guess from.
 readable source tree, and a privilege the certificate does not cover makes the
 install fail outright, which would break the sets that currently work.
 
+That absence is checked, not assumed. In a stock Tizen 5.0 armv7 rootfs the engine
+is a single 35 MB `/usr/lib/libchromium-ewk.so` with no `libchromium-impl.so`
+beside it, nothing named `*privileged-service*` anywhere in the tree, and no
+`libmarlin` either. Both the implementation split and that dependency are Samsung
+retail-firmware additions, which is also why 5.0 sets clear a wall that 5.5 sets do
+not.
+
 `dlopen` says the same word for three unrelated faults, and only one of them is a
 privilege:
 
