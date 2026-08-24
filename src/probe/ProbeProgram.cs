@@ -141,10 +141,26 @@ namespace Overscan
             Step("4b dlopen the engine directly", PreloadEngine);
             Step("4c open the blocking dependency", ProbeDependency);
 
+            // ewk_init can only return 0 from one of nine EFL library inits, so
+            // walking them ourselves in the same order names the culprit outright
+            // instead of leaving a bare "refcount=0" to interpret (issue #17).
+            Step("4d EFL subsystem ladder", () =>
+            {
+                EflSubsystems.Check();
+                foreach (string line in EflSubsystems.Detail)
+                {
+                    Breadcrumbs.Drop("             " + line);
+                }
+
+                Breadcrumbs.Drop("             verdict: " + EflSubsystems.Summary);
+            });
+
             Step("4 Chromium.Initialize", () =>
             {
-                int refCount = Chromium.Initialize();
+                int refCount = 0;
+                string output = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
                 Breadcrumbs.Drop("             chromium refcount=" + refCount);
+                Breadcrumbs.Drop("             engine said: " + output);
             });
 
             Step("5 new WebView(window)", () =>
@@ -333,6 +349,8 @@ namespace Overscan
                    "verdict    : " + (_failure ?? (_stopped ? "stopped" : "no managed failure so far")) + "\n" +
                    "engine libs: " + (_found.Count == 0 ? "none found on disk" : string.Join(", ", _found)) + "\n" +
                    "preloaded  : " + (_preloaded ?? "(none)") + "\n" +
+                   "efl subsys : " + EflSubsystems.Summary + "\n" +
+                   "\n=== EFL LADDER (ewk_init's own order) ===\n" + EflSubsystems.Dump() +
                    "\n=== PREVIOUS RUN (the last line is where it died) ===\n" +
                    Breadcrumbs.Previous +
                    "\n=== THIS RUN ===\n" + DiagLog.Dump();

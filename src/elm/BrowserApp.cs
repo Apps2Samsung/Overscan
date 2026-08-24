@@ -73,6 +73,13 @@ namespace Overscan
         /// <summary>What the engine's own init reported, for the report.</summary>
         private string _engineInit = "(not reached)";
 
+        /// <summary>
+        /// Whatever chromium-efl wrote to stderr while initialising. On a set where
+        /// ewk_init refuses this holds the engine's own one-line reason, which is
+        /// otherwise only visible through a dlog a retail TV will not give up.
+        /// </summary>
+        private string _engineStdErr = "(not captured)";
+
         /// <summary>The page to open at launch, or null for the start screen.</summary>
         private string _startupUrl;
 
@@ -249,11 +256,26 @@ namespace Overscan
         /// argument vector supplied, which the ewk samples all set and TizenFX
         /// never does; the engine leaves its count at zero after a failed init, so
         /// calling again genuinely re-runs it rather than just incrementing.
+        ///
+        /// The retry alone was not enough — issue #17 got two zeroes and no reason.
+        /// So the init is now bracketed by the two things that can name the cause:
+        /// <see cref="EflSubsystems"/> walks the same nine library inits ewk_init
+        /// does first (they are the only places it can return 0), and
+        /// <see cref="NativeStdErr"/> catches the EINA_LOG line the engine writes
+        /// on the way out.
         /// </summary>
         private bool InitializeChromium()
         {
+            EflSubsystems.Check();
+            Breadcrumbs.Drop("EFL subsystems: " + EflSubsystems.Summary);
+            foreach (string line in EflSubsystems.Detail)
+            {
+                Breadcrumbs.Drop("  " + line);
+            }
+
             Breadcrumbs.Drop("Chromium.Initialize()");
-            int refCount = Chromium.Initialize();
+            int refCount = 0;
+            _engineStdErr = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
             _engineInit = "refcount=" + refCount.ToString(CultureInfo.InvariantCulture);
             Breadcrumbs.Drop("Chromium initialized, " + _engineInit);
 
@@ -262,9 +284,11 @@ namespace Overscan
                 return true;
             }
 
+            Breadcrumbs.Drop("engine said: " + _engineStdErr);
+
             string argv = NativeEngine.SetArguments();
             Breadcrumbs.Drop("engine init returned 0 — retrying (" + argv + ")");
-            refCount = Chromium.Initialize();
+            string retryStdErr = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
             _engineInit = "refcount=0, then " + refCount.ToString(CultureInfo.InvariantCulture) +
                           " after " + argv;
             Breadcrumbs.Drop("Chromium re-initialized, refcount=" +
@@ -275,6 +299,11 @@ namespace Overscan
                 return true;
             }
 
+            // Both attempts' output, because the second is the one made with the
+            // argument vector in place and they need not say the same thing.
+            _engineStdErr = _engineStdErr + "\n-- retry --\n" + retryStdErr;
+            Breadcrumbs.Drop("engine said on retry: " + retryStdErr);
+
             _engineFailure =
                 "the TV's web engine refused to start (ewk_init returned 0).\n\n" +
                 "The engine library loaded" +
@@ -282,6 +311,7 @@ namespace Overscan
                 ", so this is not the DRM permission wall — the package is signed\n" +
                 "correctly and the engine is present, but the firmware would not\n" +
                 "bring it up in an app process.\n\n" +
+                "EFL subsystems: " + EflSubsystems.Summary + "\n" +
                 "Retry with the argument vector set: " + argv;
             Breadcrumbs.Drop("ENGINE FAILURE ewk_init returned 0 twice");
             return false;
@@ -307,10 +337,16 @@ namespace Overscan
                 Theme.Text("The web engine did not start", 44, Theme.Ink, true) +
                 Theme.Text("\n\n" + (_engineFailure ?? "(unknown)") + "\n\n", 26, Theme.InkMuted) +
                 Theme.Text("engine init: " + _engineInit + "\n" +
-                           "engine lib : " + (NativeEngine.LoadedFrom ?? "(not preloaded)") + "\n\n",
+                           "engine lib : " + (NativeEngine.LoadedFrom ?? "(not preloaded)") + "\n" +
+                           "efl subsys : " + EflSubsystems.Summary + "\n" +
+                           "engine said: " + Brief(_engineStdErr, 240) + "\n\n",
                            24, Theme.InkMuted) +
+                // Plain http:// spelled out: a phone browser upgrades a bare
+                // host:port to https, the socket answers in cleartext, and the
+                // reporter sees ERR_SSL_PROTOCOL_ERROR instead of the report.
                 Theme.Text("Press 3 for the full log, Back to exit.\n" +
-                           "The same report is on http://<this TV>:8081", 28, Theme.Accent);
+                           "The same report is on http://<this TV>:8081 (http, not https)",
+                           28, Theme.Accent);
             message.Show();
             message.RaiseTop();
             UpdateStatus();
@@ -1240,7 +1276,11 @@ namespace Overscan
                        "reason    : " + (_engineFailure ?? "(no failure recorded yet)") + "\n" +
                        "engine init: " + _engineInit + "\n" +
                        "engine lib : " + (NativeEngine.LoadedFrom ?? "(not preloaded)") + "\n" +
+                       "efl subsys : " + EflSubsystems.Summary + "\n" +
                        "trail file : " + Breadcrumbs.Location + "\n" +
+                       (full ? "\nefl ladder (ewk_init's own order)\n" + EflSubsystems.Dump() +
+                               "\nengine stdout/stderr\n" + _engineStdErr + "\n"
+                             : "engine said: " + Brief(_engineStdErr, 160) + "\n") +
                        trail;
             }
 
@@ -1270,6 +1310,22 @@ namespace Overscan
                    "title     : " + _cachedTitle + "\n" +
                    "url       : " + _cachedUrl + "\n" +
                    trail;
+        }
+
+        /// <summary>
+        /// The engine's stderr cut down to what a fixed-size label can hold. The
+        /// whole of it is on :8081; the screen only needs the line that names the
+        /// fault, and EINA_LOG writes that first.
+        /// </summary>
+        private static string Brief(string text, int limit)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return "(none)";
+            }
+
+            string flat = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            return flat.Length <= limit ? flat : flat.Substring(0, limit) + "…";
         }
 
         /// <summary>

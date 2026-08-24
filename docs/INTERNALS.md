@@ -161,6 +161,57 @@ it instead of just incrementing.
 `libmarlin.so.0` resolved — the partner certificate did its job. The engine is
 present, permitted, and still refuses to start in an app process on that firmware.
 
+### There are exactly nine things it can be
+
+The retry was not enough — issue #17 (Q80T, 5.5) came back with two zeroes and no
+reason. But `ewk_init` is short, and reading it
+([`ewk_main.cc`](https://git.tizen.org/cgit/platform/framework/web/chromium-efl/plain/tizen_src/ewk/efl_integration/public/ewk_main.cc?h=tizen))
+bounds the problem completely. Every `return 0` is a `goto` out of one of nine
+EFL library inits, in this order:
+
+```
+eina_init  →  eina_log_domain_register("ewebview-blink")  →  evas_init  →
+ecore_init  →  ecore_evas_init  →  ecore_imf_init  →
+ecore_wl2_init (or ecore_wl_init / ecore_x_init)  →  edje_init  →  eldbus_init
+```
+
+Nothing chromium-specific runs before the return: `_ewk_init_web_engine()` is an
+empty function. So "ewk_init returned 0" *always* means one of those nine said no,
+and two additions turn it into a name:
+
+- **`EflSubsystems`** walks the same nine, in the same order, through
+  `dlopen`/`dlsym`, just before `Chromium.Initialize()`. This is safe and cannot
+  mask the fault: EFL inits are reference-counted, so one that is already up (and
+  `elm_init` brought most of them up long ago) returns its incremented count, while
+  one whose underlying init genuinely fails returns 0 for us for the same reason it
+  is about to return 0 for the engine. The matching shutdowns are deliberately not
+  called — an extra reference is inert, and a shutdown ladder is one more thing
+  that could kill the process before the report is readable.
+- **`NativeStdErr`** points fds 1 and 2 at a file for the duration of the call and
+  reads it back. Each of those nine failures logs its reason first —
+  `ERR("could not init ecore_imf.")` and friends — through EINA_LOG, which writes
+  to stderr, which on a TV goes to a dlog nobody can read. A file rather than a
+  pipe: a pipe's 64 KiB buffer would deadlock the process if a *successful*
+  chromium start-up ever out-logged it, and a file cannot block.
+
+Both land in the failure screen and in `:8081`, so the next report on an affected
+set says which library refused instead of leaving a bare `refcount=0` to interpret.
+
+### `ELM_ACCEL` has to be set before the window exists
+
+`libchromium-ewk.so` has a library constructor whose entire body is
+`setenv("ELM_ACCEL", "hw", 1)`, with the engine's own comment saying it must
+happen *"before creating elm_window"* because the port has no software rendering
+path. `NativeEngine.Preload()` — the `dlopen` that runs that constructor — used to
+sit inside `TryStartEngine()`, i.e. after `BuildUi()` had already created the
+window. It now runs as the first native call in `Main`, before
+`Elementary.Initialize()`. `Preload` is idempotent, so the call in `TryStartEngine`
+still stands for the paths that reach it first.
+
+ElmSharp's own `Window.CreateHandle` calls `elm_config_accel_preference_set("3d")`
+before `elm_win_add`, which is why this probably was not the cause on its own —
+but the ordering the engine asks for costs nothing to honour.
+
 ## Two silent failures that look identical
 
 Both present as "the icon does nothing" — no window, no error, no trace:
@@ -190,6 +241,14 @@ observability is built into the app:
   `Main` sleeps forever so the report stays readable.
   *The report may only read cached strings* — touching a live DALi or EFL object
   from the server thread hangs the request.
+
+  **Tell reporters to type `http://` explicitly.** The server answers in cleartext
+  and has no TLS at all, so a browser that upgrades a bare `<tv-ip>:8081` to
+  `https://` — iOS Safari and Chrome do this by default — gets a plaintext reply to
+  a TLS handshake and shows `ERR_SSL_PROTOCOL_ERROR`. That looks like a TV fault
+  and is not one; it is also a different failure from `ERR_CONNECTION_FAILED`,
+  which really does mean nothing is listening yet. The failure screen now spells
+  out "http, not https" for this reason.
 - **`Breadcrumbs`** — append-only file, one open/append/close per line, so a native
   crash that kills the process before the socket binds still identifies itself: the
   next launch reports where the last one died. The **browser** drops these too now,

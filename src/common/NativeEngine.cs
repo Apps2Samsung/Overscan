@@ -53,9 +53,22 @@ namespace Overscan
         /// <summary>
         /// Best-effort: a failure here is not fatal, because on some platforms the
         /// ordinary P/Invoke resolution works on its own.
+        ///
+        /// Call this **before the first elm window exists**. libchromium-ewk.so has
+        /// a library constructor, <c>_ewk_force_acceleration()</c>, whose whole job
+        /// is <c>setenv("ELM_ACCEL", "hw", 1)</c>, and its comment in the engine
+        /// source is explicit that it has to happen "before creating elm_window"
+        /// because the port has no software path. Loading the engine only once the
+        /// UI was already built put that constructor on the wrong side of the
+        /// window — see <c>Program.Main</c>, which is where the call now lives.
         /// </summary>
         public static void Preload()
         {
+            if (_handle != IntPtr.Zero)
+            {
+                return;
+            }
+
             foreach (string candidate in Candidates)
             {
                 try
