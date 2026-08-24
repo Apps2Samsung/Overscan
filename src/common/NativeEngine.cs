@@ -69,6 +69,8 @@ namespace Overscan
                 return;
             }
 
+            string blocked = null;
+
             foreach (string candidate in Candidates)
             {
                 try
@@ -85,6 +87,7 @@ namespace Overscan
 
                     string error = Marshal.PtrToStringAnsi(dlerror()) ?? "(no dlerror)";
                     DiagLog.Add("preload failed " + candidate + ": " + error);
+                    blocked = blocked ?? SmackWall.BlockedSoname(error);
                 }
                 catch (Exception ex)
                 {
@@ -93,6 +96,17 @@ namespace Overscan
             }
 
             DiagLog.Add("engine not preloaded; relying on P/Invoke resolution");
+
+            // The Marlin wall, if this is still it: say which of the three refusals
+            // it is rather than leaving "Operation not permitted" to be read as a
+            // privilege every time. See SmackWall.
+            if (blocked != null)
+            {
+                foreach (string line in SmackWall.Investigate(blocked))
+                {
+                    DiagLog.Add("  " + line);
+                }
+            }
         }
 
         /// <summary>
