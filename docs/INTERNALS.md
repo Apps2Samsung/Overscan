@@ -197,6 +197,74 @@ and two additions turn it into a name:
 Both land in the failure screen and in `:8081`, so the next report on an affected
 set says which library refused instead of leaving a bare `refcount=0` to interpret.
 
+### It was none of the nine — it is the implementation library
+
+That build came back from the Q80 with all nine up:
+
+```
+efl subsys : all up (9 checked)
+  eina_init               : ok (refcount 15)
+  eina_log_domain_register: ok (domain 66)
+  evas_init               : ok (refcount 3)
+  ecore_init              : ok (refcount 18)
+  ecore_evas_init         : ok (refcount 2)
+  ecore_imf_init          : ok (refcount 2)
+  ecore_wl2_init          : ok (refcount 3)
+  edje_init               : ok (refcount 2)
+  eldbus_init             : ok (refcount 1)
+```
+
+…and `ewk_init` still returned 0, twice. So the ladder above is not the whole of
+it. The captured output is what named the real step:
+
+```
+engine said: -rw-r--r-- 1 root root 48767918 2026-03-31 16:47
+             /usr/share/chromium-efl/lib/libchromium-impl.so
+```
+
+**Nothing in this repository prints that line.** It is a busybox `ls -l`, and it
+arrived in our capture file because `NativeStdErr` redirects fds 1 and 2 and a
+`system()` child inherits them. The engine ran it.
+
+`libchromium-ewk.so` is a shim; the 48 MB `libchromium-impl.so` beside it is
+chromium. The shim `dlopen`s the implementation, and on the failure path it lists
+the file — to record that the library it could not load is nevertheless present.
+The `dlerror()` next to that `ls` goes through chromium's logging, i.e. dlog, i.e.
+nowhere we can read it. That single stray line is the whole diagnosis: the nine EFL
+inits pass, the implementation `dlopen` fails, `ewk_init` returns 0.
+
+**`ChromiumImpl`** does that `dlopen` itself, from the same point in start-up,
+where `dlerror()` is a string we can put on a screen. It is also the most plausible
+fix available from the app side:
+
+- The likeliest reason a library that exists will not load is a **dependency the
+  loader cannot find**. The built-in browser is launched with the engine's own
+  directory on `LD_LIBRARY_PATH`; a `dotnet-launcher` process is not. Setting the
+  variable now would achieve nothing — the loader reads it once, at process start —
+  but an absolute-path `dlopen` ignores the search path entirely.
+- So `Preload()` reads the missing soname back out of `dlerror()`
+  (`libfoo.so.1: cannot open shared object file: No such file or directory`), finds
+  that file under `/usr/share/chromium-efl/lib` and the usual library directories,
+  opens it `RTLD_GLOBAL`, and retries — one dependency per round. Once a library is
+  in the process under its soname, the shim's own `dlopen` a moment later matches it
+  and succeeds.
+- A message ending in **`Operation not permitted`** instead of `No such file` is not
+  chased: that is the SMACK wall from issue #13, and no amount of searching moves
+  it. It is reported as the answer.
+
+`Explain()` gathers the rest — `LD_LIBRARY_PATH`, whether the file is readable by
+this process at all (`ls` needs only the directory; `dlopen` needs the file, so
+"lists but will not open" is a SMACK label we may not touch), a directory listing,
+and an `RTLD_LAZY` retry. That last one runs **only after both `ewk_init` attempts
+have already failed**: a library that loads lazily and is missing a symbol faults
+when the symbol is first called, so leaving one in the process ahead of a *working*
+init would trade a clean refusal for a crash. After the failure it costs nothing,
+and it separates "unresolved symbol" (fails `RTLD_NOW`, loads `RTLD_LAZY`) from
+"the file will not open".
+
+If the implementation loads for us and `ewk_init` still returns 0, that eliminates
+the theory outright — which is worth as much as confirming it.
+
 ### `ELM_ACCEL` has to be set before the window exists
 
 `libchromium-ewk.so` has a library constructor whose entire body is

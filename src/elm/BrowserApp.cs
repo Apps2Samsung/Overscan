@@ -258,17 +258,30 @@ namespace Overscan
         /// calling again genuinely re-runs it rather than just incrementing.
         ///
         /// The retry alone was not enough — issue #17 got two zeroes and no reason.
-        /// So the init is now bracketed by the two things that can name the cause:
-        /// <see cref="EflSubsystems"/> walks the same nine library inits ewk_init
-        /// does first (they are the only places it can return 0), and
-        /// <see cref="NativeStdErr"/> catches the EINA_LOG line the engine writes
-        /// on the way out.
+        /// So the init is bracketed by the things that can name the cause.
+        /// <see cref="EflSubsystems"/> walks the nine EFL library inits ewk_init
+        /// runs first, and <see cref="NativeStdErr"/> catches what the engine writes
+        /// on the way out. Between them they settled #17: all nine came up, and the
+        /// captured output was a bare <c>ls -l</c> of
+        /// <c>libchromium-impl.so</c> — the shim's own evidence that its dlopen of
+        /// the implementation is what failed. So <see cref="ChromiumImpl"/> now does
+        /// that dlopen first, where dlerror() is readable and a missing dependency
+        /// can be supplied by absolute path before the engine looks for it.
         /// </summary>
         private bool InitializeChromium()
         {
             EflSubsystems.Check();
             Breadcrumbs.Drop("EFL subsystems: " + EflSubsystems.Summary);
             foreach (string line in EflSubsystems.Detail)
+            {
+                Breadcrumbs.Drop("  " + line);
+            }
+
+            // Before ewk_init, because ewk_init's own dlopen of this library is
+            // where issue #17 stops, and by then the reason is only in dlog.
+            ChromiumImpl.Preload();
+            Breadcrumbs.Drop("engine implementation: " + ChromiumImpl.Summary);
+            foreach (string line in ChromiumImpl.Detail)
             {
                 Breadcrumbs.Drop("  " + line);
             }
@@ -304,6 +317,16 @@ namespace Overscan
             _engineStdErr = _engineStdErr + "\n-- retry --\n" + retryStdErr;
             Breadcrumbs.Drop("engine said on retry: " + retryStdErr);
 
+            // Only now: one of these probes would leave a lazily-bound library in
+            // the process, which is harmless after a failure and a liability before
+            // one. See ChromiumImpl.Explain.
+            int before = ChromiumImpl.Detail.Count;
+            ChromiumImpl.Explain();
+            for (int i = before; i < ChromiumImpl.Detail.Count; i++)
+            {
+                Breadcrumbs.Drop("  " + ChromiumImpl.Detail[i]);
+            }
+
             _engineFailure =
                 "the TV's web engine refused to start (ewk_init returned 0).\n\n" +
                 "The engine library loaded" +
@@ -312,6 +335,7 @@ namespace Overscan
                 "correctly and the engine is present, but the firmware would not\n" +
                 "bring it up in an app process.\n\n" +
                 "EFL subsystems: " + EflSubsystems.Summary + "\n" +
+                "Engine implementation: " + ChromiumImpl.Summary + "\n" +
                 "Retry with the argument vector set: " + argv;
             Breadcrumbs.Drop("ENGINE FAILURE ewk_init returned 0 twice");
             return false;
@@ -339,6 +363,7 @@ namespace Overscan
                 Theme.Text("engine init: " + _engineInit + "\n" +
                            "engine lib : " + (NativeEngine.LoadedFrom ?? "(not preloaded)") + "\n" +
                            "efl subsys : " + EflSubsystems.Summary + "\n" +
+                           "engine impl: " + Brief(ChromiumImpl.Summary, 160) + "\n" +
                            "engine said: " + Brief(_engineStdErr, 240) + "\n\n",
                            24, Theme.InkMuted) +
                 // Plain http:// spelled out: a phone browser upgrades a bare
@@ -1277,8 +1302,10 @@ namespace Overscan
                        "engine init: " + _engineInit + "\n" +
                        "engine lib : " + (NativeEngine.LoadedFrom ?? "(not preloaded)") + "\n" +
                        "efl subsys : " + EflSubsystems.Summary + "\n" +
+                       "engine impl: " + ChromiumImpl.Summary + "\n" +
                        "trail file : " + Breadcrumbs.Location + "\n" +
                        (full ? "\nefl ladder (ewk_init's own order)\n" + EflSubsystems.Dump() +
+                               "\nengine implementation (libchromium-impl.so)\n" + ChromiumImpl.Dump() +
                                "\nengine stdout/stderr\n" + _engineStdErr + "\n"
                              : "engine said: " + Brief(_engineStdErr, 160) + "\n") +
                        trail;
