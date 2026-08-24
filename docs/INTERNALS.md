@@ -395,8 +395,49 @@ The script reports `FRAME:<tag>` back over the bridge and the native side follow
 with the real click, rather than the native path being used for everything. That is
 deliberate: **a real click on a text field focuses it, and a focused field raises
 the TV's IME**, which then swallows the remote — the exact failure the in-page
-pointer exists to avoid. NUI has no canvas to feed, so on 9.0+ those frames stay
-unclickable and the app says so.
+pointer exists to avoid.
+
+#### The same thing on NUI, one layer further down
+
+NUI has no Evas canvas to feed — the web view is a DALi actor drawn from a texture —
+and at API 9 the managed surface offers nothing in its place: `WebView` has no
+`SendTouchEvent`, and `Touch` cannot be constructed with a position. So the 9.0+
+package used to answer a captcha with "Can't click inside this frame", which is
+issue #20 on a 2025 set.
+
+The path exists one layer down. DALi's own C# binder, `libdali2-csharp-binder.so`,
+exports both halves, because TizenFX calls them itself from its internal `Interop`
+layer — only the managed wrappers are marked internal:
+
+| Native export | Signature (from `Tizen.NUI.dll` metadata) |
+| --- | --- |
+| `CSharp_Dali_new_TouchPoint__SWIG_0` | `IntPtr(int deviceId, int state, float x, float y)` |
+| `CSharp_Dali_Window_FeedTouch` | `void(HandleRef window, HandleRef point, int timeStamp)` |
+| `CSharp_Dali_delete_TouchPoint` | `void(HandleRef point)` |
+
+`NuiNativeTouch` P/Invokes them directly, the same way `NativeEngine` and
+`NativeMouse` P/Invoke the EFL sonames. What the platform does next is the whole
+point: `DevelWindow::FeedTouchPoint` injects the point into DALi's core, which
+hit-tests it by screen position like any other touch, delivers it to the web view
+actor, and the toolkit's `WebView::OnTouchEvent` hands it to the engine. Chromium
+routes it into whichever frame is under the point, and because it arrived as real
+input the event is trusted — the part a captcha checks.
+
+Two details that decide whether it lands:
+
+- **The window's native pointer** lives on `BaseHandle.SwigCPtr`, which is internal
+  at API 9 (so is `GetBaseHandleCPtrHandleRef`, its public-facing twin). It is read
+  by reflection rather than guessed at: the property is the same object TizenFX
+  passes to this very binder, so reading it is exactly as correct as the call it
+  feeds, and a rename surfaces as a named failure on the diagnostics screen instead
+  of a wrong pointer.
+- **The chrome must not be hit first.** DALi delivers a fed touch to the front-most
+  *sensitive* actor, and the hints card alone covers a corner big enough to hide a
+  captcha. Nothing in this app is ever touched deliberately — it is driven entirely
+  by the remote — so the bar, the progress strip, the overlay and the hints card all
+  have `Sensitive = false`.
+
+`frame click:` on the diagnostics screen says what the last attempt did.
 
 ### Why our own keyboard rather than the platform IME
 

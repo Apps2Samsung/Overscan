@@ -42,6 +42,21 @@ namespace Overscan
         /// </summary>
         public event Action<string> Clicked;
 
+        /// <summary>
+        /// Where the pointer is, as a fraction of the viewport. Needed by the
+        /// native touch path, which has to turn it back into window pixels.
+        /// </summary>
+        public double FractionX
+        {
+            get { return _x; }
+        }
+
+        /// <summary>See <see cref="FractionX"/>.</summary>
+        public double FractionY
+        {
+            get { return _y; }
+        }
+
         public void Reinstall()
         {
             // The ElmSharp build needs a bridge name for click feedback; NUI gets
