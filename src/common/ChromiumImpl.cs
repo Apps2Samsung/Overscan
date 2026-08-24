@@ -150,6 +150,21 @@ namespace Overscan
 
                 Summary = "REFUSED — " + Brief(error);
                 Lines.Add("dlopen failed: " + error);
+
+                // "Operation not permitted" names the library the loader would not
+                // open but says nothing about why, and the three reasons it can mean
+                // want three different fixes. Ask the set. See SmackWall.
+                string blocked = SmackWall.BlockedSoname(error);
+                if (blocked != null)
+                {
+                    Lines.Add("blocked by permission, not by a missing file — probing " + blocked);
+                    foreach (string line in SmackWall.Investigate(blocked))
+                    {
+                        Lines.Add(line);
+                    }
+
+                    Summary = "REFUSED — " + blocked + ": " + SmackWall.Summary;
+                }
             }
             catch (Exception ex)
             {
@@ -228,7 +243,8 @@ namespace Overscan
                 if (missing == null)
                 {
                     // "undefined symbol", "Operation not permitted", "failed to map
-                    // segment" — a wall, not a lookup we can help with.
+                    // segment" — a wall, not a lookup we can help with. Preload
+                    // takes the permission ones apart afterwards.
                     return false;
                 }
 
@@ -291,8 +307,9 @@ namespace Overscan
         /// The message names the library that is *needed*, never the one that needs
         /// it: "libfoo.so.1: cannot open shared object file: No such file or
         /// directory". Only the No-such-file form is chased — the same sentence
-        /// ending in "Operation not permitted" is the SMACK wall that stopped
-        /// libmarlin in issue #13, and no amount of searching moves it.
+        /// ending in "Operation not permitted" is a permission wall, and no amount
+        /// of searching moves it. <see cref="SmackWall.BlockedSoname"/> picks that
+        /// half up and establishes which permission.
         /// </summary>
         private static string MissingSoname(string error)
         {

@@ -265,6 +265,55 @@ and it separates "unresolved symbol" (fails `RTLD_NOW`, loads `RTLD_LAZY`) from
 If the implementation loads for us and `ewk_init` still returns 0, that eliminates
 the theory outright — which is worth as much as confirming it.
 
+### "Operation not permitted" is three different faults
+
+On the Q80 the implementation *was* found, and refused:
+
+```
+engine implementation: REFUSED — libprivileged-service-client.so:
+  cannot open shared object file: Operation not permitted
+```
+
+That set has already cleared the Marlin wall — `libchromium-ewk.so` preloads, which
+it cannot do without the DRM privileges in force — so reading this second EPERM as
+"another privilege is missing" is a guess, and an expensive one: there is no
+published list of Samsung TV partner privileges to guess from.
+`libprivileged-service-client.so` appears in no documentation, no package and no
+readable source tree, and a privilege the certificate does not cover makes the
+install fail outright, which would break the sets that currently work.
+
+That absence is checked, not assumed. In a stock Tizen 5.0 armv7 rootfs the engine
+is a single 35 MB `/usr/lib/libchromium-ewk.so` with no `libchromium-impl.so`
+beside it, nothing named `*privileged-service*` anywhere in the tree, and no
+`libmarlin` either. Both the implementation split and that dependency are Samsung
+retail-firmware additions, which is also why 5.0 sets clear a wall that 5.5 sets do
+not.
+
+`dlopen` says the same word for three unrelated faults, and only one of them is a
+privilege:
+
+| what actually failed | reads as | fixable by a manifest |
+| --- | --- | --- |
+| `open()` denied — a Smack label we may not touch | EPERM/EACCES on open | **yes** — this is the Marlin shape |
+| `mmap(PROT_EXEC)` denied — `noexec` mount or an exec-label rule | opens, will not map | no |
+| the loader looked somewhere else | opens and maps fine here | no — wrong path, not permission |
+
+`SmackWall` asks the set which one it is instead of theorising: it locates the
+soname, `open()`s it for the raw errno, `read()`s four bytes to confirm an ELF,
+`mmap()`s it `PROT_READ` and then `PROT_READ|PROT_EXEC` to separate reading from
+executing, reads `security.SMACK64`, `SMACK64EXEC`, `SMACK64MMAP` and
+`SMACK64TRANSMUTE` off it, prints our own label from `/proc/self/attr/current` and
+`CapEff` from `/proc/self/status`, and names the mount the file sits on with its
+options — where a `noexec` would be written down. It then repeats the label line
+for `libchromium-ewk.so`, `libchromium-impl.so` and `libmarlin.so.0`, so the report
+carries libraries this process *can* open beside the one it cannot.
+
+Both loaders feed it: `ChromiumImpl.Preload` on the implementation's dependencies
+and `NativeEngine.Preload` on the engine's own, via `SmackWall.BlockedSoname`,
+which is the permission-half counterpart of `ChromiumImpl.MissingSoname`'s
+No-such-file half. The verdict lands in the `engine impl:` header line and the
+lines land in the breadcrumb trail, so it survives the set being power-cycled.
+
 ### `ELM_ACCEL` has to be set before the window exists
 
 `libchromium-ewk.so` has a library constructor whose entire body is
