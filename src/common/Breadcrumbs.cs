@@ -31,6 +31,19 @@ namespace Overscan
         }
 
         /// <summary>
+        /// The directory the trail landed in, or null when none was writable.
+        /// <see cref="NativeStdErr"/> needs a scratch file and this is the one
+        /// place that has already worked out where the app may write.
+        ///
+        /// Not called "Directory": that name would shadow System.IO.Directory for
+        /// the whole class, and <see cref="Init"/> uses it.
+        /// </summary>
+        public static string TrailDirectory
+        {
+            get { return _path == null ? null : Path.GetDirectoryName(_path); }
+        }
+
+        /// <summary>
         /// Picks the first writable directory. Application.Current is null this
         /// early in Main, so the app's own data dir cannot be asked for by name and
         /// the known layouts are tried directly.

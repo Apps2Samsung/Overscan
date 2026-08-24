@@ -25,6 +25,15 @@ namespace Overscan
 
             try
             {
+                // Before Elementary, and therefore long before the window: the
+                // engine library's constructor sets ELM_ACCEL=hw, and chromium-efl
+                // requires that to be in place before elm_win is created because
+                // the port has no software rendering path at all. Loading it later
+                // — which is where this used to sit, inside TryStartEngine — meant
+                // the window was already up by the time the variable was set.
+                // Preload is idempotent, so TryStartEngine can still call it.
+                NativeEngine.Preload();
+
                 // Required before any ElmSharp widget is created (the Tizen.WebView
                 // sample in TizenFX does the same). ElmSharp is deprecated from API
                 // 10, so on a newer platform this is a place that can fail.
