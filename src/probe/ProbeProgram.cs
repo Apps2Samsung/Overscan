@@ -155,12 +155,39 @@ namespace Overscan
                 Breadcrumbs.Drop("             verdict: " + EflSubsystems.Summary);
             });
 
+            // All nine came up on the Q80 and ewk_init still returned 0, with the
+            // shim's own `ls -l` of libchromium-impl.so as the only output — so the
+            // implementation's dlopen is the step after the ladder, and this does it
+            // where dlerror() is readable.
+            Step("4e dlopen libchromium-impl.so", () =>
+            {
+                ChromiumImpl.Preload();
+                foreach (string line in ChromiumImpl.Detail)
+                {
+                    Breadcrumbs.Drop("             " + line);
+                }
+
+                Breadcrumbs.Drop("             verdict: " + ChromiumImpl.Summary);
+            });
+
             Step("4 Chromium.Initialize", () =>
             {
                 int refCount = 0;
                 string output = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
                 Breadcrumbs.Drop("             chromium refcount=" + refCount);
                 Breadcrumbs.Drop("             engine said: " + output);
+
+                if (refCount <= 0)
+                {
+                    // Only on failure: Explain leaves a lazily-bound library behind,
+                    // which is fine once there is nothing left to break.
+                    int before = ChromiumImpl.Detail.Count;
+                    ChromiumImpl.Explain();
+                    for (int i = before; i < ChromiumImpl.Detail.Count; i++)
+                    {
+                        Breadcrumbs.Drop("             " + ChromiumImpl.Detail[i]);
+                    }
+                }
             });
 
             Step("5 new WebView(window)", () =>
