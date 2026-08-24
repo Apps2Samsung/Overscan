@@ -135,6 +135,20 @@ namespace Overscan
                 _window.Add(_web);
                 DiagLog.Add("NUI WebView created");
 
+                // The chrome is drawn over the page but must never be *hit* by it:
+                // DALi delivers a fed touch to the front-most sensitive actor, and
+                // the hints card alone covers a corner big enough to hide a captcha.
+                // Nothing here is ever touched deliberately — the app is driven
+                // entirely by the remote — so none of it needs to be sensitive.
+                PassTouchesThrough(_bar);
+                PassTouchesThrough(_progress);
+                PassTouchesThrough(_overlay);
+                PassTouchesThrough(_hints);
+
+                // Insurance for the frame-click path: the toolkit gates part of its
+                // pointer forwarding on this, and the default is not worth guessing.
+                _web.MouseEventsEnabled = true;
+
                 _web.EnableJavaScript = true;
                 if (_web.Settings != null)
                 {
@@ -190,6 +204,26 @@ namespace Overscan
                 _engineFailure = ex.GetType().Name + ": " + ex.Message;
                 DiagLog.Add("ENGINE FAILURE " + _engineFailure);
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Takes a chrome element out of hit-testing without hiding it. Best-effort:
+        /// on a build where the property is missing the frame click simply has the
+        /// odds it had before.
+        /// </summary>
+        private static void PassTouchesThrough(View view)
+        {
+            try
+            {
+                if (view != null)
+                {
+                    view.Sensitive = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("could not clear Sensitive: " + ex.Message);
             }
         }
 
@@ -552,12 +586,37 @@ namespace Overscan
             else if (result.StartsWith("FRAME:", StringComparison.Ordinal))
             {
                 // A cross-origin frame — a captcha, an embedded sign-in. Nothing in
-                // the page script can reach inside it. The ewk build feeds a real
-                // Evas mouse event here (see NativeMouse); the NUI web view is a
-                // DALi actor with no canvas to feed, so on 9.0+ the honest thing is
-                // to say so rather than look broken.
+                // the page script can reach inside it, so the click has to be a real
+                // one. Issue #20 is this, on Instagram's reCAPTCHA.
                 DiagLog.Add("click landed on a cross-origin frame: " + result);
-                Flash("Can't click inside this frame");
+                ClickThroughFrame();
+            }
+        }
+
+        /// <summary>
+        /// Taps where the pointer is, through DALi rather than through the page.
+        ///
+        /// The pointer's position is a fraction of the viewport, and the web view
+        /// fills the window, so the window's own pixels are the conversion. See
+        /// <see cref="NuiNativeTouch"/> for why this is a real touch and not a
+        /// dispatched event.
+        /// </summary>
+        private void ClickThroughFrame()
+        {
+            try
+            {
+                Size2D screen = _window.WindowSize;
+                int x = (int)Math.Round(_cursor.FractionX * screen.Width);
+                int y = (int)Math.Round(_cursor.FractionY * screen.Height);
+
+                if (!NuiNativeTouch.Click(_window, x, y))
+                {
+                    Flash("This frame cannot be clicked");
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("frame click failed: " + ex.Message);
             }
         }
 
@@ -816,6 +875,7 @@ namespace Overscan
                   "view geom : " + _cachedGeometry + "\n" +
                   "page metr : " + _lastMetrics + "\n" +
                   "vp fix    : " + (_viewportFix ? "ON" : "off") + "  (key 6)\n" +
+                  "frame click: " + NuiNativeTouch.LastResult + "\n" +
                   "url       : " + _cachedUrl;
 
             return "Overscan diagnostics (NUI build)\n\n" +
