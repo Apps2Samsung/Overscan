@@ -1,0 +1,11 @@
+# Shell scripts keep LF on every checkout, Windows included.
+#
+# This repo is cloned on Windows with core.autocrlf=true, which rewrites text
+# files to CRLF in the working tree. That is fine for the C# sources, but build.sh
+# is run through WSL, and a CRLF shebang line makes the kernel look for an
+# interpreter literally named "bash\r":
+#
+#     /usr/bin/env: 'bash\r': No such file or directory
+#
+# The index already stores LF, so this only changes what lands on disk.
+*.sh text eol=lf
