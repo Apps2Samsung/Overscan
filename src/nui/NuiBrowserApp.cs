@@ -39,6 +39,23 @@ namespace Overscan
         private string _engineFailure;
 
         /// <summary>
+        /// How long after a fed tap the page is asked what it saw. Long enough for
+        /// DALi's next update, the engine's delivery and the page's own handlers —
+        /// three hops, none of them ours — and short enough to still feel like an
+        /// answer about the press you just made.
+        /// </summary>
+        private const int FrameWitnessDelay = 400;
+
+        /// <summary>
+        /// What the page reported after the last native tap: whether any real input
+        /// arrived at all, and whether a cross-origin frame took focus. The feed
+        /// itself cannot tell us either (issue #20), and these two facts are what
+        /// separate "the touch never reached the engine" from "it reached the page
+        /// and the frame ignored it".
+        /// </summary>
+        private volatile string _frameWitness = "(no frame clicked yet)";
+
+        /// <summary>
         /// Cached on the main thread: DiagServer answers on its own thread and DALi
         /// objects are not thread-safe, so the report may only read plain strings.
         /// </summary>
@@ -609,10 +626,25 @@ namespace Overscan
                 int x = (int)Math.Round(_cursor.FractionX * screen.Width);
                 int y = (int)Math.Round(_cursor.FractionY * screen.Height);
 
+                // Wiped before the feed so what comes back is only about this tap.
+                _cursor.ClearNativeWitness();
+
                 if (!NuiNativeTouch.Click(_window, x, y))
                 {
                     Flash("This frame cannot be clicked");
+                    return;
                 }
+
+                // And then ask the page what actually arrived. The feed itself is
+                // blind — issue #20 reported "fed tap at 705,126" and an unmoved
+                // captcha, which narrows nothing down — so the answer has to come
+                // from the only place that can see real input: the page. Long enough
+                // after the release for the engine to have delivered it.
+                _cursor.ReportNativeWitness(FrameWitnessDelay, witness =>
+                {
+                    _frameWitness = witness;
+                    DiagLog.Add("frame witness: " + witness);
+                });
             }
             catch (Exception ex)
             {
@@ -876,6 +908,7 @@ namespace Overscan
                   "page metr : " + _lastMetrics + "\n" +
                   "vp fix    : " + (_viewportFix ? "ON" : "off") + "  (key 6)\n" +
                   "frame click: " + NuiNativeTouch.LastResult + "\n" +
+                  "frame saw  : " + _frameWitness + "\n" +
                   "url       : " + _cachedUrl;
 
             return "Overscan diagnostics (NUI build)\n\n" +

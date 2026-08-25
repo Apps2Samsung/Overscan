@@ -100,13 +100,11 @@ namespace Overscan
             // The Marlin wall, if this is still it: say which of the three refusals
             // it is rather than leaving "Operation not permitted" to be read as a
             // privilege every time. See SmackWall.
-            if (blocked != null)
-            {
-                foreach (string line in SmackWall.Investigate(blocked))
-                {
-                    DiagLog.Add("  " + line);
-                }
-            }
+            // Off the calling thread: this runs in Main, before Elementary, so a
+            // probe that does not survive the firmware would take the app down
+            // before it could put anything on screen. Which is precisely what the
+            // first version of it did — see SmackWall.
+            SmackWall.InvestigateInBackground(blocked);
         }
 
         /// <summary>

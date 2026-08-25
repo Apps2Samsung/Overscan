@@ -106,6 +106,16 @@ namespace Overscan
         public static string Implementation { get; private set; }
 
         /// <summary>
+        /// The soname the loader was not permitted to open, once
+        /// <see cref="Preload"/> has run and hit that wall; null otherwise.
+        ///
+        /// Recorded rather than acted on. <see cref="SmackWall"/> is what establishes
+        /// *which* permission it is, and that has to happen after the engine has had
+        /// its chance — see the note in <see cref="Preload"/>.
+        /// </summary>
+        public static string Blocked { get; private set; }
+
+        /// <summary>
         /// Opens the implementation before <c>ewk_init</c> gets there, chasing any
         /// dependency the loader cannot find on its own.
         ///
@@ -132,44 +142,43 @@ namespace Overscan
                 if (path == null)
                 {
                     Summary = "not present (searched " + Candidates.Length + " paths)";
-                    Lines.Add("libchromium-impl.so is not at any known path");
+                    Note("libchromium-impl.so is not at any known path");
                     return;
                 }
 
                 Implementation = path;
-                Lines.Add("implementation: " + path + " (" + Describe(path) + ")");
+                Note("implementation: " + path + " (" + Describe(path) + ")");
 
                 string error;
                 if (Open(path, 0, out error))
                 {
                     Loaded = true;
                     Summary = "loaded from " + path;
-                    Lines.Add("dlopen ok — the implementation is in the process");
+                    Note("dlopen ok — the implementation is in the process");
                     return;
                 }
 
                 Summary = "REFUSED — " + Brief(error);
-                Lines.Add("dlopen failed: " + error);
+                Note("dlopen failed: " + error);
 
                 // "Operation not permitted" names the library the loader would not
                 // open but says nothing about why, and the three reasons it can mean
-                // want three different fixes. Ask the set. See SmackWall.
-                string blocked = SmackWall.BlockedSoname(error);
-                if (blocked != null)
+                // want three different fixes. Taking that apart is SmackWall's job
+                // and it is deliberately NOT done here: this runs before ewk_init,
+                // and a probe that does not survive the firmware then stops the
+                // engine from ever being tried — which is exactly what happened to
+                // #13 and #17. The soname is only recorded; InitializeChromium
+                // starts the investigation once the engine has failed for real.
+                Blocked = SmackWall.BlockedSoname(error);
+                if (Blocked != null)
                 {
-                    Lines.Add("blocked by permission, not by a missing file — probing " + blocked);
-                    foreach (string line in SmackWall.Investigate(blocked))
-                    {
-                        Lines.Add(line);
-                    }
-
-                    Summary = "REFUSED — " + blocked + ": " + SmackWall.Summary;
+                    Note("blocked by permission, not by a missing file: " + Blocked);
                 }
             }
             catch (Exception ex)
             {
                 Summary = "probe threw " + ex.GetType().Name;
-                Lines.Add("probe threw " + ex.GetType().Name + ": " + ex.Message);
+                Note("probe threw " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -196,12 +205,12 @@ namespace Overscan
 
             try
             {
-                Lines.Add("LD_LIBRARY_PATH: " +
+                Note("LD_LIBRARY_PATH: " +
                           (Environment.GetEnvironmentVariable("LD_LIBRARY_PATH") ?? "(unset)"));
 
                 if (Implementation != null)
                 {
-                    Lines.Add("readable by us: " + Readable(Implementation));
+                    Note("readable by us: " + Readable(Implementation));
 
                     if (!Loaded)
                     {
@@ -210,7 +219,7 @@ namespace Overscan
                         // bound to by anything still running.
                         string error;
                         bool lazy = TryOpen(Implementation, RtldLazy, out error);
-                        Lines.Add(lazy
+                        Note(lazy
                             ? "RTLD_LAZY: loads — so the fault is a symbol the engine " +
                               "resolves at bind time, not the file failing to open"
                             : "RTLD_LAZY: also fails — " + error);
@@ -221,7 +230,7 @@ namespace Overscan
             }
             catch (Exception ex)
             {
-                Lines.Add("explain threw " + ex.GetType().Name + ": " + ex.Message);
+                Note("explain threw " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -262,7 +271,7 @@ namespace Overscan
                     return false;
                 }
 
-                Lines.Add(Indent(depth) + "needs " + missing + " -> " + dependency);
+                Note(Indent(depth) + "needs " + missing + " -> " + dependency);
 
                 string inner;
                 if (!Open(dependency, depth + 1, out inner))
@@ -271,7 +280,7 @@ namespace Overscan
                     return false;
                 }
 
-                Lines.Add(Indent(depth) + "loaded " + dependency);
+                Note(Indent(depth) + "loaded " + dependency);
             }
 
             error = "gave up after " + MaxRounds + " dependency rounds";
@@ -430,29 +439,29 @@ namespace Overscan
             {
                 if (!Directory.Exists(directory))
                 {
-                    Lines.Add(directory + ": not a directory");
+                    Note(directory + ": not a directory");
                     return;
                 }
 
                 string[] entries = Directory.GetFiles(directory);
                 Array.Sort(entries, StringComparer.Ordinal);
-                Lines.Add(directory + ": " + entries.Length + " files");
+                Note(directory + ": " + entries.Length + " files");
 
                 // Enough to see what the engine ships beside itself, few enough to
                 // read on a TV.
                 for (int i = 0; i < entries.Length && i < 24; i++)
                 {
-                    Lines.Add("  " + Path.GetFileName(entries[i]));
+                    Note("  " + Path.GetFileName(entries[i]));
                 }
 
                 if (entries.Length > 24)
                 {
-                    Lines.Add("  … and " + (entries.Length - 24) + " more");
+                    Note("  … and " + (entries.Length - 24) + " more");
                 }
             }
             catch (Exception ex)
             {
-                Lines.Add(directory + ": " + ex.GetType().Name + ": " + ex.Message);
+                Note(directory + ": " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -476,6 +485,21 @@ namespace Overscan
         public static IList<string> Detail
         {
             get { return Lines; }
+        }
+
+        /// <summary>
+        /// Records a step — and flushes it before returning.
+        ///
+        /// The caller used to walk <see cref="Detail"/> afterwards and drop the
+        /// lines then, which is fine right up until one of the calls between them
+        /// does not come back: the findings are in memory, the trail has nothing,
+        /// and the report reads as "it stopped somewhere in here". Writing on the
+        /// spot costs an append per line and buys the name of the failing call.
+        /// </summary>
+        private static void Note(string line)
+        {
+            Lines.Add(line);
+            Breadcrumbs.Drop("  " + line);
         }
 
         /// <summary>The whole probe as one block, for the diagnostics page.</summary>

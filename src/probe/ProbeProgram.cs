@@ -161,12 +161,10 @@ namespace Overscan
             // where dlerror() is readable.
             Step("4e dlopen libchromium-impl.so", () =>
             {
+                // ChromiumImpl drops its own lines as it produces them now, so
+                // there is nothing to walk afterwards — and nothing to lose if one
+                // of its calls does not come back.
                 ChromiumImpl.Preload();
-                foreach (string line in ChromiumImpl.Detail)
-                {
-                    Breadcrumbs.Drop("             " + line);
-                }
-
                 Breadcrumbs.Drop("             verdict: " + ChromiumImpl.Summary);
             });
 
@@ -181,12 +179,14 @@ namespace Overscan
                 {
                     // Only on failure: Explain leaves a lazily-bound library behind,
                     // which is fine once there is nothing left to break.
-                    int before = ChromiumImpl.Detail.Count;
                     ChromiumImpl.Explain();
-                    for (int i = before; i < ChromiumImpl.Detail.Count; i++)
-                    {
-                        Breadcrumbs.Drop("             " + ChromiumImpl.Detail[i]);
-                    }
+
+                    // Same, and for the same reason as in the browser: the permission
+                    // probe is the one step in this chain known to end a process on
+                    // some firmware, so it goes last and on its own thread. Its
+                    // findings arrive in the trail as it establishes them, which is
+                    // where this app's output goes anyway.
+                    SmackWall.InvestigateInBackground(ChromiumImpl.Blocked);
                 }
             });
 

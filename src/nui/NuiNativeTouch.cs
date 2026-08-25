@@ -47,6 +47,14 @@ namespace Overscan
     ///
     /// Everything is best-effort. If the binder's name or a symbol differs on some
     /// firmware, the reason is recorded and the click behaves as it did before.
+    ///
+    /// The first version of this went out and did nothing: the report came back
+    /// `fed tap at 705,126` with an unmoved captcha, which says the call succeeded
+    /// and says nothing else. Two things follow from that, and both are here. The
+    /// press and the release are now separated in *time* rather than only in their
+    /// timestamps — see <see cref="Click"/> — and the page is asked afterwards
+    /// whether it saw anything real arrive, through <c>PageScript</c>'s
+    /// <c>native()</c>. A feed nobody can observe is a feed nobody can fix.
     /// </summary>
     internal static class NuiNativeTouch
     {
@@ -66,12 +74,10 @@ namespace Overscan
         private const int DeviceId = 0;
 
         /// <summary>
-        /// Between press and release, in the timestamps handed to the engine. The
-        /// two feeds happen in the same instant of wall-clock time, and a touch that
-        /// starts and ends on the same millisecond is the kind of thing a site's
-        /// own handling can discard.
+        /// Between press and release, in the timestamps handed to the engine *and*
+        /// in real time — see <see cref="Click"/> for why the second part matters.
         /// </summary>
-        private const int TapMilliseconds = 60;
+        private const int TapMilliseconds = 90;
 
         [DllImport("libdl.so.2")]
         private static extern IntPtr dlopen(string file, int mode);
@@ -91,12 +97,25 @@ namespace Overscan
         private static IntPtr _window;
         private static uint _stamp;
 
+        /// <summary>True between a press and its release. See <see cref="Click"/>.</summary>
+        private static bool _inFlight;
+
         /// <summary>Why the last attempt did nothing, for the diagnostics screen.</summary>
         public static string LastResult { get; private set; } = "(not used yet)";
 
         /// <summary>
         /// Taps at a point in window coordinates. Returns false when the platform
         /// would not let us, in which case nothing happened at all.
+        ///
+        /// The release is fed from a timer rather than on the next line, and that is
+        /// the substantive change since the first attempt (issue #20, which reported
+        /// `fed tap at 705,126` and no effect). Feeding both points in one go put
+        /// them in the same scene event queue, so DALi handed the engine a press and
+        /// a release in a single frame: chromium's gesture recognition sees a contact
+        /// that never existed for any measurable time, and a timestamp gap does not
+        /// help when both events are processed in the same update. A real tap spans
+        /// frames. So the press goes now, the release goes <see cref="TapMilliseconds"/>
+        /// later, and the engine sees a contact with a duration.
         /// </summary>
         public static bool Click(Window window, int x, int y)
         {
@@ -106,25 +125,39 @@ namespace Overscan
                 return false;
             }
 
-            IntPtr down = IntPtr.Zero;
-            IntPtr up = IntPtr.Zero;
+            // A second press while the first contact is still down would give the
+            // engine down-down-up-up, which is not a tap in any gesture recogniser.
+            // The interval is 90 ms; nobody presses OK faster than that on purpose.
+            if (_inFlight)
+            {
+                LastResult = "previous tap is still in flight";
+                DiagLog.Add("native touch: " + LastResult);
+                return false;
+            }
+
             try
             {
                 int at = NextStamp();
 
                 // Two separate points rather than one reused: the binder owns the
                 // native object and the state is fixed at construction.
-                down = NewTouchPoint(DeviceId, StateDown, x, y);
-                up = NewTouchPoint(DeviceId, StateUp, x, y);
-                if (down == IntPtr.Zero || up == IntPtr.Zero)
+                if (!Feed(handle, StateDown, x, y, at))
                 {
-                    LastResult = "could not build a touch point";
-                    DiagLog.Add("native touch: " + LastResult);
                     return false;
                 }
 
-                FeedTouchPoint(handle, down, at);
-                FeedTouchPoint(handle, up, at + TapMilliseconds);
+                _inFlight = NuiLater.Once(TapMilliseconds, delegate
+                {
+                    _inFlight = false;
+                    Feed(handle, StateUp, x, y, at + TapMilliseconds);
+                });
+
+                if (!_inFlight)
+                {
+                    // No timer, so no gap — but a contact left down is worse than a
+                    // tap that is too quick, and it would wedge every later press.
+                    Feed(handle, StateUp, x, y, at + TapMilliseconds);
+                }
 
                 LastResult = "fed tap at " + x + "," + y;
                 DiagLog.Add("native touch: " + LastResult);
@@ -137,10 +170,38 @@ namespace Overscan
                 DiagLog.Add("native touch: " + LastResult);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Builds one point, feeds it, and hands it straight back. Kept as one step
+        /// because a TouchPoint is only ever wanted for the length of the feed.
+        /// </summary>
+        private static bool Feed(IntPtr window, int state, int x, int y, int stamp)
+        {
+            IntPtr point = IntPtr.Zero;
+            try
+            {
+                point = NewTouchPoint(DeviceId, state, x, y);
+                if (point == IntPtr.Zero)
+                {
+                    LastResult = "could not build a touch point";
+                    DiagLog.Add("native touch: " + LastResult);
+                    return false;
+                }
+
+                FeedTouchPoint(window, point, stamp);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _window = IntPtr.Zero;
+                LastResult = "feed failed — " + ex.GetType().Name + ": " + ex.Message;
+                DiagLog.Add("native touch: " + LastResult);
+                return false;
+            }
             finally
             {
-                Release(down);
-                Release(up);
+                Release(point);
             }
         }
 
@@ -157,7 +218,7 @@ namespace Overscan
             }
             catch (Exception)
             {
-                // A leaked TouchPoint is a few bytes, and this runs once per click
+                // A leaked TouchPoint is a few bytes, and this runs twice per click
                 // on a frame; failing the click over it would help nobody.
             }
         }

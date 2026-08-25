@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 
 namespace Overscan
 {
@@ -37,7 +38,20 @@ namespace Overscan
     /// answer arrives on the diagnostics page as evidence rather than a theory.
     ///
     /// Everything here is read-only and every call is guarded. A diagnostic that
-    /// can take start-up down is worse than no diagnostic.
+    /// can take start-up down is worse than no diagnostic — and the first version
+    /// of this class was exactly that. On both reporting sets (#13 on a 2018 set,
+    /// #17 on the Q80) the trail stopped dead on the line before the probe and the
+    /// engine was never even asked to start: something in here does not survive
+    /// that firmware, and because the findings were handed back to the caller in
+    /// one batch at the end, nothing reached disk to say which call it was. So two
+    /// rules now hold, and they are the whole difference:
+    ///
+    /// * <b>every line is flushed as it is produced</b> (see <see cref="Trace"/>),
+    ///   so a native crash names the call that caused it on the next launch;
+    /// * <b>the probe never runs before the engine does</b>. It is started from
+    ///   <see cref="InvestigateInBackground"/> on a background thread, after
+    ///   <c>ewk_init</c> has already failed and the failure screen is up. A hang
+    ///   costs a thread and a crash costs a process that had nothing left to do.
     /// </summary>
     internal static class SmackWall
     {
@@ -109,6 +123,12 @@ namespace Overscan
         /// <summary>Targets already taken apart, so a retry cannot double the report.</summary>
         private static readonly HashSet<string> Done = new HashSet<string>();
 
+        /// <summary>
+        /// Guards <see cref="Lines"/> and <see cref="Done"/>: the probe runs on its
+        /// own thread now and the diagnostics page is served from another one.
+        /// </summary>
+        private static readonly object Gate = new object();
+
         private static bool _identified;
 
         /// <summary>The verdict, or "(not reached)" while nothing has been blocked.</summary>
@@ -117,7 +137,52 @@ namespace Overscan
         /// <summary>Every line produced so far, for the probe and the trail.</summary>
         public static IList<string> Detail
         {
-            get { return Lines; }
+            get
+            {
+                lock (Gate)
+                {
+                    return Lines.ToArray();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Starts the investigation on a background thread and returns at once.
+        ///
+        /// The one thing this class must never do again is stand between start-up
+        /// and the engine. Nothing downstream needs its answer — the answer is for
+        /// us, on the next log — so the caller carries on, the failure screen goes
+        /// up, and the findings arrive in the trail and on the diagnostics page as
+        /// they are established. A probe that hangs now hangs a thread nobody is
+        /// waiting on.
+        /// </summary>
+        public static void InvestigateInBackground(string target)
+        {
+            if (string.IsNullOrEmpty(target))
+            {
+                return;
+            }
+
+            try
+            {
+                var thread = new Thread(delegate ()
+                {
+                    Investigate(target);
+                });
+
+                // Background, so a probe still running cannot keep the process
+                // alive after the user has walked away from the failure screen.
+                thread.IsBackground = true;
+                thread.Name = "smack-probe";
+                thread.Start();
+            }
+            catch (Exception ex)
+            {
+                // A set that will not give us a thread still gets the verdict, it
+                // just gets it the dangerous way.
+                Trace("probe: no thread (" + ex.GetType().Name + "), running inline");
+                Investigate(target);
+            }
         }
 
         /// <summary>
@@ -169,15 +234,21 @@ namespace Overscan
         public static IList<string> Investigate(string target)
         {
             var added = new List<string>();
-            if (string.IsNullOrEmpty(target) || !Done.Add(target))
+
+            lock (Gate)
             {
-                return added;
+                if (string.IsNullOrEmpty(target) || !Done.Add(target))
+                {
+                    return added;
+                }
             }
 
             try
             {
+                Trace("probe: begin " + target);
                 Identify(added);
 
+                Trace("probe: locate " + target);
                 string path = target.IndexOf('/') >= 0 ? target : Find(target);
                 if (path == null)
                 {
@@ -188,8 +259,11 @@ namespace Overscan
                 }
 
                 Add(added, "blocked: " + path + " (" + Size(path) + ")");
+
+                Trace("probe: mountinfo");
                 Add(added, "  mount: " + MountOf(path));
 
+                Trace("probe: getxattr " + path);
                 foreach (string line in Xattrs(path))
                 {
                     Add(added, "  " + line);
@@ -205,9 +279,12 @@ namespace Overscan
                         continue;
                     }
 
+                    Trace("probe: control " + control);
                     Add(added, "  " + control);
                     Add(added, "    read: " + ReadProbe(control) + "   " + Xattrs(control)[0]);
                 }
+
+                Trace("probe: done");
             }
             catch (Exception ex)
             {
@@ -228,6 +305,7 @@ namespace Overscan
             int fd = -1;
             try
             {
+                Trace("probe: open " + path);
                 fd = open(path, ORdonly);
                 if (fd < 0)
                 {
@@ -240,15 +318,25 @@ namespace Overscan
                     return;
                 }
 
+                Trace("probe: read header");
                 var head = new byte[4];
                 IntPtr got = read(fd, head, (IntPtr)head.Length);
                 bool elf = got.ToInt64() == 4 && head[0] == 0x7f &&
                            head[1] == (byte)'E' && head[2] == (byte)'L' && head[3] == (byte)'F';
                 Add(added, "  open(O_RDONLY): ok" + (elf ? ", reads as ELF" : ", first bytes are not ELF"));
 
+                Trace("probe: mmap PROT_READ");
                 string readable = MapProbe(fd, ProtRead, "PROT_READ");
-                string executable = MapProbe(fd, ProtRead | ProtExec, "PROT_READ|PROT_EXEC");
                 Add(added, "  mmap " + readable);
+
+                // The last of the four calls and the one most likely to be the
+                // reason this class killed start-up on both reporting sets: asking
+                // a kernel with an exec-label policy to map a page executable is
+                // exactly the thing such a policy exists to refuse, and refusing it
+                // by signal rather than by errno is a legal way to do that. Traced
+                // immediately before, so the next trail says so outright.
+                Trace("probe: mmap PROT_READ|PROT_EXEC");
+                string executable = MapProbe(fd, ProtRead | ProtExec, "PROT_READ|PROT_EXEC");
                 Add(added, "  mmap " + executable);
 
                 if (executable.EndsWith("ok", StringComparison.Ordinal))
@@ -524,22 +612,50 @@ namespace Overscan
             }
         }
 
+        /// <summary>
+        /// Records a finding — and puts it on disk before returning.
+        ///
+        /// The batch-at-the-end version of this cost a whole round trip with two
+        /// users: the report had three lines and stopped, which said only "somewhere
+        /// in here". A line that is already written cannot be lost to a signal.
+        /// </summary>
         private static void Add(List<string> added, string line)
         {
-            Lines.Add(line);
+            lock (Gate)
+            {
+                Lines.Add(line);
+            }
+
             added.Add(line);
+            Breadcrumbs.Drop("  smack: " + line);
+        }
+
+        /// <summary>
+        /// Names the call that is about to be made, on disk, without putting it in
+        /// the report. If the next launch's trail ends on one of these, that call is
+        /// the one that does not survive this firmware.
+        /// </summary>
+        private static void Trace(string step)
+        {
+            Breadcrumbs.Drop("  " + step);
         }
 
         /// <summary>The whole finding as one block, for the diagnostics page.</summary>
         public static string Dump()
         {
-            if (Lines.Count == 0)
+            string[] snapshot;
+            lock (Gate)
             {
-                return "  (nothing was blocked)\n";
+                if (Lines.Count == 0)
+                {
+                    return "  (nothing was blocked)\n";
+                }
+
+                snapshot = Lines.ToArray();
             }
 
             var sb = new StringBuilder();
-            foreach (string line in Lines)
+            foreach (string line in snapshot)
             {
                 sb.Append("  ").Append(line).Append('\n');
             }
