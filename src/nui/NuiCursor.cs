@@ -111,6 +111,48 @@ namespace Overscan
             }
         }
 
+        /// <summary>
+        /// Forgets any real input the page has seen so far, so the next reading is
+        /// about the next feed and nothing else.
+        /// </summary>
+        public void ClearNativeWitness()
+        {
+            Eval("try{window." + PageScript.Namespace + ".clearNative();}catch(e){}");
+        }
+
+        /// <summary>
+        /// Asks the page, after <paramref name="delayMilliseconds"/>, whether real
+        /// input actually arrived — see <c>PageScript.native()</c>.
+        ///
+        /// The delay is the point. Feeding a touch into the window and reading the
+        /// answer on the next line would always report "nothing": the point is queued
+        /// for DALi's next update, handed to the engine after that, and delivered to
+        /// the page after that again. Anything sooner measures our own impatience.
+        /// </summary>
+        public void ReportNativeWitness(int delayMilliseconds, Action<string> report)
+        {
+            NuiLater.Once(delayMilliseconds, delegate
+            {
+                try
+                {
+                    _web.EvaluateJavaScript(
+                        "String(window." + PageScript.Namespace + " && window." +
+                        PageScript.Namespace + ".native())",
+                        result =>
+                        {
+                            if (report != null)
+                            {
+                                report(string.IsNullOrEmpty(result) ? "(no answer)" : result);
+                            }
+                        });
+                }
+                catch (Exception ex)
+                {
+                    DiagLog.Add("witness read failed: " + ex.Message);
+                }
+            });
+        }
+
         public void ScrollPage(int direction)
         {
             // Reported back, unlike the fire-and-forget Eval: without this there is

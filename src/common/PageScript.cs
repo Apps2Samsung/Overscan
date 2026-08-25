@@ -11,8 +11,16 @@ namespace Overscan
     /// The one place a dispatched event cannot reach is inside a cross-origin
     /// <c>&lt;iframe&gt;</c> — a captcha, an embedded sign-in. A same-origin frame
     /// is entered here (see <c>descend</c>); a cross-origin one is reported back as
-    /// <c>FRAME:</c> so the ewk build can push a real Evas mouse event through
-    /// <c>NativeMouse</c> (which only the ewk build has) instead.
+    /// <c>FRAME:</c> so the app can push a real event in from outside the page
+    /// instead — <see cref="NativeMouse"/> on the ewk builds, and
+    /// <c>NuiNativeTouch</c> on the NUI one.
+    ///
+    /// That feed is blind: from the app's side it either arrives or it does not, and
+    /// both look the same. So the script watches for the two things that can only be
+    /// true if it did — an event with <c>isTrusted</c>, and a cross-origin frame
+    /// taking focus — and reports them through <c>native()</c>. Issue #20 is the
+    /// case where the feed goes out and nothing happens, which without those two
+    /// facts is unanswerable.
     /// </summary>
     internal static class PageScript
     {
@@ -47,7 +55,7 @@ namespace Overscan
 (function(){
   if (window.__ovs) { window.__ovs.install(); return; }
 
-  var st = { x: 0, y: 0, over: null };
+  var st = { x: 0, y: 0, over: null, trusted: null, frameFocus: null };
 
   function clamp(v, hi) { return v < 0 ? 0 : (v > hi ? hi : v); }
 
@@ -267,6 +275,30 @@ namespace Overscan
       return d;
     },
 
+    /* What the platform itself delivered to this page, if anything.
+       The frame-click path feeds a real touch in from outside the page, because a
+       cross-origin frame is the one thing a dispatched event cannot reach (issue
+       #20). From out here that feed is entirely blind: it either arrives or it does
+       not, and both look identical. These two facts tell them apart.
+
+       `trusted` is any event the page saw with isTrusted set — nothing we dispatch
+       ever has it, so a value here means the platform delivered real input to the
+       engine. `frame` is the parent-side proof that it landed *inside* the frame:
+       clicking into a cross-origin frame focuses the frame element, and only a real
+       click does. So: neither set means the touch never reached the engine; trusted
+       but no frame means it arrived and was routed elsewhere; both means it went in
+       and the frame's own content is what did not react. */
+    native: function () {
+      return 'trusted=' + (st.trusted || 'none') + ' frame=' + (st.frameFocus || 'none');
+    },
+
+    /* Called just before a feed, so what comes back afterwards is only about it. */
+    clearNative: function () {
+      st.trusted = null;
+      st.frameFocus = null;
+      return 'cleared';
+    },
+
     /* Scrolls the innermost scrollable element under the cursor, falling back to
        the document. Without this, sites that scroll a div (most SPAs) ignore us. */
     scroll: function (dx, dy) {
@@ -407,10 +439,36 @@ namespace Overscan
   } catch (_) {}
   try {
     document.addEventListener('focusin', function (e) {
+      /* A frame is not a text field and cannot raise the IME, so the guard has no
+         business here — and a cross-origin frame taking focus is the one signal
+         from out here that a fed touch actually landed inside it. Blurring it would
+         be this guard undoing the frame-click path it sits next to. */
+      if (e.target && isFrame(e.target)) {
+        st.frameFocus = e.target.tagName || 'FRAME';
+        return;
+      }
       if (window.__ovs.allowFocus) { return; }
       try { if (e.target && e.target.blur) { e.target.blur(); } } catch (_) {}
     }, true);
     if (document.activeElement && document.activeElement.blur) { document.activeElement.blur(); }
+  } catch (_) {}
+
+  /* Real input, if any ever arrives. Capture phase so nothing in the page can stop
+     it being seen, and it only ever reads — a watcher that changed the outcome of
+     the thing it is watching would be worthless. */
+  try {
+    ['pointerdown', 'mousedown', 'touchstart', 'click'].forEach(function (type) {
+      document.addEventListener(type, function (e) {
+        try {
+          if (!e || !e.isTrusted) { return; }
+          var p = e.touches && e.touches.length ? e.touches[0] : e;
+          var x = Math.round(p.clientX || 0);
+          var y = Math.round(p.clientY || 0);
+          st.trusted = type + ' on ' + ((e.target && e.target.tagName) || '?') +
+                       ' at ' + x + ',' + y;
+        } catch (_) {}
+      }, true);
+    });
   } catch (_) {}
 
   window.__ovs.install();

@@ -279,12 +279,11 @@ namespace Overscan
 
             // Before ewk_init, because ewk_init's own dlopen of this library is
             // where issue #17 stops, and by then the reason is only in dlog.
+            // ChromiumImpl writes its own trail as it goes now, so there is nothing
+            // to walk afterwards — and nothing left in memory to lose if one of its
+            // calls does not return.
             ChromiumImpl.Preload();
             Breadcrumbs.Drop("engine implementation: " + ChromiumImpl.Summary);
-            foreach (string line in ChromiumImpl.Detail)
-            {
-                Breadcrumbs.Drop("  " + line);
-            }
 
             Breadcrumbs.Drop("Chromium.Initialize()");
             int refCount = 0;
@@ -320,12 +319,14 @@ namespace Overscan
             // Only now: one of these probes would leave a lazily-bound library in
             // the process, which is harmless after a failure and a liability before
             // one. See ChromiumImpl.Explain.
-            int before = ChromiumImpl.Detail.Count;
             ChromiumImpl.Explain();
-            for (int i = before; i < ChromiumImpl.Detail.Count; i++)
-            {
-                Breadcrumbs.Drop("  " + ChromiumImpl.Detail[i]);
-            }
+
+            // And only now the permission wall, on a thread of its own. Everything
+            // this app was going to do has already failed, so the probe can take as
+            // long as it likes and cannot cost anything — whereas running it before
+            // ewk_init cost #13 and #17 a build each: the app died inside it and the
+            // engine was never asked to start at all. See SmackWall.
+            SmackWall.InvestigateInBackground(ChromiumImpl.Blocked);
 
             _engineFailure =
                 "the TV's web engine refused to start (ewk_init returned 0).\n\n" +
@@ -369,8 +370,15 @@ namespace Overscan
                 // Plain http:// spelled out: a phone browser upgrades a bare
                 // host:port to https, the socket answers in cleartext, and the
                 // reporter sees ERR_SSL_PROTOCOL_ERROR instead of the report.
+                // The permission probe is still running behind this screen (see
+                // SmackWall) and its verdict lands in the report a moment later, so
+                // say that rather than have the first look be read as the answer.
                 Theme.Text("Press 3 for the full log, Back to exit.\n" +
-                           "The same report is on http://<this TV>:8081 (http, not https)",
+                           "The same report is on http://<this TV>:8081 (http, not https)" +
+                           (ChromiumImpl.Blocked == null
+                               ? string.Empty
+                               : "\nStill working out what refused " + ChromiumImpl.Blocked +
+                                 " — give it a few seconds, then reload."),
                            28, Theme.Accent);
             message.Show();
             message.RaiseTop();
@@ -1303,9 +1311,16 @@ namespace Overscan
                        "engine lib : " + (NativeEngine.LoadedFrom ?? "(not preloaded)") + "\n" +
                        "efl subsys : " + EflSubsystems.Summary + "\n" +
                        "engine impl: " + ChromiumImpl.Summary + "\n" +
+                       "permission : " + (ChromiumImpl.Blocked == null
+                           ? "(nothing was refused)"
+                           : ChromiumImpl.Blocked + " — " + SmackWall.Summary) + "\n" +
                        "trail file : " + Breadcrumbs.Location + "\n" +
                        (full ? "\nefl ladder (ewk_init's own order)\n" + EflSubsystems.Dump() +
                                "\nengine implementation (libchromium-impl.so)\n" + ChromiumImpl.Dump() +
+                               "\npermission wall" +
+                               (ChromiumImpl.Blocked == null
+                                   ? "\n"
+                                   : " (" + ChromiumImpl.Blocked + ")\n") + SmackWall.Dump() +
                                "\nengine stdout/stderr\n" + _engineStdErr + "\n"
                              : "engine said: " + Brief(_engineStdErr, 160) + "\n") +
                        trail;

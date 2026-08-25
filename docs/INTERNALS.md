@@ -311,8 +311,51 @@ carries libraries this process *can* open beside the one it cannot.
 Both loaders feed it: `ChromiumImpl.Preload` on the implementation's dependencies
 and `NativeEngine.Preload` on the engine's own, via `SmackWall.BlockedSoname`,
 which is the permission-half counterpart of `ChromiumImpl.MissingSoname`'s
-No-such-file half. The verdict lands in the `engine impl:` header line and the
+No-such-file half. The verdict lands in the `permission :` header line and the
 lines land in the breadcrumb trail, so it survives the set being power-cycled.
+
+### A probe that ran too early, and reported too late
+
+The first version of that probe cost two users a build each, and the way it failed
+is worth keeping written down.
+
+It ran inside `ChromiumImpl.Preload`, i.e. *before* `ewk_init` — and on both
+reporting sets (#17 on the Q80, #13 on a 2018 set) the process did not come back
+out of it. Every trail ended on the same line:
+
+```
+19:39:40    eldbus_init             : ok (refcount 1)
+```
+
+which is the last line before the probe and two lines before the engine would have
+been asked to start. So a diagnostic meant to explain a failure had replaced it with
+an earlier one, and the reports were worse than the reports it was written to
+improve: the app no longer even reached the thing being diagnosed.
+
+It was also unreadable when it *did* run. `Investigate` collected its findings in a
+list and handed them back to the caller, which dropped them into the trail
+afterwards — so a call that never returns takes every finding with it. The one
+report that got furthest showed exactly three lines and stopped, which says
+"somewhere in here" and nothing more.
+
+Two rules came out of it, and they apply to every probe in this app, not just this
+one:
+
+- **Nothing diagnostic runs before the thing it diagnoses.** `SmackWall` is started
+  from `SmackWall.InvestigateInBackground`, on a background thread, after both
+  `ewk_init` attempts have returned 0 and the failure screen is up. A hang costs a
+  thread nobody is waiting on; a crash costs a process with nothing left to do.
+- **Every line is flushed as it is produced.** `SmackWall.Add` and
+  `ChromiumImpl.Note` write through `Breadcrumbs.Drop` on the spot, and each native
+  call is announced by `SmackWall.Trace` *before* it is made (`probe: open …`,
+  `probe: mmap PROT_READ|PROT_EXEC`, …). If the next launch's trail ends on one of
+  those, that call is the one this firmware does not survive — which is the question
+  the batched version could not answer.
+
+The riskiest of those calls is the last: asking a kernel with an exec-label policy
+to `mmap(PROT_EXEC)` a file it is withholding is precisely what such a policy exists
+to refuse, and refusing it by signal rather than by errno is a legal way to do that.
+It is traced immediately before, so the trail names it outright either way.
 
 ### `ELM_ACCEL` has to be set before the window exists
 
@@ -486,7 +529,51 @@ Two details that decide whether it lands:
   by the remote — so the bar, the progress strip, the overlay and the hints card all
   have `Sensitive = false`.
 
+- **The press and the release have to be a frame apart.** The first version fed both
+  points back to back, which put them in the same DALi scene event queue and handed
+  the engine a press and a release inside one update: a contact that never existed
+  for any measurable time, which no gesture recogniser calls a tap. A timestamp gap
+  does not help when both events are processed together. So the press goes now and
+  the release goes 90 ms later, from a `Tizen.NUI.Timer` (see `NuiLater` — a NUI
+  Timer with no live reference can be collected before its first tick and simply
+  never fire, which would leave the engine with a contact still down).
+
 `frame click:` on the diagnostics screen says what the last attempt did.
+
+#### The feed is blind, so the page is asked
+
+`fed tap at 705,126` means the call returned. It does not mean anything arrived —
+and that is the whole of the second round of #20: the report said exactly that,
+beside a captcha that had not moved. From the app's side a feed that lands and a
+feed that vanishes are identical, which makes the next step unguessable.
+
+Two facts are observable from inside the page, and only from there:
+
+- **`isTrusted`.** Nothing this app dispatches ever has it — `fire()` builds its
+  events in script — so any event the page sees with `isTrusted` set was delivered
+  by the platform. That distinguishes "the touch never reached the engine" from "it
+  reached the engine".
+- **A cross-origin frame taking focus.** Clicking into another origin's frame
+  focuses the frame *element* in the parent document, and only a real click does.
+  That distinguishes "it reached the page but went somewhere else" from "it went
+  into the frame and the frame's own content did not react".
+
+So the script watches for both (capture phase, read-only) and reports them through
+`__ovs.native()`; `ClickThroughFrame` clears them with `__ovs.clearNative()` before
+the feed and reads them back 400 ms after — three hops later, none of them ours.
+The answer appears as `frame saw :` on the diagnostics screen:
+
+| `frame saw :` | what it means |
+| --- | --- |
+| `trusted=none frame=none` | the touch never reached the engine — the injection point is wrong, not the tap |
+| `trusted=… frame=none` | real input arrived and was routed somewhere other than the frame |
+| `trusted=… frame=IFRAME` | it went into the frame; what did not react is the frame's own content |
+
+This also fixed something the focus guard was doing. That guard blurs anything the
+page focuses, to keep a page's autofocus from raising the TV's IME and swallowing
+the remote — and it was blurring frames too, which meant the app undoing the one
+thing the frame-click path had just achieved. A frame is not a text field and cannot
+raise the IME, so it is now left alone (and its focus recorded, per above).
 
 ### Why our own keyboard rather than the platform IME
 
