@@ -285,9 +285,21 @@ namespace Overscan
             ChromiumImpl.Preload();
             Breadcrumbs.Drop("engine implementation: " + ChromiumImpl.Summary);
 
+            // Issue #17's trail ends here, on this line, every launch — so the
+            // interesting question is no longer what ewk_init returns but whether it
+            // returns at all, and how long it takes not to. See Heartbeat.
             Breadcrumbs.Drop("Chromium.Initialize()");
             int refCount = 0;
-            _engineStdErr = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
+            Heartbeat.Start("inside ewk_init");
+            try
+            {
+                _engineStdErr = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
+            }
+            finally
+            {
+                Heartbeat.Stop();
+            }
+
             _engineInit = "refcount=" + refCount.ToString(CultureInfo.InvariantCulture);
             Breadcrumbs.Drop("Chromium initialized, " + _engineInit);
 
@@ -300,7 +312,16 @@ namespace Overscan
 
             string argv = NativeEngine.SetArguments();
             Breadcrumbs.Drop("engine init returned 0 — retrying (" + argv + ")");
-            string retryStdErr = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
+            Heartbeat.Start("inside ewk_init (retry)");
+            string retryStdErr;
+            try
+            {
+                retryStdErr = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
+            }
+            finally
+            {
+                Heartbeat.Stop();
+            }
             _engineInit = "refcount=0, then " + refCount.ToString(CultureInfo.InvariantCulture) +
                           " after " + argv;
             Breadcrumbs.Drop("Chromium re-initialized, refcount=" +
@@ -1321,7 +1342,9 @@ namespace Overscan
                                (ChromiumImpl.Blocked == null
                                    ? "\n"
                                    : " (" + ChromiumImpl.Blocked + ")\n") + SmackWall.Dump() +
-                               "\nengine stdout/stderr\n" + _engineStdErr + "\n"
+                               "\nengine stdout/stderr (this run)\n" + _engineStdErr + "\n" +
+                               "\nengine stdout/stderr (previous run)\n" +
+                               Breadcrumbs.PreviousStdErr + "\n"
                              : "engine said: " + Brief(_engineStdErr, 160) + "\n") +
                        trail;
             }

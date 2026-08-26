@@ -17,11 +17,28 @@ namespace Overscan
     {
         private static string _path;
         private static string _previous = "(no previous run recorded)";
+        private static string _previousStdErr = "(no previous run recorded)";
 
         /// <summary>The trail left by the previous launch.</summary>
         public static string Previous
         {
             get { return _previous; }
+        }
+
+        /// <summary>
+        /// What the previous launch's native calls wrote to stdout/stderr.
+        ///
+        /// <see cref="NativeStdErr"/> only reads its scratch file back once the call
+        /// it wrapped has returned, so a call that never returns leaves its output
+        /// on disk and hands back nothing. On issue #17's set that is every run:
+        /// the trail's last line is <c>Chromium.Initialize()</c>, so ewk_init does
+        /// not return 0 — it does not return. Its EINA_LOG lines are the one thing
+        /// that would say why, and they were already there; they were just being
+        /// truncated by the next run before anyone read them.
+        /// </summary>
+        public static string PreviousStdErr
+        {
+            get { return _previousStdErr; }
         }
 
         /// <summary>Where the trail ended up, for the report.</summary>
@@ -98,6 +115,12 @@ namespace Overscan
                         _previous = File.ReadAllText(previous);
                     }
 
+                    // The same treatment for NativeStdErr's scratch file, and it has
+                    // to happen here: that class opens it FileMode.Create, so by the
+                    // time it is next used the previous run's output is gone. This is
+                    // the only moment between the two runs.
+                    RollStdErr(dir);
+
                     return;
                 }
                 catch (Exception)
@@ -107,10 +130,56 @@ namespace Overscan
             }
         }
 
+        /// <summary>
+        /// Moves the last run's captured output aside and reads it, so a native call
+        /// that never returned still gets to say what it printed. Best-effort: a
+        /// missing or unreadable file just means there is nothing to report.
+        /// </summary>
+        private static void RollStdErr(string dir)
+        {
+            try
+            {
+                string current = Path.Combine(dir, "stderr.log");
+                string previous = Path.Combine(dir, "stderr.prev.log");
+
+                if (File.Exists(current))
+                {
+                    if (File.Exists(previous))
+                    {
+                        File.Delete(previous);
+                    }
+
+                    File.Move(current, previous);
+                }
+
+                if (File.Exists(previous))
+                {
+                    string text = File.ReadAllText(previous).Trim();
+                    _previousStdErr = text.Length == 0
+                        ? "(previous run wrote nothing to stdout/stderr)"
+                        : text;
+                }
+            }
+            catch (Exception)
+            {
+                _previousStdErr = "(previous run's output could not be read)";
+            }
+        }
+
         public static void Drop(string message)
         {
             DiagLog.Add(message);
+            DropToTrail(message);
+        }
 
+        /// <summary>
+        /// A trail line that does not go to the on-screen log. <see cref="DiagLog"/>
+        /// keeps 60 lines, so anything that ticks — see <see cref="Heartbeat"/> —
+        /// would evict the start-up lines that say where the app got to. The trail
+        /// file has no such limit and is the thing read after a crash anyway.
+        /// </summary>
+        public static void DropToTrail(string message)
+        {
             if (_path == null)
             {
                 return;

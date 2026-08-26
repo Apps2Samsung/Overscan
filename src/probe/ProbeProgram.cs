@@ -168,10 +168,38 @@ namespace Overscan
                 Breadcrumbs.Drop("             verdict: " + ChromiumImpl.Summary);
             });
 
+            // Ahead of ewk_init, and this is the one process where that is the right
+            // order. The browser must not do it: #13 and #17 each lost a build to a
+            // probe that died before the engine was ever asked to start. But issue
+            // #17's trail ends inside ewk_init every launch and never comes back, so
+            // anything sequenced after it is unreachable — and here a dead process
+            // costs nothing, because Step names the call that killed it.
+            Step("4f permission wall", () =>
+            {
+                if (ChromiumImpl.Blocked == null)
+                {
+                    Breadcrumbs.Drop("             nothing was refused; nothing to probe");
+                    return;
+                }
+
+                SmackWall.Investigate(ChromiumImpl.Blocked);
+                Breadcrumbs.Drop("             verdict: " + SmackWall.Summary);
+            });
+
             Step("4 Chromium.Initialize", () =>
             {
                 int refCount = 0;
-                string output = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
+                Heartbeat.Start("inside ewk_init");
+                string output;
+                try
+                {
+                    output = NativeStdErr.Capture(delegate { refCount = Chromium.Initialize(); });
+                }
+                finally
+                {
+                    Heartbeat.Stop();
+                }
+
                 Breadcrumbs.Drop("             chromium refcount=" + refCount);
                 Breadcrumbs.Drop("             engine said: " + output);
 
@@ -180,13 +208,6 @@ namespace Overscan
                     // Only on failure: Explain leaves a lazily-bound library behind,
                     // which is fine once there is nothing left to break.
                     ChromiumImpl.Explain();
-
-                    // Same, and for the same reason as in the browser: the permission
-                    // probe is the one step in this chain known to end a process on
-                    // some firmware, so it goes last and on its own thread. Its
-                    // findings arrive in the trail as it establishes them, which is
-                    // where this app's output goes anyway.
-                    SmackWall.InvestigateInBackground(ChromiumImpl.Blocked);
                 }
             });
 
@@ -378,8 +399,11 @@ namespace Overscan
                    "preloaded  : " + (_preloaded ?? "(none)") + "\n" +
                    "efl subsys : " + EflSubsystems.Summary + "\n" +
                    "\n=== EFL LADDER (ewk_init's own order) ===\n" + EflSubsystems.Dump() +
+                   "\n=== PERMISSION WALL ===\n" + SmackWall.Dump() +
                    "\n=== PREVIOUS RUN (the last line is where it died) ===\n" +
                    Breadcrumbs.Previous +
+                   "\n=== PREVIOUS RUN, stdout/stderr ===\n" +
+                   Breadcrumbs.PreviousStdErr + "\n" +
                    "\n=== THIS RUN ===\n" + DiagLog.Dump();
         }
     }

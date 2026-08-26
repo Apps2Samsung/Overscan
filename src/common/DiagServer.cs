@@ -92,8 +92,16 @@ namespace Overscan
             Func<string> provider = ReportProvider;
             if (provider == null)
             {
+                // The previous run's evidence does not need the UI to exist, and
+                // this page is what a reporter gets when they are quick off the
+                // mark — issue #17's first fetch showed three lines and nothing
+                // else. It is the same trail the full report carries.
                 return "Overscan — no report provider yet (UI has not started)\n\n" +
-                       DiagLog.Dump();
+                       "this run\n" + DiagLog.Dump() +
+                       "\nprevious run (last line is where it died)\n" +
+                       Breadcrumbs.Previous +
+                       "\nengine stdout/stderr (previous run)\n" +
+                       Breadcrumbs.PreviousStdErr + "\n";
             }
 
             try
