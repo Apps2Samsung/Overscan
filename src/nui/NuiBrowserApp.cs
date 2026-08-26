@@ -29,6 +29,13 @@ namespace Overscan
         private View _progress;
         private View _hints;
         private TextLabel _overlay;
+        private TextLabel _hintsFooter;
+
+        private RemoteMenu _menu;
+        private View _menuPanel;
+        private TextLabel[] _menuLabels;
+        private TextLabel[] _menuShortcuts;
+        private View _menuHighlight;
 
         private UserAgentPreset[] _presets = UserAgents.Defaults();
         private int _presetIndex;
@@ -73,6 +80,29 @@ namespace Overscan
         private bool _chromeVisible;
         private int _marquee;
         private DateTime _lastActivity = DateTime.UtcNow;
+
+        /// <summary>
+        /// How many OK presses have arrived in a row without the key being let go.
+        /// Tizen delivers a held key as repeated Down events, and counting them is
+        /// the only way to notice a hold that cannot also break an ordinary press:
+        /// the press still clicks the moment it arrives, exactly as before, and the
+        /// menu opens on top of that if the button stays down. Waiting for the Up
+        /// event instead would be tidier and would put every click in this browser
+        /// at the mercy of a firmware delivering it.
+        /// </summary>
+        private int _okRepeats;
+        private DateTime _lastOk = DateTime.MinValue;
+
+        /// <summary>
+        /// Presses of OK in a row before a hold is taken to mean "open the menu".
+        /// Tizen's repeat starts after about half a second and runs at roughly ten
+        /// a second, so this lands a little over a second into the hold — past any
+        /// accidental double-press, short of feeling stuck.
+        /// </summary>
+        private const int OkHoldRepeats = 6;
+
+        /// <summary>Longest gap that still counts as the same hold.</summary>
+        private const int OkRepeatGapMs = 400;
         private DateTime _flashUntil = DateTime.MinValue;
 
         /// <summary>The page to open at launch, or null for the start screen.</summary>
@@ -95,6 +125,7 @@ namespace Overscan
             BuildChrome();
             BuildOverlay();
             BuildHints();
+            BuildMenu();
 
             _keyboard = new NuiKeyboard(_window);
             _keyboard.Committed += OnKeyboardCommitted;
@@ -161,6 +192,7 @@ namespace Overscan
                 PassTouchesThrough(_progress);
                 PassTouchesThrough(_overlay);
                 PassTouchesThrough(_hints);
+                PassTouchesThrough(_menuPanel);
 
                 // Insurance for the frame-click path: the toolkit gates part of its
                 // pointer forwarding on this, and the default is not worth guessing.
@@ -384,7 +416,7 @@ namespace Overscan
         {
             Size2D screen = _window.WindowSize;
             int width = 470;
-            int height = 470;
+            int height = 560;
 
             _hints = new View
             {
@@ -404,8 +436,13 @@ namespace Overscan
             };
             _hints.Add(title);
 
+            // "hold OK" comes first and is not a number, deliberately. On a slim
+            // remote it is the only row on this card the user can act on, and a
+            // list that opens with nine things they cannot do reads as "this app
+            // is not for your remote" (issue #27).
             string[][] rows =
             {
+                new[] { "hold OK", "menu" },
                 new[] { "0", "address bar" },
                 new[] { "1", "identify as…" },
                 new[] { "2", "type in field" },
@@ -423,20 +460,34 @@ namespace Overscan
                 _hints.Add(new TextLabel
                 {
                     Position2D = new Position2D(NuiTheme.Pad, y),
-                    Size2D = new Size2D(60, 38),
+                    Size2D = new Size2D(150, 38),
                     PointSize = 13,
                     TextColor = NuiTheme.Ink,
                     Text = rows[i][0],
                 });
                 _hints.Add(new TextLabel
                 {
-                    Position2D = new Position2D(NuiTheme.Pad + 60, y + 3),
-                    Size2D = new Size2D(width - NuiTheme.Pad - 80, 34),
+                    Position2D = new Position2D(NuiTheme.Pad + 150, y + 3),
+                    Size2D = new Size2D(width - NuiTheme.Pad - 170, 34),
                     PointSize = 11,
                     TextColor = NuiTheme.InkMuted,
                     Text = rows[i][1],
                 });
             }
+
+            // Where an unrecognised button reports itself. A remote we have never
+            // seen sends a name we do not answer to, and the user cannot open the
+            // diagnostics screen to find out what it was — that screen is behind a
+            // number key too. So the name lands here, on the card they can see.
+            _hintsFooter = new TextLabel
+            {
+                Position2D = new Position2D(NuiTheme.Pad, height - NuiTheme.Pad - 30),
+                Size2D = new Size2D(width - (NuiTheme.Pad * 2), 28),
+                PointSize = 9,
+                TextColor = NuiTheme.InkMuted,
+                Text = string.Empty,
+            };
+            _hints.Add(_hintsFooter);
 
             _window.Add(_hints);
         }
@@ -456,6 +507,254 @@ namespace Overscan
 
         // ----------------------------------------------------------------- input
 
+        /// <summary>
+        /// The on-screen menu: every function this browser has, in a list the
+        /// D-pad can walk. It exists for remotes without a numpad (issue #27),
+        /// where it is the only way in, and it shows each entry's number key
+        /// beside it so it also teaches the shortcut to anyone who has one.
+        /// </summary>
+        private void BuildMenu()
+        {
+            _menu = new RemoteMenu(new[]
+            {
+                new RemoteMenu.Item(RemoteMenu.ActionAddress, "Go to address…", "0"),
+                new RemoteMenu.Item(RemoteMenu.ActionHome, "Start screen", "9"),
+                new RemoteMenu.Item(RemoteMenu.ActionBookmark, "Keep this page", "8"),
+                new RemoteMenu.Item(RemoteMenu.ActionTypeInField, "Type in a field…", "2"),
+                new RemoteMenu.Item(RemoteMenu.ActionIdentity, "Identify as…", "1"),
+                new RemoteMenu.Item(RemoteMenu.ActionKeysToPage, "Send keys to page", "4"),
+                new RemoteMenu.Item(RemoteMenu.ActionFitPage, "Fit page to screen", "6"),
+                new RemoteMenu.Item(RemoteMenu.ActionImages, "Images on/off", "Info"),
+                new RemoteMenu.Item(RemoteMenu.ActionHints, "Remote card on/off", "7"),
+                new RemoteMenu.Item(RemoteMenu.ActionDiagnostics, "Diagnostics", "3"),
+                new RemoteMenu.Item(RemoteMenu.ActionQuit, "Close Overscan", string.Empty),
+            });
+
+            Size2D screen = _window.WindowSize;
+            const int RowHeight = 62;
+            int width = 720;
+            int height = (NuiTheme.Pad * 2) + 56 + (_menu.Count * RowHeight) + 44;
+
+            _menuPanel = new View
+            {
+                Position2D = new Position2D((screen.Width - width) / 2, (screen.Height - height) / 2),
+                Size2D = new Size2D(width, height),
+                BackgroundColor = NuiTheme.PanelDeep,
+                CornerRadius = NuiTheme.Radius,
+            };
+
+            _menuPanel.Add(new TextLabel
+            {
+                Position2D = new Position2D(NuiTheme.Pad, NuiTheme.Pad),
+                Size2D = new Size2D(width - (NuiTheme.Pad * 2), 36),
+                PointSize = 13,
+                TextColor = NuiTheme.Accent,
+                Text = "MENU",
+            });
+
+            // Behind the rows, so a row's own text is never covered by it.
+            _menuHighlight = new View
+            {
+                Position2D = new Position2D(NuiTheme.Pad - 8, NuiTheme.Pad + 56),
+                Size2D = new Size2D(width - (NuiTheme.Pad * 2) + 16, RowHeight - 6),
+                BackgroundColor = NuiTheme.Accent,
+                CornerRadius = 8f,
+            };
+            _menuPanel.Add(_menuHighlight);
+
+            _menuLabels = new TextLabel[_menu.Count];
+            _menuShortcuts = new TextLabel[_menu.Count];
+
+            for (int i = 0; i < _menu.Count; i++)
+            {
+                RemoteMenu.Item item = _menu.ItemAt(i);
+                int y = NuiTheme.Pad + 56 + (i * RowHeight);
+
+                _menuLabels[i] = new TextLabel
+                {
+                    Position2D = new Position2D(NuiTheme.Pad, y + 6),
+                    Size2D = new Size2D(width - (NuiTheme.Pad * 2) - 140, 42),
+                    PointSize = 15,
+                    TextColor = NuiTheme.Ink,
+                    Text = item.Label,
+                };
+                _menuPanel.Add(_menuLabels[i]);
+
+                _menuShortcuts[i] = new TextLabel
+                {
+                    Position2D = new Position2D(width - NuiTheme.Pad - 140, y + 10),
+                    Size2D = new Size2D(140, 38),
+                    PointSize = 11,
+                    HorizontalAlignment = HorizontalAlignment.End,
+                    TextColor = NuiTheme.InkMuted,
+                    Text = item.Shortcut,
+                };
+                _menuPanel.Add(_menuShortcuts[i]);
+            }
+
+            _menuPanel.Add(new TextLabel
+            {
+                Position2D = new Position2D(NuiTheme.Pad, height - NuiTheme.Pad - 30),
+                Size2D = new Size2D(width - (NuiTheme.Pad * 2), 28),
+                PointSize = 10,
+                TextColor = NuiTheme.InkMuted,
+                Text = "up/down to choose  ·  OK to pick  ·  Return to close",
+            });
+
+            _window.Add(_menuPanel);
+            _menuPanel.Hide();
+        }
+
+        private void ShowMenu(bool visible)
+        {
+            if (visible)
+            {
+                _menu.Open();
+                DrawMenuSelection();
+                _menuPanel.Show();
+                _menuPanel.RaiseToTop();
+                DiagLog.Add("menu opened");
+            }
+            else
+            {
+                _menu.Close();
+                _menuPanel.Hide();
+            }
+        }
+
+        private void DrawMenuSelection()
+        {
+            const int RowHeight = 62;
+            _menuHighlight.Position2D = new Position2D(
+                _menuHighlight.Position2D.X,
+                NuiTheme.Pad + 56 + (_menu.SelectedIndex * RowHeight));
+
+            for (int i = 0; i < _menuLabels.Length; i++)
+            {
+                bool picked = i == _menu.SelectedIndex;
+
+                // On the accent bar, muted grey is unreadable and the accent itself
+                // is invisible: both rows swap to the panel colour instead.
+                _menuLabels[i].TextColor = picked ? NuiTheme.PanelDeep : NuiTheme.Ink;
+                _menuShortcuts[i].TextColor = picked ? NuiTheme.PanelDeep : NuiTheme.InkMuted;
+            }
+        }
+
+        /// <summary>
+        /// Everything the browser can be asked to do, in one place, so a number key
+        /// and a menu row cannot drift apart.
+        /// </summary>
+        private void RunAction(string id)
+        {
+            // A number key can fire an action with the menu still up, and two
+            // panels fighting over the middle of the screen reads as a glitch.
+            // Reaching here from the menu has already closed it, so this is only
+            // ever the shortcut's doing.
+            if (_menu.Visible)
+            {
+                ShowMenu(false);
+            }
+
+            switch (id)
+            {
+                case RemoteMenu.ActionAddress:
+                    _keyboard.Open(KeyboardTarget.Address, _atHome ? string.Empty : _cachedUrl);
+                    break;
+
+                case RemoteMenu.ActionHome:
+                    ShowHome();
+                    break;
+
+                case RemoteMenu.ActionBookmark:
+                    ToggleFavourite();
+                    break;
+
+                case RemoteMenu.ActionTypeInField:
+                    _keyboard.Open(KeyboardTarget.PageField, string.Empty);
+                    break;
+
+                case RemoteMenu.ActionIdentity:
+                    ApplyPreset((_presetIndex + 1) % _presets.Length);
+                    Store.Set("uaPreset", _presetIndex);
+                    _web.Reload();
+                    break;
+
+                case RemoteMenu.ActionKeysToPage:
+                    _keysToPage = !_keysToPage;
+                    DiagLog.Add(_keysToPage ? "keys -> page" : "keys -> cursor");
+                    Flash(_keysToPage ? "keys go to the page" : "keys move the pointer");
+                    UpdateStatus();
+                    break;
+
+                case RemoteMenu.ActionFitPage:
+                    _viewportFix = !_viewportFix;
+                    Store.Set("viewportFix", _viewportFix);
+                    DiagLog.Add("viewport fix " + (_viewportFix ? "ON" : "OFF"));
+                    ApplyViewportFix();
+                    UpdateStatus();
+                    break;
+
+                case RemoteMenu.ActionImages:
+                    ToggleImages();
+                    break;
+
+                case RemoteMenu.ActionHints:
+                    _hintsWanted = !_hintsWanted;
+                    ShowHints(_hintsWanted);
+                    Store.Set("hints", _hintsWanted);
+                    break;
+
+                case RemoteMenu.ActionDiagnostics:
+                    ShowOverlay(!_overlayVisible);
+                    break;
+
+                case RemoteMenu.ActionQuit:
+                    Exit();
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// The menu's own key handling, while it is up. Returns false for a key the
+        /// menu does not want, which the caller then treats as normal — a number
+        /// key still does its job with the menu open rather than being swallowed.
+        /// </summary>
+        private bool HandleMenuKey(string key)
+        {
+            switch (key)
+            {
+                case RemoteKeys.Up:
+                    _menu.Move(-1);
+                    DrawMenuSelection();
+                    return true;
+
+                case RemoteKeys.Down:
+                    _menu.Move(1);
+                    DrawMenuSelection();
+                    return true;
+
+                case RemoteKeys.Ok:
+                case RemoteKeys.OkKeypad:
+                    string id = _menu.Selected.Id;
+                    ShowMenu(false);
+                    RunAction(id);
+                    return true;
+
+                case RemoteKeys.Back:
+                case RemoteKeys.Left:
+                    ShowMenu(false);
+                    return true;
+            }
+
+            if (RemoteKeys.IsMenuKey(key) || RemoteKeys.IsMediaKey(key))
+            {
+                ShowMenu(false);
+                return true;
+            }
+
+            return false;
+        }
+
         private void OnWindowKey(object sender, Window.KeyEventArgs e)
         {
             if (e.Key.State != Key.StateType.Down)
@@ -473,7 +772,11 @@ namespace Overscan
 
             if (_web == null)
             {
-                if (key == RemoteKeys.Num3)
+                // The engine never started, so there is no page and no menu — but
+                // the diagnostics screen is the whole reason someone is still
+                // pressing buttons, and on a remote with no numpad key 3 cannot
+                // get them there. Any menu button does instead.
+                if (key == RemoteKeys.Num3 || RemoteKeys.IsMenuKey(key) || RemoteKeys.IsMediaKey(key))
                 {
                     ShowOverlay(!_overlayVisible);
                 }
@@ -482,6 +785,22 @@ namespace Overscan
                     Exit();
                 }
 
+                return;
+            }
+
+            if (OkHoldConsumed(key))
+            {
+                return;
+            }
+
+            if (_menu.Visible && HandleMenuKey(key))
+            {
+                return;
+            }
+
+            if (RemoteKeys.IsMenuKey(key) || (RemoteKeys.IsMediaKey(key) && !_keysToPage))
+            {
+                ShowMenu(true);
                 return;
             }
 
@@ -533,60 +852,111 @@ namespace Overscan
                     break;
 
                 case RemoteKeys.Num0:
-                case RemoteKeys.More:
-                case RemoteKeys.Menu:
-                    _keyboard.Open(KeyboardTarget.Address, _atHome ? string.Empty : _cachedUrl);
+                    RunAction(RemoteMenu.ActionAddress);
                     break;
 
                 case RemoteKeys.Num1:
-                    ApplyPreset((_presetIndex + 1) % _presets.Length);
-                    Store.Set("uaPreset", _presetIndex);
-                    _web.Reload();
+                    RunAction(RemoteMenu.ActionIdentity);
                     break;
 
                 case RemoteKeys.Num2:
-                    _keyboard.Open(KeyboardTarget.PageField, string.Empty);
+                    RunAction(RemoteMenu.ActionTypeInField);
                     break;
 
                 case RemoteKeys.Num3:
-                    ShowOverlay(!_overlayVisible);
+                    RunAction(RemoteMenu.ActionDiagnostics);
                     break;
 
                 case RemoteKeys.Num4:
-                    _keysToPage = !_keysToPage;
-                    DiagLog.Add(_keysToPage ? "keys -> page" : "keys -> cursor");
-                    UpdateStatus();
+                    RunAction(RemoteMenu.ActionKeysToPage);
                     break;
 
                 case RemoteKeys.Num6:
-                    _viewportFix = !_viewportFix;
-                    Store.Set("viewportFix", _viewportFix);
-                    DiagLog.Add("viewport fix " + (_viewportFix ? "ON" : "OFF"));
-                    ApplyViewportFix();
-                    UpdateStatus();
+                    RunAction(RemoteMenu.ActionFitPage);
                     break;
 
                 case RemoteKeys.Num7:
-                    _hintsWanted = !_hintsWanted;
-                    ShowHints(_hintsWanted);
-                    Store.Set("hints", _hintsWanted);
+                    RunAction(RemoteMenu.ActionHints);
                     break;
 
                 case RemoteKeys.Num8:
-                    ToggleFavourite();
+                    RunAction(RemoteMenu.ActionBookmark);
                     break;
 
                 case RemoteKeys.Num9:
-                    ShowHome();
+                    RunAction(RemoteMenu.ActionHome);
                     break;
 
                 case RemoteKeys.Info:
-                    ToggleImages();
+                    RunAction(RemoteMenu.ActionImages);
                     break;
 
                 default:
-                    DiagLog.Add("unhandled key: " + key);
+                    NoteUnknownKey(key);
                     break;
+            }
+        }
+
+        /// <summary>
+        /// Watches OK for a hold, and opens the menu on one. Returns true when the
+        /// press belongs to a hold and must go no further.
+        /// </summary>
+        /// <remarks>
+        /// Two things have to stay true here. A single press must behave exactly as
+        /// it always did — a hold is detected from the repeats that follow, never by
+        /// delaying the press itself, so no click in this browser waits on a Up
+        /// event some firmware may not send. And once the menu is up, the rest of
+        /// the hold has to be thrown away: the presses still arriving are the same
+        /// button the user has not let go of yet, and letting them through would
+        /// pick the first row of the menu they were only just opening.
+        /// </remarks>
+        private bool OkHoldConsumed(string key)
+        {
+            if (key != RemoteKeys.Ok && key != RemoteKeys.OkKeypad)
+            {
+                _okRepeats = 0;
+                return false;
+            }
+
+            DateTime now = DateTime.UtcNow;
+            bool sameHold = (now - _lastOk).TotalMilliseconds <= OkRepeatGapMs;
+            _lastOk = now;
+
+            if (!sameHold)
+            {
+                // A press in its own right: it clicks, or it picks a menu row.
+                _okRepeats = 0;
+                return false;
+            }
+
+            if (_menu.Visible)
+            {
+                return true;
+            }
+
+            _okRepeats++;
+            if (_okRepeats < OkHoldRepeats)
+            {
+                return false;
+            }
+
+            _okRepeats = 0;
+            ShowMenu(true);
+            return true;
+        }
+
+        /// <summary>
+        /// A button we have no name for. It goes to the diagnostics log as before,
+        /// and now also onto the hints card — the user who most needs to report an
+        /// unknown key is the one whose remote cannot reach the diagnostics screen.
+        /// </summary>
+        private void NoteUnknownKey(string key)
+        {
+            DiagLog.Add("unhandled key: " + key);
+
+            if (_hintsFooter != null)
+            {
+                _hintsFooter.Text = "unknown button: " + key;
             }
         }
 

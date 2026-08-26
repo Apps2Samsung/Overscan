@@ -70,6 +70,7 @@ browser simply won't start. Newer sets don't have this restriction.
 | --- | --- |
 | **D-pad** | Move the pointer (speeds up while held) |
 | **OK** | Click. On a text box, opens the keyboard for it |
+| **hold OK** | Open the menu — everything below, in a list you can walk |
 | **Back** | Close overlay → back a page → exit |
 | **CH ▲ / ▼** | Page up / page down |
 | **0** | Address bar |
@@ -83,6 +84,18 @@ browser simply won't start. Newer sets don't have this restriction.
 | **8** | Keep this page in favourites (press again to remove) |
 | **9** | Back to the start screen |
 | **Info** | Images on/off — the biggest speed-up on an old set |
+
+### No number keys on your remote?
+
+The slim remote that ships with recent sets — The Frame's among them — has no
+numpad at all, so none of the rows above are reachable on it. **Hold OK** for a
+second and the same list appears on screen; the D-pad moves through it and OK
+picks. A **menu**, **tools** or **play/pause** button opens it in one press if your
+remote has one.
+
+If a button of yours does nothing, press it once and look at the bottom of the
+remote card in the corner: it prints the name the TV gave that button. Send us that
+name and we'll wire it up.
 
 ### The on-screen keyboard
 
