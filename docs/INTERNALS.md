@@ -357,6 +357,66 @@ to `mmap(PROT_EXEC)` a file it is withholding is precisely what such a policy ex
 to refuse, and refusing it by signal rather than by errno is a legal way to do that.
 It is traced immediately before, so the trail names it outright either way.
 
+The first of those two rules held up. It also turned out to be unsatisfiable in the
+browser on the set it was written for — see the next section.
+
+### `ewk_init` does not return 0 — it does not return
+
+`build-f75dd96` restored the pre-probe depth on the Q80: the trail reached the
+engine again. What it also showed is that the whole failure model above was wrong
+about one word. Every launch on that set ends on the same line:
+
+```
+08:42:38    engine implementation: REFUSED — libprivileged-service-client.so: …
+08:42:38    Chromium.Initialize()
+```
+
+and nothing after it. `Breadcrumbs.Drop` writes each line with its own
+open/append/close precisely so that this is readable, so the last line is where
+the process stopped: inside `ewk_init`. It is not returning 0 twice. It is not
+returning.
+
+That invalidates two things at once. The retry never happens, the failure screen
+never appears — and `SmackWall.InvestigateInBackground`, which the previous section
+carefully sequenced *after* both attempts, is unreachable on the one set it was
+written for. `permission : (nothing was refused)` in that report does not mean
+nothing was refused; it means nothing was ever asked.
+
+Three changes follow from it.
+
+**The engine's own output survives the crash now.** `NativeStdErr` was already
+pointing fds 1 and 2 at `<data>/stderr.log` before the call — but it only reads that
+file back *after* the call returns, so a call that never returns hands back
+`(not captured)` and leaves its output on disk. Where the next launch truncated it,
+`FileMode.Create`. Four builds' worth of EINA_LOG lines were written and thrown
+away. `Breadcrumbs.Init` now rolls that file aside to `stderr.prev.log` in the same
+breath as the trail — the only moment between the two runs — and reads it into
+`Breadcrumbs.PreviousStdErr`, which the report prints as *engine stdout/stderr
+(previous run)*. It also goes on `DiagServer`'s pre-UI page, which is what a quick
+reporter gets and which used to carry three lines and nothing else.
+
+**`Heartbeat` times the call that does not come back.** "Did not return" still
+covers two failures needing opposite fixes: a crash inside the engine, or the
+launchpad killing us because `ewk_init` is being called from inside the create
+callback and Tizen will not wait on that callback forever. A tick a second tells
+them apart — a crash leaves no ticks, a watchdog leaves a run of them ending on a
+round number. The ticks are trail-only via `Breadcrumbs.DropToTrail`: `DiagLog`
+keeps 60 lines, and at one a second the on-screen log would lose exactly the
+start-up lines worth reading. The elapsed time is measured in `Stop`, on the calling
+side, so a call that returns in 5 ms is not reported as the second the ticking
+thread takes to notice.
+
+**In the probe, and only in the probe, the permission wall goes first.** The rule
+above still holds for the browser: #13 and #17 each lost a build to a probe that
+died before the engine was asked to start. But `OverscanProbe` is a separate
+package with its own id, built by CI into `Overscan-probe.tpk`, and its whole
+purpose is to be expendable — `Step` announces each call before making it, so a
+process that dies names its own cause on the next launch. Sequencing anything after
+`ewk_init` there is sequencing it after the point of no return. So `4f permission
+wall` runs `SmackWall.Investigate` synchronously between the implementation dlopen
+and `Chromium.Initialize`, and its verdict is in the trail before the engine gets a
+chance to take the process with it.
+
 ### `ELM_ACCEL` has to be set before the window exists
 
 `libchromium-ewk.so` has a library constructor whose entire body is
