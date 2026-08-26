@@ -26,6 +26,53 @@ namespace Overscan
         /// <summary>The "123"/More button; what the emulator's remote panel sends.</summary>
         public const string More = "XF86More";
 
+        // ------------------------------------------------------------ menu keys
+        //
+        // A slim Samsung remote (The Frame, TM2360E and relatives) has no number
+        // keys at all, so every one of the Num* bindings below is unreachable on
+        // it — see issue #27. These are the buttons such a remote *does* have and
+        // that this app has no other use for. They all open the on-screen menu,
+        // which is the only way those functions can be reached without a numpad.
+        //
+        // Which name a given button actually sends is not documented and differs
+        // between remote generations, so the menu answers to all of them rather
+        // than to the one that happens to work on the sets we can test. An
+        // unrecognised key is not silently dropped either: its name is written to
+        // the hints card, so a user with a remote we have never seen can read the
+        // name off the screen and tell us.
+        public const string PlayBack = "XF86PlayBack";
+        public const string AudioPlay = "XF86AudioPlay";
+        public const string AudioPause = "XF86AudioPause";
+        public const string AudioPlayPause = "XF86AudioPlayPause";
+        public const string Tools = "XF86Tools";
+        public const string SimpleMenu = "XF86SimpleMenu";
+        public const string SysMenu = "XF86SysMenu";
+        public const string PlainMenu = "Menu";
+
+        /// <summary>
+        /// Buttons whose only job is to open the on-screen menu.
+        /// </summary>
+        public static readonly string[] MenuKeys =
+        {
+            Menu, More, Tools, SimpleMenu, SysMenu, PlainMenu,
+        };
+
+        /// <summary>
+        /// Transport buttons, which also open the menu — but only as a fallback.
+        /// Some slim remotes have no menu-ish button at all and these are all that
+        /// is left; a remote that has both should not need them.
+        /// </summary>
+        /// <remarks>
+        /// A browser that swallows Play/Pause while a video is playing is its own
+        /// kind of broken, so these stop opening the menu the moment the user routes
+        /// keys to the page (key 4) — that switch already exists for exactly this
+        /// sort of collision, and the page then gets them untouched.
+        /// </remarks>
+        public static readonly string[] MediaKeys =
+        {
+            PlayBack, AudioPlay, AudioPause, AudioPlayPause,
+        };
+
         public const string ChannelUp = "XF86RaiseChannel";
         public const string ChannelDown = "XF86LowerChannel";
 
@@ -49,6 +96,37 @@ namespace Overscan
         {
             Back, Menu, Info, Search, More, ChannelUp, ChannelDown,
             Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
+            Tools, SimpleMenu, SysMenu,
+            PlayBack, AudioPlay, AudioPause, AudioPlayPause,
         };
+
+        /// <summary>
+        /// True for a button whose only job here is to open the menu. Kept as a
+        /// method rather than a set lookup so the caller needs no allocation on
+        /// the key path.
+        /// </summary>
+        public static bool IsMenuKey(string key)
+        {
+            return Contains(MenuKeys, key);
+        }
+
+        /// <summary>True for a transport button — see <see cref="MediaKeys"/>.</summary>
+        public static bool IsMediaKey(string key)
+        {
+            return Contains(MediaKeys, key);
+        }
+
+        private static bool Contains(string[] keys, string key)
+        {
+            for (int i = 0; i < keys.Length; i++)
+            {
+                if (keys[i] == key)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }

@@ -7,7 +7,8 @@ cannot be logged.
 ## Source layout
 
 ```
-src/common/     engine-agnostic: user agents, injected page script, diagnostics, URL helpers
+src/common/     engine-agnostic: user agents, injected page script, diagnostics, URL helpers,
+                remote key names and the on-screen menu's model
 src/elm/        ElmSharp + Tizen.WebView (ewk) UI  — TV 5.0-8.0
 src/nui/        NUI + NUI WebView UI               — TV 9.0+
 src/probe/      diagnostic ladder harness (its own package)
@@ -494,6 +495,46 @@ observability is built into the app:
   (`Elementary.Initialize` → window → widgets → `Chromium.Initialize` → web view →
   UA → `LoadUrl`), plus filesystem and `dlopen` reconnaissance. This is what found
   the DRM wall.
+
+## Remotes without a numpad
+
+Every function in this browser except the pointer used to sit behind a number key,
+and the slim remote that ships with recent sets — The Frame's among them — has no
+number keys at all. On one of those the app was a pointer and nothing else: no
+address bar, no start screen, not even the diagnostics screen that would have said
+so. That was issue #27.
+
+The fix is an on-screen menu listing every action, walked with the D-pad. Three
+things about it are deliberate:
+
+- **`RemoteMenu` (in `src/common`) holds the list and the selection; each UI draws
+  it.** The two builds do not offer quite the same actions — NUI has no pointer-style
+  toggle, ElmSharp has no `Settings` for one — so each supplies its own item array
+  rather than the model carrying names for things one of them cannot do.
+- **Both builds route the number keys and the menu rows through one `RunAction`
+  switch.** Before this there were two copies of every action body, one per input
+  path, which is how a shortcut and a menu entry quietly drift apart.
+- **The menu opens on a *hold* of OK, detected from key repeats.** Tizen delivers a
+  held key as repeated Down events, so a press still clicks the instant it arrives,
+  exactly as it always did. Recognising the hold by waiting for the Up event would
+  read better and would put every click in this browser at the mercy of a firmware
+  delivering one — and the sets in issues #13 and #17 are a standing reminder of how
+  much of this platform does not do what it says. Once the menu is up, the rest of
+  that hold is dropped: those presses are the button the user has not let go of yet,
+  and letting one through would pick the first row of the menu they were still
+  opening.
+
+A dedicated **menu**, **tools** or **play/pause** button opens it in one press
+instead. Which name such a button sends is undocumented and differs between remote
+generations, so `RemoteKeys.MenuKeys` answers to all the plausible ones rather than
+the one that happened to work on a set we could test. Transport buttons are kept
+separate in `MediaKeys`: they open the menu too, but stop doing so once keys are
+routed to the page (key 4), because a browser that swallows Play/Pause during a
+video is its own kind of broken.
+
+Anything still unrecognised prints its own name on the remote card in the corner —
+not only in the diagnostics log. The user who most needs to report an unknown button
+is the one whose remote cannot reach the diagnostics screen.
 
 ## The D-pad pointer
 
