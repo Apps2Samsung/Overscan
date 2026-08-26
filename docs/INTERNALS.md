@@ -635,6 +635,62 @@ the remote — and it was blurring frames too, which meant the app undoing the o
 thing the frame-click path had just achieved. A frame is not a text field and cannot
 raise the IME, so it is now left alone (and its focus recorded, per above).
 
+#### The answer was the first row: nothing arrives
+
+On the set in #20 (UA55M70HAULXL, Tizen 10) the report came back
+`trusted=none frame=none`, four taps in a row. What that rules out is most of the
+things worth suspecting, because the log also shows the feed working exactly as
+designed:
+
+- **Both symbols resolve and both calls return.** A missing export throws
+  `EntryPointNotFoundException`, which would have been recorded as
+  `feed failed — …`; a null return from the constructor would have said
+  `could not build a touch point`. Neither appeared, so the binder has both and the
+  window handle read out of `SwigCPtr` was not null.
+- **The release really fired.** A press whose release never came would leave
+  `_inFlight` set, and the next press would log `previous tap is still in flight`.
+  Four consecutive `fed tap` lines with no such warning means the timer ticked and
+  the second point went out 90 ms after the first, as intended.
+- **Nothing in the scene ate it.** The chrome, progress bar, overlay and hints card
+  are all `Sensitive = false` (and a failure to clear it would have been logged);
+  the keyboard is `Hide()`n, and an invisible actor is not hit-tested; the web view
+  is full-window and sensitive.
+- **The witness cannot have missed it.** It listens in the capture phase for any
+  `isTrusted` event, and separately for a frame taking focus — which is the parent
+  side of a click that went *into* a cross-origin frame, i.e. the one case where no
+  trusted event surfaces in the outer document. Both are empty.
+
+So the touch is built correctly, fed correctly, and never reaches the engine. Either
+DALi does not hit-test a fed point onto the web view actor on this platform, or the
+TV's engine backend drops what `WebView::OnTouchEvent` hands it. From outside those
+two are indistinguishable, and neither has a variation left that would not be a
+guess at the same layer. **`FeedTouchPoint` is a dead end on the NUI build**, and it
+stays in the tree only because it is the thing that produced this evidence.
+
+(For the record, the managed surface at API 9 does expose `FeedTouchPoint` and
+`FeedTouchEvent` after all — the P/Invoke was not necessary. It is also not the
+problem: same call, same layer, same result.)
+
+#### What is left: the engine's own protocol
+
+One layer remains, and it is *inside* the engine rather than beneath it. Chromium's
+DevTools protocol has `Input.dispatchMouseEvent`, which the browser process injects
+into the widget's input pipeline: the renderer treats it as real input, so it is
+`isTrusted`, and the browser hit-tests it to the right renderer — which is precisely
+what makes it reach an out-of-process cross-origin frame. It is the mechanism
+Puppeteer and Playwright use for this exact problem, and it needs no privilege the
+app does not already have (`internet`, for a socket on loopback).
+
+TizenFX declares `CSharp_Dali_WebView_StartInspectorServer` in its interop layer at
+API 9 without exposing a managed wrapper, so the export is reachable the same way
+`FeedTouch` was. `NuiInspector` starts it and reports the port as `inspector :` on
+the diagnostics screen.
+
+That is deliberately only the question. Two things have to hold before a client is
+worth writing — that the server starts on a retail set, and that it is reachable —
+and neither can be established from here. A CDP client is a WebSocket client plus a
+protocol, and there is no sense writing it blind.
+
 ### Why our own keyboard rather than the platform IME
 
 An ElmSharp `Entry` takes focus at startup on a real TV, the platform IME appears

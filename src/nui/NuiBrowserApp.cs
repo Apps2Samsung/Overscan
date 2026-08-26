@@ -214,6 +214,13 @@ namespace Overscan
                 _cursor = new NuiCursor(_web);
                 _cursor.Clicked += OnPageClicked;
                 DiagLog.Add("engine ready");
+
+                // Asks the one open question left about frames (issue #20). See
+                // NuiInspector: the layer below the engine does not deliver on that
+                // set, and the engine's own protocol is the only way in that remains.
+                // Whether the server starts on a retail TV is not something I can
+                // find out from here.
+                NuiInspector.Start(_web);
                 return true;
             }
             catch (Exception ex)
@@ -909,6 +916,7 @@ namespace Overscan
                   "vp fix    : " + (_viewportFix ? "ON" : "off") + "  (key 6)\n" +
                   "frame click: " + NuiNativeTouch.LastResult + "\n" +
                   "frame saw  : " + _frameWitness + "\n" +
+                  "inspector : " + NuiInspector.LastResult + "\n" +
                   "url       : " + _cachedUrl;
 
             return "Overscan diagnostics (NUI build)\n\n" +
