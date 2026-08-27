@@ -1696,6 +1696,7 @@ namespace Overscan
                        "permission : " + (ChromiumImpl.Blocked == null
                            ? "(nothing was refused)"
                            : ChromiumImpl.Blocked + " — " + SmackWall.Summary) + "\n" +
+                       "own native : " + NativeProbe.Summary + "\n" +
                        "trail file : " + Breadcrumbs.Location + "\n" +
                        (full ? "\nefl ladder (ewk_init's own order)\n" + EflSubsystems.Dump() +
                                "\nengine implementation (libchromium-impl.so)\n" + ChromiumImpl.Dump() +

@@ -539,10 +539,36 @@ returns `SF_STATUS_UEP_FILE_NOT_SIGNED`, which in enforce mode is another EPERM.
 A stub would be the first native `.so` this repo has ever shipped, so nothing we
 have measured says a native library of ours can be mapped executable at all.
 
-So the stub has a cheap prerequisite: **ship any trivial ELF `.so` in the package
-and `mmap` it `PROT_READ|PROT_EXEC` by absolute path.** If that is refused, the
-stub is dead too and the honest answer to the reporter is that this TV cannot run
-Overscan. That test is one build and it costs the same as guessing.
+So the stub had a cheap prerequisite, and that is what the current build ships.
+
+`Overscan5/res/libovprobe.so` is a real ARM shared object — one function, no
+`DT_NEEDED`, `SONAME libovprobe.so`, built freestanding by `tools/elfprobe/build.sh`
+from `ovprobe.s` with nothing but `as` and `ld` out of one downloaded `.deb`. It is
+committed rather than built in CI, because CI has no ARM toolchain and the file
+changes never. `res/` is where it lives because that is the app's own read-only
+directory, the one an app rule grants `rxl` on, and where a real stub would have to
+live too.
+
+`NativeProbe` asks the set three things about it, each named on the trail before the
+call is made: that it can be read, that a page of it can be mapped
+`PROT_READ|PROT_EXEC`, and that the dynamic loader will take it
+(`RTLD_LAZY|RTLD_GLOBAL` by absolute path, then `dlsym` for the marker — the same
+two flags a stub would need). The verdict lands in the report as `own native :`.
+
+It also prints `e_flags` for our library and for `libchromium-ewk.so` side by side.
+ARM writes its float ABI there, and a `dlopen` refused for an ABI mismatch reads
+exactly like one refused by policy unless those two numbers are next to each other.
+Ours is `0x5000200` (soft), which is what a Tizen armv7 `gnueabi` build carries —
+but that is the sort of thing worth measuring rather than believing.
+
+**It runs in front of `SmackWall.Investigate`, on the same thread.** That looks
+backwards against the rule about probes going last, and it is deliberate: the last
+step of that investigation is the `getxattr` the Q80 has not come back from twice,
+so anything queued behind it never runs at all. Both sit after the engine has
+already failed, so neither is in front of anything that still matters.
+
+If the mapping is refused, the stub is dead too and the honest answer to the
+reporter is that this TV cannot run Overscan.
 
 **The judgment is the point, and it is Patrick's to make, not a session's.** The
 stub grants nothing — it cannot give this app a privilege it does not have, and if
