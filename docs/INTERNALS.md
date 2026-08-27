@@ -580,8 +580,12 @@ fails the build with MSB3024, because the task copies by `%(TizenTpkSubPath)` an
 that metadata only comes from its own globs.
 
 **All three copies are covered by `signature1.xml` and `author-signature.xml`** —
-verified on the published `build-c2fa17d` asset for `res/` and `bin/`, and in the
-built tpk for `lib/`, byte-identical to the committed object in every case. That
+verified on the published `build-a7b7030` asset, byte-identical to the committed
+object in every case, with the new location labels present in the shipped
+`Overscan.dll` to prove the asset was the build it claimed to be. The CI log cannot
+stand in for that check: `TizenTpkFiles` prints an item's own identity, so the `lib/`
+copy logs as `res/libovprobe.so` and `bin/` content is never listed — a log from a
+build with none of this in it looks identical. That
 matters because reporters re-sign with their own certificate: a file outside the
 signature fails their install rather than ours.
 
