@@ -383,10 +383,28 @@ namespace Overscan
                 {
                     int errno = Marshal.GetLastWin32Error();
                     Add(added, "  open(O_RDONLY): " + Errno(errno));
-                    Summary = "READ DENIED (" + Errno(errno) + ") — a privilege could lift this";
-                    Add(added, "  verdict: the file cannot be read at all. That is the Marlin " +
-                               "shape from issue #13: a label a privilege grants, so the fix is " +
-                               "in the manifest.");
+
+                    // Which errno it is decides the whole question, and this used
+                    // to say "a privilege could lift this" for both of them. Smack
+                    // refuses with EACCES — every decision in it comes out of
+                    // smk_access, which returns -EACCES — so an EPERM on opening a
+                    // file that exists is somebody else's refusal, and no manifest
+                    // reaches it. See "Above platform level" in docs/INTERNALS.md.
+                    if (errno == Eperm)
+                    {
+                        Summary = "READ DENIED (EPERM) — not Smack, and not a privilege";
+                        Add(added, "  verdict: refused before Smack was asked. Smack says " +
+                                   "EACCES; EPERM on an existing file is the firmware's own " +
+                                   "gate and no manifest privilege lifts it.");
+                    }
+                    else
+                    {
+                        Summary = "READ DENIED (" + Errno(errno) + ") — a privilege may lift this";
+                        Add(added, "  verdict: the file cannot be read at all, and Smack or the " +
+                                   "file's group said so. That is the Marlin shape from issue " +
+                                   "#13, where the fix was in the manifest.");
+                    }
+
                     return;
                 }
 
