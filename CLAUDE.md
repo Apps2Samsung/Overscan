@@ -102,6 +102,18 @@ Publishes a `build-<sha7>` tag with all six `.tpk` assets, default-signed. Issue
 replies quote that tag. Reporters re-sign with their own partner certificate, so
 signing is not in our path.
 
+**Checking what actually shipped needs the file, and this box cannot fetch it.**
+`gh release download` and the asset API both come back `HTTP 403` with a proxy
+page instead of the tpk, so a published asset has to be downloaded by hand and
+read from `~/Downloads`. Worth doing whenever a change alters *where* a file lands
+in the package: the build log cannot answer that question, because
+`TizenTpkFiles : <path>` prints each item's own identity, so a copy redirected
+elsewhere with `TizenTpkSubDir` still logs as its source path and `bin/` content
+is not listed at all. Open the tpk — the file list, the per-copy hashes, and the
+`URI=` references in `signature1.xml` and `author-signature.xml` are the answer.
+Both signatures matter: a file outside them fails the reporter's re-signing rather
+than ours.
+
 ## Working an issue
 
 Nobody debugging this app has the TV in the room. A build takes a sign, an
