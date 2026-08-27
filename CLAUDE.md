@@ -69,6 +69,24 @@ It compiles the shipping file itself and clicks into a genuinely cross-site
 minutes of existing, each of which would have been indistinguishable, from a TV,
 from "the engine ignores the click".
 
+### The native probe library
+
+`Overscan5/res/libovprobe.so` is the only native binary this repo ships: a tiny ARM
+shared object that exists so issue #17's set can be asked whether this app may load
+native code of its own at all. It is **committed**, because CI has no ARM toolchain.
+
+Rebuild it only if `tools/elfprobe/ovprobe.s` changes:
+
+```sh
+apt-get download binutils-arm-linux-gnueabihf          # no root needed
+dpkg-deb -x binutils-arm-linux-gnueabihf_*.deb /some/where
+XTOOL=/some/where tools/elfprobe/build.sh
+```
+
+That script prints the ELF header and dynamic section at the end — check it still
+says `DYN`, `ARM`, `SONAME libovprobe.so` and no `NEEDED`. A dependency on anything
+would make a refusal to load ambiguous, which defeats the whole measurement.
+
 ## Releasing
 
 ```sh
@@ -102,8 +120,16 @@ around spending it well.
   run Overscan". Guessing costs somebody else an install.
 - **Anything left open is written down in `docs/INTERNALS.md`, not carried in a
   head.** What is waiting on a reporter, what the next report decides, and any
-  decision that is Patrick's rather than a session's — see *What is left on the
-  Q80* there for the shape to follow.
+  decision that is Patrick's rather than a session's. Two sections hold the current
+  state and are the first thing to read when picking this up: *What is left on the
+  Q80* (issue #17) and *What is left on the 2025 sets* (issue #20). Update them in
+  the same change that ships the build they describe.
+- **Every reply on an issue quotes a release tag, and every open question names what
+  each possible answer decides** — including the answer that means "this set cannot
+  run Overscan". Saying that in advance is what stops it reading as a reversal
+  later.
+- **Posting a comment on an issue is asked first.** Opening a PR, merging it and
+  cutting a release are not — those were confirmed standing.
 
 ## Conventions
 
