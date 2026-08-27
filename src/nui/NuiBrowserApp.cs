@@ -74,6 +74,8 @@ namespace Overscan
         private bool _overlayVisible;
         private bool _hintsWanted = true;
         private bool _imagesOn = true;
+        private bool _videoOverlay;
+        private string _cookieState = "(not configured)";
         private bool _keysToPage;
         private bool _viewportFix;
         private bool _atHome;
@@ -81,6 +83,15 @@ namespace Overscan
         private bool _chromeVisible;
         private int _marquee;
         private DateTime _lastActivity = DateTime.UtcNow;
+
+        /// <summary>
+        /// When the trail was last told how big this process had become. See
+        /// <see cref="ProcessMemory"/>: an app the low-memory killer takes away
+        /// and an app that crashes leave the same silence behind them, and this
+        /// line is what tells the two apart afterwards.
+        /// </summary>
+        private DateTime _lastMemoryNote = DateTime.MinValue;
+        private long _peakMemoryMb;
 
         /// <summary>
         /// How many OK presses have arrived in a row without the key being let go.
@@ -182,7 +193,7 @@ namespace Overscan
                     Size = new Size(screen.Width, screen.Height),
                 };
                 _window.Add(_web);
-                DiagLog.Add("NUI WebView created");
+                Breadcrumbs.Drop("NUI WebView created");
 
                 // The chrome is drawn over the page but must never be *hit* by it:
                 // DALi delivers a fed touch to the front-most sensitive actor, and
@@ -215,11 +226,24 @@ namespace Overscan
                     _web.Settings.AutoFittingEnabled = false;
                     _imagesOn = Store.GetBool("images", true);
                     _web.Settings.AutomaticImageLoadingAllowed = _imagesOn;
+
+                    // Nothing this browser does is worth a private window, and the
+                    // engine's own default for it is not documented anywhere we can
+                    // read. With it on, cookies and local storage live in memory and
+                    // die with the process — which is what a site logging you out
+                    // every launch (issue #20) looks like from the sofa.
+                    _web.Settings.PrivateBrowsingEnabled = false;
                 }
+
+                ConfigureCookies();
+                ApplyVideoPath(Store.GetBool("videoOverlay", false));
 
                 _web.PageLoadStarted += (s, e) =>
                 {
-                    DiagLog.Add("load started");
+                    // On the trail, not only in the log: when a page takes the app
+                    // down with it, the address it was opening is the first thing
+                    // anyone will want to know.
+                    Breadcrumbs.Drop("load started: " + SafeUrl());
                     _loading = true;
                     ShowChrome();
 
@@ -234,7 +258,7 @@ namespace Overscan
                 {
                     _loading = false;
                     _progress.Hide();
-                    DiagLog.Add("load finished: " + SafeUrl());
+                    Breadcrumbs.Drop("load finished: " + SafeUrl() + "  [" + ProcessMemory.Summary() + "]");
                     _cursor.Reinstall();
                     Probe();
                     ApplyViewportFix();
@@ -246,20 +270,20 @@ namespace Overscan
                 {
                     _loading = false;
                     _progress.Hide();
-                    DiagLog.Add("load error on " + SafeUrl());
+                    Breadcrumbs.Drop("load error on " + SafeUrl());
                     UpdateStatus();
                 };
 
                 _cursor = new NuiCursor(_web);
                 _cursor.Clicked += OnPageClicked;
-                DiagLog.Add("engine ready");
+                Breadcrumbs.Drop("engine ready");
 
                 return true;
             }
             catch (Exception ex)
             {
                 _engineFailure = ex.GetType().Name + ": " + ex.Message;
-                DiagLog.Add("ENGINE FAILURE " + _engineFailure);
+                Breadcrumbs.Drop("ENGINE FAILURE " + _engineFailure);
                 return false;
             }
         }
@@ -281,6 +305,82 @@ namespace Overscan
             catch (Exception ex)
             {
                 DiagLog.Add("could not clear Sensitive: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Gives the session somewhere to live that outlasts the process.
+        ///
+        /// Without this the engine keeps cookies in memory only, so closing
+        /// Overscan logs you out of everything and every launch is a browser that
+        /// has never been anywhere (issue #20). The ElmSharp build has done this
+        /// since its first release, by way of <c>Context.GetCookieManager</c>; the
+        /// NUI WebView hangs the same manager off the view itself and this build
+        /// simply never asked it for one.
+        ///
+        /// The path is the app's own data directory — the only place a sideloaded
+        /// app on a retail TV is allowed to write, and where the trail and the
+        /// favourites already are.
+        /// </summary>
+        private void ConfigureCookies()
+        {
+            try
+            {
+                WebCookieManager cookies = _web.CookieManager;
+                if (cookies == null)
+                {
+                    _cookieState = "engine offered no cookie manager";
+                    DiagLog.Add("cookies: " + _cookieState);
+                    return;
+                }
+
+                cookies.CookieAcceptPolicy = WebCookieManager.CookieAcceptPolicyType.Always;
+                cookies.SetPersistentStorage(DirectoryInfo.Data, WebCookieManager.CookiePersistentStorageType.SqlLite);
+
+                _cookieState = "kept in " + DirectoryInfo.Data;
+                Breadcrumbs.Drop("cookies persistent: " + DirectoryInfo.Data);
+            }
+            catch (Exception ex)
+            {
+                _cookieState = "FAILED — " + ex.GetType().Name + ": " + ex.Message;
+                Breadcrumbs.Drop("cookies: " + _cookieState);
+            }
+        }
+
+        /// <summary>
+        /// Chooses how video reaches the screen, and remembers the choice.
+        ///
+        /// A TV decodes video on hardware and shows it on an overlay plane, with a
+        /// transparent hole punched through the page where the picture belongs.
+        /// That is the right arrangement for the set's own browser, which owns the
+        /// screen. It is a poor one for an app: DALi composites this window itself,
+        /// there are only a couple of those planes in the whole set, and a page like
+        /// an Instagram reel feed asks for one per video as it scrolls.
+        /// Overscan dying on reels and not on other video (issue #20) has that
+        /// shape, so the default here is now the in-page path, where the engine
+        /// decodes to a texture and hands it to us like any other pixels.
+        ///
+        /// It is a toggle rather than a decision because the trade is real: the
+        /// in-page path costs a copy per frame and some sets may not offer it at
+        /// all. If video turns black or stops playing, the overlay is one menu
+        /// entry away — and which way a given TV needs is exactly the thing we
+        /// cannot find out from here.
+        /// </summary>
+        private void ApplyVideoPath(bool overlay)
+        {
+            _videoOverlay = overlay;
+
+            try
+            {
+                _web.VideoHoleEnabled = overlay;
+                Breadcrumbs.Drop("video path: " + (overlay ? "hardware overlay" : "in page"));
+            }
+            catch (Exception ex)
+            {
+                // Best-effort like everything else that reaches past the managed
+                // surface: an engine without the property plays video the way it
+                // always did.
+                DiagLog.Add("video path could not be set: " + ex.Message);
             }
         }
 
@@ -387,6 +487,8 @@ namespace Overscan
                 UpdateStatus();
             }
 
+            NoteMemory();
+
             bool busy = _loading || _keyboard.IsVisible || _overlayVisible;
             if (_chromeVisible && !busy && DateTime.UtcNow - _lastActivity > TimeSpan.FromSeconds(4))
             {
@@ -394,6 +496,39 @@ namespace Overscan
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Writes this process's size to the trail every few seconds. Trail-only
+        /// and never to the on-screen log, which keeps 60 lines and would lose
+        /// everything worth reading inside a minute — see <see cref="Heartbeat"/>
+        /// for the same reasoning about a line that repeats.
+        ///
+        /// The interval is the point: an app being evicted for memory is not a
+        /// moment, it is a slope, and a slope only exists if something was writing
+        /// numbers down before anybody knew there was a problem.
+        /// </summary>
+        private void NoteMemory()
+        {
+            if (DateTime.UtcNow - _lastMemoryNote < TimeSpan.FromSeconds(5))
+            {
+                return;
+            }
+
+            _lastMemoryNote = DateTime.UtcNow;
+
+            long mb = ProcessMemory.ResidentMb();
+            if (mb < 0)
+            {
+                return;
+            }
+
+            if (mb > _peakMemoryMb)
+            {
+                _peakMemoryMb = mb;
+            }
+
+            Breadcrumbs.DropToTrail("memory: " + mb + " MB resident (peak " + _peakMemoryMb + ")");
         }
 
         private void BuildOverlay()
@@ -526,6 +661,7 @@ namespace Overscan
                 new RemoteMenu.Item(RemoteMenu.ActionKeysToPage, "Send keys to page", "4"),
                 new RemoteMenu.Item(RemoteMenu.ActionFitPage, "Fit page to screen", "6"),
                 new RemoteMenu.Item(RemoteMenu.ActionImages, "Images on/off", "Info"),
+                new RemoteMenu.Item(RemoteMenu.ActionVideoPath, "Video: in page / overlay", "5"),
                 new RemoteMenu.Item(RemoteMenu.ActionHints, "Remote card on/off", "7"),
                 new RemoteMenu.Item(RemoteMenu.ActionDiagnostics, "Diagnostics", "3"),
                 new RemoteMenu.Item(RemoteMenu.ActionQuit, "Close Overscan", string.Empty),
@@ -699,6 +835,18 @@ namespace Overscan
                     ToggleImages();
                     break;
 
+                case RemoteMenu.ActionVideoPath:
+                    ApplyVideoPath(!_videoOverlay);
+                    Store.Set("videoOverlay", _videoOverlay);
+                    Flash(_videoOverlay
+                        ? "Video: hardware overlay"
+                        : "Video: in page — try this if video closes the app");
+
+                    // The engine reads this when a video element is created, so the
+                    // page that is already open keeps whatever it started with.
+                    _web.Reload();
+                    break;
+
                 case RemoteMenu.ActionHints:
                     _hintsWanted = !_hintsWanted;
                     ShowHints(_hintsWanted);
@@ -870,6 +1018,10 @@ namespace Overscan
 
                 case RemoteKeys.Num4:
                     RunAction(RemoteMenu.ActionKeysToPage);
+                    break;
+
+                case RemoteKeys.Num5:
+                    RunAction(RemoteMenu.ActionVideoPath);
                     break;
 
                 case RemoteKeys.Num6:
@@ -1152,7 +1304,7 @@ namespace Overscan
         private void Navigate(string url)
         {
             _atHome = false;
-            DiagLog.Add("navigate: " + url);
+            Breadcrumbs.Drop("navigate: " + url);
             _web.LoadUrl(url);
             _cursor.Center();
             UpdateStatus();
@@ -1338,11 +1490,20 @@ namespace Overscan
                   "frame saw  : " + _frameWitness + "\n" +
                   "native tap : " + NuiNativeTouch.LastResult + "\n" +
                   "inspector  : " + NuiInspector.LastResult + "\n" +
+                  "cookies   : " + _cookieState + "\n" +
+                  "video     : " + (_videoOverlay ? "hardware overlay" : "in page") + "  (key 5)\n" +
+                  "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
                   "url       : " + _cachedUrl;
 
+            // The previous run's trail, exactly as the ElmSharp report carries it.
+            // A page that closes the app leaves nothing to read in this run: the
+            // launch that died is the one with the answer in it.
             return "Overscan diagnostics (NUI build)\n\n" +
                    "platform  : NUI WebView, api-version 9.0+\n" +
-                   engine + "\n\nlog\n" + DiagLog.Dump();
+                   "trail file : " + Breadcrumbs.Location + "\n" +
+                   engine + "\n\n" +
+                   "previous run (last line is where it died)\n" + Breadcrumbs.Previous + "\n\n" +
+                   "log\n" + DiagLog.Dump();
         }
 
         private static string ShortPreset(string label)

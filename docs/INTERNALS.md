@@ -912,6 +912,47 @@ typed. `Store.Init` therefore has to run **before** the keyboard is constructed 
 both builds used to initialise the store afterwards, silently discarding the user's
 layout choice.
 
+## What the NUI build never asked the engine for
+
+The two builds share `src/common` and nothing else, and everything the ElmSharp
+build learned by way of a native call it had to make itself, the NUI build gets
+for free from a managed property it never thought to set. Issue #20 found two of
+those at once, on a set where the browser otherwise works.
+
+**The session was memory-only.** ewk keeps cookies in RAM unless it is given
+somewhere to put them, and the ElmSharp build has said so since its first release
+(`Context.GetCookieManager` → `SetPersistentStorage`). NUI hangs the same manager
+off the view (`WebView.CookieManager`) and this build simply never asked for one,
+so closing Overscan logged you out of everything — a browser that has never been
+anywhere, every launch. `WebSettings.PrivateBrowsingEnabled` is now set to false
+explicitly alongside it: with it on, local storage is memory-only too, and the
+engine's default for it is not documented anywhere readable.
+
+**Video was going out through a hardware plane.** A TV decodes video on hardware
+and shows it on an overlay plane, punching a transparent hole through the page
+where the picture belongs. That is right for the set's own browser, which owns
+the screen; it is wrong for an app whose window DALi composites itself, and there
+are only a couple of those planes in the whole set. A reel feed asks for one per
+video as it scrolls, which is the shape of "reels close Overscan, other video is
+fine". `WebView.VideoHoleEnabled` now defaults to false — the in-page path, where
+the engine decodes to a texture like any other pixels — and key `5` toggles it,
+because the trade is real (a copy per frame, and some sets may not offer that path
+at all) and which way a given TV needs cannot be found out from here.
+
+Neither of those is confirmed from a TV yet. What *is* now possible is finding
+out: the NUI build had no `Breadcrumbs` at all, so a page that killed the process
+left nothing behind but the user's word for it. It calls `Breadcrumbs.Init` in
+`Main` like the ElmSharp build, drops the address it is opening on the way in, and
+the report carries the previous run's trail.
+
+`ProcessMemory` writes the resident size to the trail every five seconds, and that
+interval is the whole point. An app the low-memory killer takes away and an app
+that crashes leave the same silence, and they need opposite fixes — but on the
+trail they look nothing alike: a crash ends on whatever call was in flight, an
+eviction ends on a memory line much larger than the ones before it. A slope only
+exists if something was writing numbers down before anyone knew there was a
+problem.
+
 ## Emulator notes
 
 - **The TV emulator needs a modern `-cpu` model or it panics.** With the default
