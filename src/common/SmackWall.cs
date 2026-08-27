@@ -167,6 +167,12 @@ namespace Overscan
             {
                 var thread = new Thread(delegate ()
                 {
+                    // In front of the investigation, and on the same thread rather
+                    // than beside it. The last step of Investigate is the one the
+                    // Q80 has not come back from twice, so anything queued behind
+                    // it is a probe that never runs — and two probes racing on two
+                    // threads would leave a trail nobody can order afterwards.
+                    NativeProbe.Run();
                     Investigate(target);
                 });
 
@@ -181,6 +187,7 @@ namespace Overscan
                 // A set that will not give us a thread still gets the verdict, it
                 // just gets it the dangerous way.
                 Trace("probe: no thread (" + ex.GetType().Name + "), running inline");
+                NativeProbe.Run();
                 Investigate(target);
             }
         }

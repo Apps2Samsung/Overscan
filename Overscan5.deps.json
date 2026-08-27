@@ -1,0 +1,65 @@
+{
+  "runtimeTarget": {
+    "name": "Tizen,Version=v5.0/",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    "Tizen,Version=v5.0": {},
+    "Tizen,Version=v5.0/": {
+      "Overscan/1.0.0": {
+        "dependencies": {
+          "Tizen.NET": "5.0.0.14562",
+          "Tizen.NET.Sdk": "1.1.9"
+        },
+        "runtime": {
+          "Overscan.dll": {}
+        }
+      },
+      "Microsoft.NETCore.Platforms/2.0.0": {},
+      "Tizen.NET/5.0.0.14562": {
+        "dependencies": {
+          "Microsoft.NETCore.Platforms": "2.0.0",
+          "Tizen.NET.API5": "5.0.0.14562"
+        }
+      },
+      "Tizen.NET.API5/5.0.0.14562": {},
+      "Tizen.NET.Sdk/1.1.9": {}
+    }
+  },
+  "libraries": {
+    "Overscan/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.NETCore.Platforms/2.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-VdLJOCXhZaEMY7Hm2GKiULmn7IEPFE4XC5LPSfBVCUIA8YLZVh846gtfBJalsPQF2PlzdD7ecX7DZEulJ402ZQ==",
+      "path": "microsoft.netcore.platforms/2.0.0",
+      "hashPath": "microsoft.netcore.platforms.2.0.0.nupkg.sha512"
+    },
+    "Tizen.NET/5.0.0.14562": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-s6tDzcrNkL5LluXTyQ3UxDN+hrZ9SjDjoTCVEvlslERwszfBvn7JQpbD4okCAQ3wueHsUWxoqZvm/Tz6dHgPhQ==",
+      "path": "tizen.net/5.0.0.14562",
+      "hashPath": "tizen.net.5.0.0.14562.nupkg.sha512"
+    },
+    "Tizen.NET.API5/5.0.0.14562": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-zprWc1EtMX4QLUANp52EZpIs5yj1khnmf2matin716XB1pFaLxKjmBG3gbsgvJCJA/drujoKWcxv9hksfUxeUw==",
+      "path": "tizen.net.api5/5.0.0.14562",
+      "hashPath": "tizen.net.api5.5.0.0.14562.nupkg.sha512"
+    },
+    "Tizen.NET.Sdk/1.1.9": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-n22K2Cfp7r/Y1XLjYuL4KmOXuff3gQ7e0/n7esZ6M4bKG49A8rb62QJSZKql3WYJMs3gN4u9Q5BIVcVcG/su+w==",
+      "path": "tizen.net.sdk/1.1.9",
+      "hashPath": "tizen.net.sdk.1.1.9.nupkg.sha512"
+    }
+  }
+}
