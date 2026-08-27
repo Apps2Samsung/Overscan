@@ -41,6 +41,16 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>libovprobe.so</Link>
     </None>
+    <!--
+      And a third, in `lib/` — the last package directory a tpk has, and the
+      conventional home for a native library, so a set that labels directories
+      differently has all three asked about. `TizenTpkUserIncludeFiles` with a
+      `TizenTpkSubDir` is the packaging task's own way to place a file somewhere
+      other than where it sits in the project, so the object stays committed once.
+    -->
+    <TizenTpkUserIncludeFiles Include="res/libovprobe.so">
+      <TizenTpkSubDir>lib</TizenTpkSubDir>
+    </TizenTpkUserIncludeFiles>
   </ItemGroup>
 
   <ItemGroup>
