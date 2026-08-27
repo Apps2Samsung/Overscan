@@ -1119,18 +1119,35 @@ captcha was fixed. As of 2026-08-27 the state is:
 
 - **The session not surviving a restart — fixed, and it was a real bug.** Shipped in
   `build-9d856d1`. Nothing pending.
-- **Reels crashing the app — a likely cause changed, unconfirmed.** `VideoHoleEnabled`
-  now defaults to false for the reasons above, and key `5` puts it back. Nobody here
-  has a set that runs this build, so this is the one thing in the app that was
-  changed on a theory rather than a measurement. **Waiting on:** the `previous run`
-  block from `:8081` after the next crash. The last line of it names the call that
-  died, and the `memory:` lines separate a crash from a low-memory eviction — which
-  need opposite fixes and which nothing before this build could tell apart. Ask for
-  that block, not for a description.
-- **"A frame at the top that cannot be clicked" on first launch — not diagnosed.**
-  It is not clear whether the reporter means part of the page or part of Overscan
-  (the address bar, or the remote card in the corner). Asked on the issue, with key
-  `7` as the way to tell those apart. Nothing has been changed for it.
+- **Reels crashing the app — fixed on that set, and the theory was right about
+  video. Which *setting* fixed it is the open question.** The reporter came back
+  with "Video: in page/overlay fixed the black screen reels issue no crashes now",
+  which does not say which of the two positions he is on — and the two answers point
+  opposite ways. In page (the new default) being the one means ship it as it stands;
+  overlay meaning he pressed `5` means the new default is what produced his black
+  screen and the crash was fixed by something else in that build, in which case the
+  default is wrong for the next person. **Waiting on:** which word the *Video* row in
+  the menu shows. Asked on the issue. Do not change the default until that answer is
+  in — a coin flip here ships a black screen to everybody who does not know about `5`.
+- **"A frame at the top" — answered, and it is our own address bar.** It appears once
+  on first launch, which is intended: without it the first screen is a browser with no
+  visible way to type. Nothing to fix unless he says it is in the way. This closes the
+  only part of #20 that was undiagnosed.
+- **Scrolling with the channel rocker — asked for, and it already existed.** Both
+  builds have handed the channel keys to `ScrollPage` since their first release, and
+  nothing in the app said so: not the card, not the start screen, not the menu.
+  Documented now, and the general problem is #38, which is worth reading before adding
+  a fifth place that half-explains a key.
+- **Ad blocking — accepted in principle, not started. Proposal in #37.** The NUI
+  WebView can refuse a request before it goes out (`RequestIntercepted`,
+  `WebHttpRequestInterceptor`, `WebContext` are all in `Samsung.Tizen.Ref` 9.0.104),
+  so this is real blocking on the 2025 sets and structurally impossible on the four
+  `Tizen.WebView` packages, which have no such hook. Two constraints are decided and
+  should not be relitigated: it ships as the **only** new thing in its build, because
+  the reporter is the sole tester of that half of the app and a mixed build makes
+  "slower" or "site broken" unattributable; and the handler timing goes in the
+  diagnostics report from the first version, because the check sits in the path of
+  every request on TV hardware.
 
 If video comes back black or silent rather than crashing, that is the in-page path
 failing on that set and key `5` is the answer — not a regression to chase.
