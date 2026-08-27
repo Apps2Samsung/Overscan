@@ -569,14 +569,21 @@ step of that investigation is the `getxattr` the Q80 has not come back from twic
 so anything queued behind it never runs at all. Both sit after the engine has
 already failed, so neither is in front of anything that still matters.
 
-Two packaging facts worth not re-deriving. A file in `Overscan5/res/` needs no
-`.csproj` change to be packaged and lands at `res/` in the tpk; a second copy
-reaches `bin/` through a `<None CopyToOutputDirectory>` item, because that is the
-tpk directory the build output becomes. **Both are covered by `signature1.xml`** —
-checked in the built tpk, where `res/libovprobe.so` and `bin/libovprobe.so` are
-byte-identical to the committed object and both appear as signed references. That
+Packaging facts worth not re-deriving, because getting one object into all three
+package directories from one committed file took three attempts. `Overscan5/res/`
+needs no `.csproj` change at all and lands at `res/`. A `<None>` item with
+`CopyToOutputDirectory` reaches `bin/`, because that tpk directory *is* the build
+output. `lib/` takes a `TizenTpkUserIncludeFiles` item with `TizenTpkSubDir`, which
+is the packaging task's own supported way to place a file somewhere other than
+where it sits in the project — `<Link>` on a `TizenTpkFiles` item is ignored and
+fails the build with MSB3024, because the task copies by `%(TizenTpkSubPath)` and
+that metadata only comes from its own globs.
+
+**All three copies are covered by `signature1.xml` and `author-signature.xml`** —
+verified on the published `build-c2fa17d` asset for `res/` and `bin/`, and in the
+built tpk for `lib/`, byte-identical to the committed object in every case. That
 matters because reporters re-sign with their own certificate: a file outside the
-signature would fail their install rather than ours.
+signature fails their install rather than ours.
 
 ### The exec mapping is refused, and where that leaves it
 
@@ -607,9 +614,11 @@ three forms per location, plus a control:
 | --- | --- |
 | anonymous `PROT_EXEC` page | If refused, the kernel refuses executable memory outright and none of this is about us. The runtime's JIT does this every launch, so it is known safe — and it is no use to a shim either way, because `DT_NEEDED` resolves against the loader's link map and only `dlopen` writes to that. |
 | `res/` ELF | The baseline, already answered: refused. |
-| `bin/` ELF | The directory the assembly that mapped executable lives in. A refusal here says the difference was the file format, not the directory. |
+| `bin/` ELF, by its ordinary `/opt/usr/apps/.../bin/` path | The directory the assembly that mapped executable lives in. A refusal here says the difference was the file format, not the directory. |
+| `bin/` ELF again, by the assembly's own path | TizenFX does not expose `bin/`, so managed code reaches it only through `Assembly.Location` — which on Tizen is `/proc/self/fd/<n>/bin/...`, the exact path form of the reading that came back `yes`. Without both, a `yes` cannot be attributed to the directory rather than the path form. |
+| `lib/` ELF | The third and last package directory, and the conventional home for a native library, in case the installer labels it differently. |
 | `data/` ELF, copied and `chmod 0755` | The only mount we choose rather than accept, and the SFD hook is documented as inspecting unsigned ELF on *writable* mounts. |
-| each of those re-asked through `/proc/self/fd/<n>` | Same inode, same mount, different path form — the assembly answered `yes` at a `/proc/self/fd/<n>/bin/...` path and the probe was asked by its ordinary one. If only this form succeeds, the policy is keyed on the path and a package can move. |
+| each of those re-asked through `/proc/self/fd/<n>` | Same inode, same mount, different path form. If only this form succeeds, the policy is keyed on the path and a package can move. |
 
 Labels and mounts for all three copies are read **after** every mapping question, not
 beside each one: they only explain *why*, and `getxattr` is the call this set has not

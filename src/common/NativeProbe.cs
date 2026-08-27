@@ -31,7 +31,9 @@ namespace Overscan
     ///   `/proc/self/fd/&lt;n&gt;/bin/...`, which is how a .NET launchpad hands over
     ///   its directory; ours was asked by its ordinary `/opt/usr/apps/...` path. The
     ///   same file in `bin/` is asked both ways, which is the only way to separate
-    ///   the two.
+    ///   the two. `lib/` — the third package directory, and the conventional home
+    ///   for a native library — is asked as well, so no directory in the package is
+    ///   left to wonder about.
     /// * <b>The mount.</b> The SFD hook that fits this refusal only inspects unsigned
     ///   ELF on a <i>writable</i> mount, and everywhere we can put a file is
     ///   writable. There is no read-only mount we can write to, so the honest version
@@ -308,30 +310,42 @@ namespace Overscan
         /// Every copy of the library this package has, in the order they are worth
         /// asking about.
         ///
-        /// `res/` first because it is the one this set has already survived being
-        /// asked about, then `bin/` — where the app's own assembly lives, the one
-        /// file of ours known to map executable here — and last a copy written into
-        /// the app's writable data directory, which is the only mount we can choose
-        /// rather than accept.
+        /// All three package directories a tpk has, then a copy on the one mount we
+        /// choose. `res/` goes first because it is the one this set has already
+        /// survived being asked about; `bin/` matters most, because the app's own
+        /// assembly is in it and that is the only file of ours known to map
+        /// executable here.
+        ///
+        /// `bin/` is asked twice, and the second one is the point rather than a
+        /// duplicate. TizenFX does not expose that directory, so the only handle on
+        /// it from managed code is the assembly's own location — and on Tizen that
+        /// arrives as <c>/proc/self/fd/&lt;n&gt;/bin/...</c>, which is exactly the
+        /// path form the successful `own code` reading used. Asking by the ordinary
+        /// <c>/opt/usr/apps/...</c> path as well is the only way a `yes` can be
+        /// attributed to the directory rather than to the path form.
         /// </summary>
         private static IList<Location> Locate()
         {
             var found = new List<Location>();
 
-            string inResource = Combine(ResourceDirectory(), ProbeLibrary);
-            if (inResource != null)
+            // `res/` from the directory TizenFX reports, not from the derived root:
+            // it is the baseline reading and must not depend on that derivation.
+            Add(found, "res/", Combine(ResourceDirectory(), ProbeLibrary));
+
+            string root = AppRoot();
+            string ordinaryBin = Combine(root == null ? null : Path.Combine(root, "bin"), ProbeLibrary);
+            Add(found, "bin/", ordinaryBin);
+
+            // The same file again, by the only path managed code can name it with.
+            // Skipped when the runtime hands back the ordinary path anyway, which is
+            // what happens off-device and on the emulator.
+            string assemblyBin = Combine(AssemblyDirectory(), ProbeLibrary);
+            if (assemblyBin != null && !string.Equals(assemblyBin, ordinaryBin, StringComparison.Ordinal))
             {
-                found.Add(new Location("res/", inResource));
+                found.Add(new Location("bin/ (assembly path)", assemblyBin));
             }
 
-            // `bin/` is not exposed by DirectoryInfo, and the assembly is in it.
-            // On Tizen that path arrives as `/proc/self/fd/<n>/bin`, which is also
-            // the form the successful `own code` reading used.
-            string inBin = Combine(AssemblyDirectory(), ProbeLibrary);
-            if (inBin != null)
-            {
-                found.Add(new Location("bin/", inBin));
-            }
+            Add(found, "lib/", Combine(root == null ? null : Path.Combine(root, "lib"), ProbeLibrary));
 
             if (found.Count == 0)
             {
@@ -346,6 +360,39 @@ namespace Overscan
             }
 
             return found;
+        }
+
+        private static void Add(IList<Location> found, string name, string path)
+        {
+            if (path != null)
+            {
+                found.Add(new Location(name, path));
+            }
+        }
+
+        /// <summary>
+        /// The installed package directory, which is the parent of `res/` — the one
+        /// directory TizenFX does name, and the only way to reach `bin/` and `lib/`
+        /// by their ordinary paths rather than through the runtime's own handle.
+        /// </summary>
+        private static string AppRoot()
+        {
+            try
+            {
+                string resource = ResourceDirectory();
+                if (string.IsNullOrEmpty(resource))
+                {
+                    return null;
+                }
+
+                // TizenFX returns it with a trailing slash, which GetDirectoryName
+                // would otherwise read as "the res directory itself".
+                return Path.GetDirectoryName(resource.TrimEnd('/'));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         /// <summary>
