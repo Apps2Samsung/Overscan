@@ -295,9 +295,14 @@ privilege:
 
 | what actually failed | reads as | fixable by a manifest |
 | --- | --- | --- |
-| `open()` denied — a Smack label we may not touch | EPERM/EACCES on open | **yes** — this is the Marlin shape |
+| `open()` denied by Smack or by the file's group | **EACCES** on open | **yes** — this is the Marlin shape |
+| `open()` denied by the firmware's own gate | **EPERM** on open | no — see below |
 | `mmap(PROT_EXEC)` denied — `noexec` mount or an exec-label rule | opens, will not map | no |
 | the loader looked somewhere else | opens and maps fine here | no — wrong path, not permission |
+
+Those first two rows were one row until 2026-08-27, reading "EPERM/EACCES" and
+"yes, this is the Marlin shape" for both. They are not the same refusal and the
+difference is the entire question — see below.
 
 `SmackWall` asks the set which one it is instead of theorising: it locates the
 soname, prints our own label from `/proc/self/attr/current` and `CapEff` from
@@ -442,28 +447,77 @@ wall` runs `SmackWall.Investigate` synchronously between the implementation dlop
 and `Chromium.Initialize`, and its verdict is in the trail before the engine gets a
 chance to take the process with it.
 
+### Above platform level: what actually refuses that `open()`
+
+The Q80's report on 2026-08-27 answered both instrumented questions. `ewk_init`
+returns now (60 ms, and 37 on the retry) rather than swallowing the process, so
+moving our 48 MB `dlopen` out from in front of it worked. It still returns 0, the
+implementation still will not load, and the verdict line reads
+
+```
+open(O_RDONLY): EPERM (operation not permitted)
+```
+
+on a file that `stat`s fine at 84484 bytes, from a process labelled
+`User::Pkg::org.apps2samsung.overscan` with `CapEff` all zero, on a read-only vdfs
+root. Reading that as "the Marlin shape, so the fix is in the manifest" is what
+this app believed until now, and it is wrong twice over.
+
+**Smack says EACCES.** Every access decision in Smack comes out of `smk_access()`,
+which returns `-EACCES`; that holds in Samsung's own patched Smack too. An **EPERM**
+on opening a file that exists is therefore not a Smack denial, and a privilege
+configures nothing else that could produce it. `SmackWall` has always printed the
+two apart — it just drew the same conclusion from both.
+
+**A privilege could not have granted it even if it were Smack.** `security-manager`
+generates an app's Smack rules from `policy/app-rules-template.smack`, which is
+fixed and privilege-independent; the app label gets `wx` on `System` and
+`System::Privileged` and **no `r`**, plus `rxl` on `System::Shared`, `User::Home`
+and its own paths. Ordinary `/usr/lib` is readable because the rootfs carries the
+Floor label `_`, which Smack lets anyone read. The only file that turns a privilege
+into a Smack rule, `policy/privilege-smack.list`, holds two entries upstream, and
+`SmackRules::addFromPrivTemplate` rejects any rule whose subject or object is not a
+`~PLACEHOLDER~` — so a privilege **cannot name a literal label** such as
+`System::Privileged` at all. What a privilege does grant is a Cynara policy and,
+for ten of them, a supplementary Unix group. A group refusal is EACCES as well.
+
+**What is left is Samsung's own.** Their TV kernels carry a proprietary LSM,
+`security/sfd`, wired into `security_inode_permission` *ahead of* Smack. Its
+SecureContainer hook returns `-EPERM` for any file whose Smack label begins with
+`!` unless `current->uepLevel` is at or above the container threshold, and
+`uepLevel` is a level byte read at `execve` out of a UEP signature block appended
+to the binary by Samsung's internal signing service. It is inherited from the
+platform binary that launched us. Nothing in a `.tpk` — no privilege, no author or
+distributor certificate, partner or otherwise — writes a UEP signature. The gate is
+not a privilege tier: it is **above platform level**, and platform signing would
+not reach it either.
+
+That path is an exact match for the symptom and the only one in that kernel that
+produces EPERM from `open()` on an existing regular file, but it is a match made
+from a 2018 KantS kernel drop and a Tizen 5.0 one, not from the Q80's own firmware.
+The one measurement that would confirm it outright is `security.SMACK64` on the
+library: a value starting with `!` closes the case. `SmackWall` already asks for it
+last, and the Q80's trail ends on exactly that line — `probe: getxattr
+security.SMACK64` — with the next entry belonging to the following launch. Either
+the call does not return on that set, or the user closed the app in the same second.
+We cannot tell which, and there is no second way to read a label from managed code.
+
+**What this closes.** The manifest route for issue #17 is not unlikely, it is
+structurally impossible. Do not add privileges to `Overscan5/tizen-manifest.xml`
+looking for this one: there is nothing to find, and a privilege the certificate
+does not cover fails the install outright on the sets that currently work.
+
 ### What is left on the Q80, and the decision nobody should take alone
 
-As of `build-d8563ab` this is open, waiting on one report. Written down here rather
-than carried in somebody's head, because the next person to work on it may be a
-different person at a different desk.
+Both questions this was waiting on were answered by the report on `build-d8563ab`,
+and the section above is what came back. Written down here rather than carried in
+somebody's head, because the next person to work on it may be a different person at
+a different desk.
 
-**What the next report decides.** Two questions, both already instrumented:
-
-- Does `Chromium initialized, refcount=…` appear at all, now that our own `dlopen`
-  is no longer in front of the first `ewk_init`? If it does, that set is back to
-  failing in a legible way. If it does not, `Heartbeat`'s ticks say whether the
-  engine died instantly or the launchpad killed us after a round number of seconds
-  — and the second of those is fixable here, by bringing the engine up after the
-  create callback returns rather than inside it.
-- What `SmackWall`'s verdict line says, from the three-row table above.
-
-**If the verdict is the middle row** — reads, will not map executable — that is the
-end. No manifest changes it, and the honest answer to the reporter is that this TV
-cannot run Overscan. Say so plainly rather than shipping another build.
-
-**If it is the first row** — `open()` denied — one idea remains, and it is a
-judgment call rather than a technical one:
+**Where it stands.** `ewk_init` returns and the trail is legible, so the launchpad
+theory is dead and the `Heartbeat` question is closed. The verdict is the EPERM row
+— refused above Smack, by a gate no manifest reaches. That leaves exactly one idea,
+and it is a judgment call rather than a technical one:
 
 > Ship a stub `libprivileged-service-client.so` in the package's own lib directory
 > and `dlopen` it by absolute path with `RTLD_GLOBAL` before the implementation.
@@ -472,11 +526,23 @@ judgment call rather than a technical one:
 > `NuiNativeTouch` already relies on to pin DALi's binder. With `RTLD_LAZY`, only
 > the symbols the engine actually calls would have to resolve.
 
-Three things gate it, and all three are answerable from the same report: the
-verdict must be the first row; `own code:` must say the app can map its own
-directory executable; and `e_machine` names what the stub would have to be built
-for. A cross toolchain is obtainable without root the same way the openssl 1.1
-shim was (`apt-get download` plus `dpkg-deb -x`).
+Two of its three gates are met: the verdict is a read denial rather than a mapping
+one, and `e_machine` names what the stub would be built for. A cross toolchain is
+obtainable without root the same way the openssl 1.1 shim was (`apt-get download`
+plus `dpkg-deb -x`).
+
+**The third gate has not actually been tested, and there is a reason to doubt it.**
+`own code: yes` reports that this process can map *its own assembly* `PROT_EXEC` —
+but that assembly is a PE file, and the same SFD module only inspects files it
+recognises as ELF. For an unsigned ELF on a writable mount its `mmap_file` hook
+returns `SF_STATUS_UEP_FILE_NOT_SIGNED`, which in enforce mode is another EPERM.
+A stub would be the first native `.so` this repo has ever shipped, so nothing we
+have measured says a native library of ours can be mapped executable at all.
+
+So the stub has a cheap prerequisite: **ship any trivial ELF `.so` in the package
+and `mmap` it `PROT_READ|PROT_EXEC` by absolute path.** If that is refused, the
+stub is dead too and the honest answer to the reporter is that this TV cannot run
+Overscan. That test is one build and it costs the same as guessing.
 
 **The judgment is the point, and it is Patrick's to make, not a session's.** The
 stub grants nothing — it cannot give this app a privilege it does not have, and if
