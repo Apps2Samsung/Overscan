@@ -100,6 +100,10 @@ around spending it well.
   runs after the failure it is investigating, never before it.
 - **One question per build**, and say plainly which answer means "this TV cannot
   run Overscan". Guessing costs somebody else an install.
+- **Anything left open is written down in `docs/INTERNALS.md`, not carried in a
+  head.** What is waiting on a reporter, what the next report decides, and any
+  decision that is Patrick's rather than a session's — see *What is left on the
+  Q80* there for the shape to follow.
 
 ## Conventions
 

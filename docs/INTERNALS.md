@@ -300,12 +300,23 @@ privilege:
 | the loader looked somewhere else | opens and maps fine here | no — wrong path, not permission |
 
 `SmackWall` asks the set which one it is instead of theorising: it locates the
-soname, `open()`s it for the raw errno, `read()`s four bytes to confirm an ELF,
-`mmap()`s it `PROT_READ` and then `PROT_READ|PROT_EXEC` to separate reading from
-executing, reads `security.SMACK64`, `SMACK64EXEC`, `SMACK64MMAP` and
-`SMACK64TRANSMUTE` off it, prints our own label from `/proc/self/attr/current` and
-`CapEff` from `/proc/self/status`, and names the mount the file sits on with its
-options — where a `noexec` would be written down. It then repeats the label line
+soname, prints our own label from `/proc/self/attr/current` and `CapEff` from
+`/proc/self/status`, names the mount the file sits on with its options — where a
+`noexec` would be written down — and then, **in this order**, `open()`s the file
+for the raw errno, `read()`s twenty bytes to confirm an ELF and name its
+`e_machine`, `mmap()`s it `PROT_READ` and then `PROT_READ|PROT_EXEC` to separate
+reading from executing, and only afterwards reads `security.SMACK64`,
+`SMACK64EXEC`, `SMACK64MMAP` and `SMACK64TRANSMUTE` off it.
+
+The order is not incidental. On the Q80 the process died inside `getxattr` — the
+trail ends on that line — and the labels were sequenced *before* the verdict, so it
+took the answer with it. Reading and mapping the file is the answer; the labels only
+ever explained why. Each label is now traced on its own line too, so a repeat kill
+names which of the four did it.
+
+`SmackWall.OwnCode` asks one more thing, before any of the above and where nothing
+can eat it: whether this app can `mmap` its own installed assembly `PROT_EXEC`. See
+"What is left" below for what turns on that. It then repeats the label line
 for `libchromium-ewk.so`, `libchromium-impl.so` and `libmarlin.so.0`, so the report
 carries libraries this process *can* open beside the one it cannot.
 
@@ -361,7 +372,7 @@ It is traced immediately before, so the trail names it outright either way.
 The first of those two rules held up. It also turned out to be unsatisfiable in the
 browser on the set it was written for — see the next section.
 
-### `ewk_init` does not return 0 — it does not return
+### `ewk_init` does not return 0 — it does not return, *while we are holding it wrong*
 
 `build-f75dd96` restored the pre-probe depth on the Q80: the trail reached the
 engine again. What it also showed is that the whole failure model above was wrong
@@ -407,6 +418,19 @@ start-up lines worth reading. The elapsed time is measured in `Stop`, on the cal
 side, so a call that returns in 5 ms is not reported as the second the ticking
 thread takes to notice.
 
+**And a fourth, added later, which may undo the heading above.** Reading the whole
+of #17 back turns up a confound in it. `ChromiumImpl.Preload` — the app's own
+`dlopen` of the 48 MB implementation — is the *only* change to the ewk start-up path
+between `build-caef7bd`, whose `ewk_init` returned `refcount=0` twice and lived to
+draw its failure screen, and every build since, whose trail ends on
+`Chromium.Initialize()` with the process gone. One set and one variable is not
+proof. It is also the third time this project has put a fragile probe in front of
+the thing it was explaining. So the `dlopen` moved to between the two init
+attempts: same job — the implementation is in the process before the engine looks
+for it — while the first attempt gets an untouched process again. If `refcount=`
+comes back on that set, the heading above was about our diagnostic and not about
+the TV.
+
 **In the probe, and only in the probe, the permission wall goes first.** The rule
 above still holds for the browser: #13 and #17 each lost a build to a probe that
 died before the engine was asked to start. But `OverscanProbe` is a separate
@@ -417,6 +441,50 @@ process that dies names its own cause on the next launch. Sequencing anything af
 wall` runs `SmackWall.Investigate` synchronously between the implementation dlopen
 and `Chromium.Initialize`, and its verdict is in the trail before the engine gets a
 chance to take the process with it.
+
+### What is left on the Q80, and the decision nobody should take alone
+
+As of `build-d8563ab` this is open, waiting on one report. Written down here rather
+than carried in somebody's head, because the next person to work on it may be a
+different person at a different desk.
+
+**What the next report decides.** Two questions, both already instrumented:
+
+- Does `Chromium initialized, refcount=…` appear at all, now that our own `dlopen`
+  is no longer in front of the first `ewk_init`? If it does, that set is back to
+  failing in a legible way. If it does not, `Heartbeat`'s ticks say whether the
+  engine died instantly or the launchpad killed us after a round number of seconds
+  — and the second of those is fixable here, by bringing the engine up after the
+  create callback returns rather than inside it.
+- What `SmackWall`'s verdict line says, from the three-row table above.
+
+**If the verdict is the middle row** — reads, will not map executable — that is the
+end. No manifest changes it, and the honest answer to the reporter is that this TV
+cannot run Overscan. Say so plainly rather than shipping another build.
+
+**If it is the first row** — `open()` denied — one idea remains, and it is a
+judgment call rather than a technical one:
+
+> Ship a stub `libprivileged-service-client.so` in the package's own lib directory
+> and `dlopen` it by absolute path with `RTLD_GLOBAL` before the implementation.
+> glibc resolves `DT_NEEDED` against the sonames already loaded in the process, so
+> the loader would never go to `/usr/lib` for it — the same mechanism
+> `NuiNativeTouch` already relies on to pin DALi's binder. With `RTLD_LAZY`, only
+> the symbols the engine actually calls would have to resolve.
+
+Three things gate it, and all three are answerable from the same report: the
+verdict must be the first row; `own code:` must say the app can map its own
+directory executable; and `e_machine` names what the stub would have to be built
+for. A cross toolchain is obtainable without root the same way the openssl 1.1
+shim was (`apt-get download` plus `dpkg-deb -x`).
+
+**The judgment is the point, and it is Patrick's to make, not a session's.** The
+stub grants nothing — it cannot give this app a privilege it does not have, and if
+the engine genuinely uses that library the result is a browser that fails later
+instead of sooner, which may be worse than failing now. Against that: it is a
+compatibility shim of exactly the kind an app ships when a platform library is
+absent, and it is the only remaining path to that TV running this browser at all.
+Do not build it speculatively, and do not ship it without asking.
 
 ### `ELM_ACCEL` has to be set before the window exists
 
