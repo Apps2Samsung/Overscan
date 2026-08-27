@@ -68,7 +68,8 @@ namespace Overscan
             html.Append(@"<div class='hint'>
 <b>0</b> type an address &nbsp;·&nbsp; <b>8</b> keep this page &nbsp;·&nbsp;
 <b>9</b> back to this screen &nbsp;·&nbsp; <b>7</b> all keys<br/>
-Move the pointer with the D-pad, press OK to click.<br/>
+Move the pointer with the D-pad, press OK to click, and scroll with the
+<b>channel up/down</b> rocker — that one works on every remote, numpad or not.<br/>
 On the keyboard: <b>shift</b> for capitals, <b>sym</b> for punctuation
 (<b>@</b> is on the bottom row), and <b>start</b> to make what you typed the page
 this browser opens on — press <b>start</b> with nothing typed to get this
