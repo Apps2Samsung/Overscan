@@ -539,9 +539,9 @@ returns `SF_STATUS_UEP_FILE_NOT_SIGNED`, which in enforce mode is another EPERM.
 A stub would be the first native `.so` this repo has ever shipped, so nothing we
 have measured says a native library of ours can be mapped executable at all.
 
-So the stub had a cheap prerequisite, and `build-9d856d1` is the build that asks it.
-**That is where this stands as of 2026-08-27: shipped, asked on the issue, waiting
-on Willou-Gillou.** Nothing else is pending on that set.
+So the stub had a cheap prerequisite, and `build-9d856d1` is the build that asked
+it. **The Q80 answered on 2026-08-27, and the answer was no** — see *The exec
+mapping is refused, and where that leaves it* below.
 
 `Overscan5/res/libovprobe.so` is a real ARM shared object — one function, no
 `DT_NEEDED`, `SONAME libovprobe.so`, built freestanding by `tools/elfprobe/build.sh`
@@ -569,27 +569,65 @@ step of that investigation is the `getxattr` the Q80 has not come back from twic
 so anything queued behind it never runs at all. Both sit after the engine has
 already failed, so neither is in front of anything that still matters.
 
-**What the next report decides, and there are only two branches.** The line to read
-is `own native :` in the `:8081` report.
+Two packaging facts worth not re-deriving. A file in `Overscan5/res/` needs no
+`.csproj` change to be packaged and lands at `res/` in the tpk; a second copy
+reaches `bin/` through a `<None CopyToOutputDirectory>` item, because that is the
+tpk directory the build output becomes. **Both are covered by `signature1.xml`** —
+checked in the built tpk, where `res/libovprobe.so` and `bin/libovprobe.so` are
+byte-identical to the committed object and both appear as signed references. That
+matters because reporters re-sign with their own certificate: a file outside the
+signature would fail their install rather than ours.
 
-- **It maps and loads** — the last gate is met and the stub becomes buildable. It is
-  still Patrick's call, not a session's, for the reasons above. `tools/elfprobe`
-  already has the toolchain recipe and an assembly file to copy; a stub differs from
-  the probe only in its `SONAME` and in being `dlopen`ed by
-  `ChromiumImpl.Preload` before the implementation.
-- **The mapping is refused** — the same wall covers anything we ship, the stub is
-  dead too, and the honest answer is that this TV cannot run Overscan. Say so and
-  close #17 rather than asking that reporter for another install. That was written
-  into the issue reply in advance, so it will not come as a reversal.
+### The exec mapping is refused, and where that leaves it
 
-One packaging fact worth not re-deriving: a file in `Overscan5/res/` needs no
-`.csproj` change to be packaged, lands at `res/` in the tpk, and **is covered by
-`signature1.xml`** — checked against the published `build-9d856d1` asset, where
-`res/libovprobe.so` is byte-identical to the committed one. That last part matters
-because reporters re-sign with their own certificate: a file outside the signature
-would fail their install rather than ours.
+The Q80's report on `build-9d856d1` (2026-08-27) ran the whole probe:
 
-**The judgment is the point, and it is Patrick's to make, not a session's.** The
+```
+ours   : e_machine=40 e_flags=0x5000200 float=soft
+engine : e_machine=40 e_flags=0x5000200 float=soft
+mmap PROT_READ            : ok
+mmap PROT_READ|PROT_EXEC  : EPERM (operation not permitted)
+dlopen: refused — .../res/libovprobe.so: failed to map segment from shared object
+```
+
+So the ABI is not the problem — those two lines are identical, which is the reason
+they are printed together — and the refusal is exactly the SFD `mmap_file` shape
+predicted above: an unsigned ELF of ours will not map executable. `dlopen` then fails
+downstream of the same thing, which is why its message is about mapping a segment
+rather than about permission.
+
+**What is left is not a fourth idea, it is the same measurement made where it has
+not been made.** The one file of ours that *did* map executable on that set is the
+app's own assembly, and it differed from the probe in two ways at once — it is a PE
+rather than an ELF, and it is in `bin/` rather than `res/`. Only the format was named.
+`build-<next>` ships the same object in **both** directories and asks about it in
+three forms per location, plus a control:
+
+| Reading | What a refusal there means |
+| --- | --- |
+| anonymous `PROT_EXEC` page | If refused, the kernel refuses executable memory outright and none of this is about us. The runtime's JIT does this every launch, so it is known safe — and it is no use to a shim either way, because `DT_NEEDED` resolves against the loader's link map and only `dlopen` writes to that. |
+| `res/` ELF | The baseline, already answered: refused. |
+| `bin/` ELF | The directory the assembly that mapped executable lives in. A refusal here says the difference was the file format, not the directory. |
+| `data/` ELF, copied and `chmod 0755` | The only mount we choose rather than accept, and the SFD hook is documented as inspecting unsigned ELF on *writable* mounts. |
+| each of those re-asked through `/proc/self/fd/<n>` | Same inode, same mount, different path form — the assembly answered `yes` at a `/proc/self/fd/<n>/bin/...` path and the probe was asked by its ordinary one. If only this form succeeds, the policy is keyed on the path and a package can move. |
+
+Labels and mounts for all three copies are read **after** every mapping question, not
+beside each one: they only explain *why*, and `getxattr` is the call this set has not
+returned from twice. The sequence itself was validated against a real `.so` on the dev
+box first — anonymous exec, both path forms, the copy, the `chmod`, the `dlopen` and
+the two header offsets — so a refusal on the TV cannot be our flags.
+
+**If every location refuses, that is the end of the stub and the end of #17.** Not the
+end of one attempt at it: with anonymous memory allowed and every file location
+refused, the gate is on files this app supplies, and there is nowhere left to put one.
+Say so, and close #17 — that branch was written into the issue reply in advance, twice,
+so it does not read as a reversal. The only variable left outside the app is which
+`libchromium-impl.so` build the firmware ships, which is worth one question about a
+pending software update and no more than that.
+
+**The stub itself, if a location ever does allow it, is still Patrick's call.**
+
+The judgment is the point. The
 stub grants nothing — it cannot give this app a privilege it does not have, and if
 the engine genuinely uses that library the result is a browser that fails later
 instead of sooner, which may be worse than failing now. Against that: it is a

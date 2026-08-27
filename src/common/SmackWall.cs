@@ -546,7 +546,7 @@ namespace Overscan
             return found;
         }
 
-        private static string Xattr(string path, string name)
+        internal static string Xattr(string path, string name)
         {
             try
             {
@@ -576,7 +576,7 @@ namespace Overscan
         ///
         /// The longest matching mount point wins, the way the kernel resolves it.
         /// </summary>
-        private static string MountOf(string path)
+        internal static string MountOf(string path)
         {
             try
             {
