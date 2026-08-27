@@ -1,25 +1,52 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Tizen.Applications;
 
 namespace Overscan
 {
     /// <summary>
-    /// Whether this app may load a native library of its own on this set.
+    /// Whether this app may map native code of its own executable — anywhere it can
+    /// put a file, and in any form of the request.
     ///
-    /// Everything issue #17 has measured so far was measured on the app's own
-    /// assembly — and that is a **PE** file. Samsung's loader hooks only inspect
-    /// files they recognise as ELF, so `own code: yes` says nothing at all about
-    /// the one thing the remaining idea for that TV depends on. This ships a real
-    /// ARM shared object in <c>res/</c> and asks the set about it directly.
+    /// `build-9d856d1` asked this once, about one file in `res/`, and the Q80 in
+    /// issue #17 answered: `mmap PROT_READ|PROT_EXEC: EPERM`, `dlopen: failed to map
+    /// segment from shared object`, on a library whose `e_machine` and `e_flags`
+    /// match the engine's own exactly. So it is not an ABI mismatch, and the stub
+    /// idea is refused where it was tried.
     ///
-    /// Three readings, in the order they would matter to a library that has to
-    /// work: the file can be read, a page of it can be mapped executable, and the
-    /// dynamic loader will take it. They fail for unrelated reasons, so they are
-    /// asked separately — a refusal to map is a policy, a refusal to load can just
-    /// as easily be an ABI the TV does not use.
+    /// Three things about that measurement are worth one more build before calling
+    /// it, and this class asks all three at once because there is no fourth idea
+    /// behind them:
+    ///
+    /// * <b>The directory.</b> The one file of ours that <i>did</i> map executable
+    ///   on that set was the app's own assembly, in `bin/`. Ours was in `res/`. Two
+    ///   differences at once — the directory and the file format — and only the
+    ///   format was named. So the same object now ships in `bin/` too, beside that
+    ///   assembly, and is asked there.
+    /// * <b>The path form.</b> The assembly answered `yes` at
+    ///   `/proc/self/fd/&lt;n&gt;/bin/...`, which is how a .NET launchpad hands over
+    ///   its directory; ours was asked by its ordinary `/opt/usr/apps/...` path. The
+    ///   same file in `bin/` is asked both ways, which is the only way to separate
+    ///   the two.
+    /// * <b>The mount.</b> The SFD hook that fits this refusal only inspects unsigned
+    ///   ELF on a <i>writable</i> mount, and everywhere we can put a file is
+    ///   writable. There is no read-only mount we can write to, so the honest version
+    ///   of that test is the app's own writable data directory: a copy, `chmod 0755`,
+    ///   asked in the same three ways.
+    ///
+    /// One control runs in front of all of it: a page of anonymous memory mapped
+    /// `PROT_EXEC`. The runtime's own JIT does that on every launch, so it is known
+    /// safe, and it separates "this kernel refuses executable memory" from "this
+    /// kernel refuses <i>files we supply</i>". Only the second has a shim behind it,
+    /// and anonymous memory is no use to a shim: the dynamic loader resolves
+    /// `DT_NEEDED` against its own link map, which nothing but `dlopen` writes to.
+    ///
+    /// If every location refuses, that is the end of the idea rather than the end of
+    /// one attempt at it — see *What is left on the Q80* in `docs/INTERNALS.md`.
     ///
     /// Only the tizen5 package ships the library, because only the Q80 needs the
     /// answer and the object is built for one architecture. Everywhere else this
@@ -38,10 +65,15 @@ namespace Overscan
 
         private const int ORdonly = 0;
         private const int ProtRead = 0x1;
+        private const int ProtWrite = 0x2;
         private const int ProtExec = 0x4;
         private const int MapPrivate = 0x02;
+        private const int MapAnonymous = 0x20;
         private const int RtldLazy = 0x00001;
         private const int RtldGlobal = 0x00100;
+
+        /// <summary>`rwxr-xr-x`, for the copy in the writable directory.</summary>
+        private const uint ExecutableMode = 0x1ED;
 
         [DllImport("libc.so.6", SetLastError = true)]
         private static extern int open(string path, int flags);
@@ -59,6 +91,9 @@ namespace Overscan
         [DllImport("libc.so.6", SetLastError = true)]
         private static extern int munmap(IntPtr address, IntPtr length);
 
+        [DllImport("libc.so.6", SetLastError = true)]
+        private static extern int chmod(string path, uint mode);
+
         [DllImport("libdl.so.2")]
         private static extern IntPtr dlopen(string file, int mode);
 
@@ -71,70 +106,160 @@ namespace Overscan
         /// <summary>The one line for the report header.</summary>
         public static string Summary = "(not asked)";
 
+        private static readonly List<string> Lines = new List<string>();
+
+        /// <summary>Guards <see cref="Lines"/>: the report is served from another thread.</summary>
+        private static readonly object Gate = new object();
+
+        /// <summary>Where a copy of the library was asked about, and what it said.</summary>
+        private sealed class Location
+        {
+            public Location(string name, string path)
+            {
+                Name = name;
+                Path = path;
+            }
+
+            /// <summary>How it is named in the report — `res/`, `bin/`, `data/`.</summary>
+            public string Name;
+
+            /// <summary>The file asked about, or null if this location has none.</summary>
+            public string Path;
+
+            /// <summary>True once a page of it has mapped `PROT_READ|PROT_EXEC`.</summary>
+            public bool MapsExecutable;
+
+            /// <summary>True once the dynamic loader has taken it.</summary>
+            public bool Loads;
+        }
+
         /// <summary>
-        /// Runs the three readings, dropping each on the trail as it goes.
+        /// Runs the control, then every location in turn, dropping each reading on
+        /// the trail before the call that produces it.
         ///
-        /// Every line is written before the call it describes, for the same reason
-        /// the rest of this app does it: if one of these is what kills the process,
-        /// the trail has to name which. That risk is real here — asking a kernel
-        /// with an executable-mapping policy to map a page executable is precisely
-        /// what such a policy exists to refuse, and refusing it with a signal is a
-        /// legal way to do that.
+        /// Every line is written before its call, for the same reason the rest of
+        /// this app does it: if one of these is what kills the process, the trail has
+        /// to name which. That risk is real here — asking a kernel with an
+        /// executable-mapping policy to map a page executable is precisely what such
+        /// a policy exists to refuse, and refusing it with a signal is a legal way to
+        /// do that.
+        ///
+        /// Labels and mounts are read for every location at the very end rather than
+        /// beside each one. They only ever explain <i>why</i>, and `getxattr` is the
+        /// call this set has not come back from twice — so nothing that decides the
+        /// question is queued behind it.
         /// </summary>
         public static void Run()
         {
-            string path = Locate();
-            if (path == null)
+            try
             {
-                Summary = "not shipped in this package";
-                Breadcrumbs.Drop("native probe: " + Summary);
-                return;
+                Trace("native probe: anonymous PROT_EXEC control");
+                string anonymous = MapAnonymousExecutable();
+                Trace("  anonymous exec memory: " + anonymous);
+
+                var locations = Locate();
+                if (locations.Count == 0)
+                {
+                    Summary = "not shipped in this package";
+                    Trace("native probe: " + Summary);
+                    return;
+                }
+
+                Trace("  engine : " + HeaderOf(EngineLibrary));
+
+                foreach (Location location in locations)
+                {
+                    Ask(location);
+                }
+
+                Summary = Verdict(locations, anonymous);
+                Trace("native probe verdict: " + Summary);
+
+                // Last, and only for the record: which mount each copy sat on and
+                // what Smack wrote on it. See the note above about ordering.
+                foreach (Location location in locations)
+                {
+                    Trace("  probe: mount of " + location.Name);
+                    Trace("  " + location.Name + " mount: " + SmackWall.MountOf(location.Path));
+
+                    Trace("  probe: getxattr on " + location.Name);
+                    Trace("  " + location.Name + " labels: " + LabelsOf(location.Path));
+                }
             }
+            catch (Exception ex)
+            {
+                Summary = "could not be asked: " + ex.GetType().Name + ": " + ex.Message;
+                Trace("  " + Summary);
+            }
+        }
 
-            Breadcrumbs.Drop("native probe: " + path);
+        /// <summary>Every line produced so far, for the diagnostics report.</summary>
+        public static string Dump()
+        {
+            lock (Gate)
+            {
+                return Lines.Count == 0
+                    ? "  (not probed)\n"
+                    : string.Join("\n", Lines.ToArray()) + "\n";
+            }
+        }
 
+        /// <summary>
+        /// The three readings, for one copy of the library: it can be read, a page of
+        /// it can be mapped executable, and the dynamic loader will take it. They fail
+        /// for unrelated reasons, so they are asked separately.
+        ///
+        /// The executable mapping is asked twice when it is refused — once by the
+        /// file's ordinary path and once through <c>/proc/self/fd</c>. That second
+        /// form is the only difference between this measurement and the one on the
+        /// app's own assembly that came back `yes`, and a policy keyed on the path
+        /// rather than the inode is the one way it could matter.
+        /// </summary>
+        private static void Ask(Location location)
+        {
             int fd = -1;
             try
             {
-                Breadcrumbs.Drop("  probe: open " + ProbeLibrary);
-                fd = open(path, ORdonly);
+                Trace("  probe: open " + location.Name + " " + location.Path);
+                fd = open(location.Path, ORdonly);
                 if (fd < 0)
                 {
-                    Summary = "cannot even read it — " + Errno(Marshal.GetLastWin32Error());
-                    Breadcrumbs.Drop("  " + Summary);
+                    Trace("  " + location.Name + ": cannot even read it — " +
+                          Errno(Marshal.GetLastWin32Error()));
                     return;
                 }
 
                 // e_flags carries ARM's float-ABI bits, and the engine's own library
                 // is the only statement of what this firmware expects. A dlopen
                 // refused for an ABI mismatch and one refused by policy read the
-                // same from here unless these two numbers are side by side.
-                Breadcrumbs.Drop("  probe: read header");
-                Breadcrumbs.Drop("  ours   : " + Header(fd));
-                Breadcrumbs.Drop("  engine : " + HeaderOf(EngineLibrary));
+                // same from here unless those two numbers are side by side.
+                Trace("  probe: read header of " + location.Name);
+                Trace("  " + location.Name + " ours  : " + Header(fd));
 
-                Breadcrumbs.Drop("  probe: mmap PROT_READ");
-                string readable = Map(fd, ProtRead, "PROT_READ");
-                Breadcrumbs.Drop("  mmap " + readable);
+                Trace("  probe: mmap PROT_READ " + location.Name);
+                Trace("  " + location.Name + " mmap " + Map(fd, ProtRead, "PROT_READ"));
 
-                Breadcrumbs.Drop("  probe: mmap PROT_READ|PROT_EXEC");
+                Trace("  probe: mmap PROT_READ|PROT_EXEC " + location.Name);
                 string executable = Map(fd, ProtRead | ProtExec, "PROT_READ|PROT_EXEC");
-                Breadcrumbs.Drop("  mmap " + executable);
+                Trace("  " + location.Name + " mmap " + executable);
+                location.MapsExecutable = Succeeded(executable);
 
-                bool mapped = executable.EndsWith("ok", StringComparison.Ordinal);
+                if (!location.MapsExecutable)
+                {
+                    Trace("  probe: mmap PROT_READ|PROT_EXEC via /proc/self/fd " + location.Name);
+                    string reopened = MapThroughProcFd(fd);
+                    Trace("  " + location.Name + " mmap via /proc/self/fd: " + reopened);
+                    location.MapsExecutable = Succeeded(reopened);
+                }
 
-                Breadcrumbs.Drop("  probe: dlopen " + ProbeLibrary);
-                string loaded = Load(path);
-                Breadcrumbs.Drop("  dlopen: " + loaded);
-
-                Summary = mapped
-                    ? "maps executable; dlopen " + loaded
-                    : "REFUSED — " + executable;
+                Trace("  probe: dlopen " + location.Name);
+                string loaded = Load(location.Path);
+                Trace("  " + location.Name + " dlopen: " + loaded);
+                location.Loads = loaded.IndexOf("resolved", StringComparison.Ordinal) >= 0;
             }
             catch (Exception ex)
             {
-                Summary = "could not be asked: " + ex.GetType().Name + ": " + ex.Message;
-                Breadcrumbs.Drop("  " + Summary);
+                Trace("  " + location.Name + " threw " + ex.GetType().Name + ": " + ex.Message);
             }
             finally
             {
@@ -153,32 +278,258 @@ namespace Overscan
         }
 
         /// <summary>
-        /// Where the package put it. <c>res/</c> is the app's own read-only
-        /// directory — the one place a sideloaded app has that an app rule grants
-        /// `rxl` on, and where a real library of ours would have to live too.
+        /// The verdict line, which is the whole point of the build: whether there is
+        /// any location left with a shim behind it.
         /// </summary>
-        private static string Locate()
+        private static string Verdict(IList<Location> locations, string anonymous)
+        {
+            var refused = new List<string>();
+            foreach (Location location in locations)
+            {
+                if (location.Loads)
+                {
+                    return location.Name + " maps executable and dlopen loaded it";
+                }
+
+                if (location.MapsExecutable)
+                {
+                    return location.Name + " maps executable, but dlopen refused it";
+                }
+
+                refused.Add(location.Name);
+            }
+
+            return "REFUSED in " + string.Join(", ", refused.ToArray()) +
+                   " — anonymous exec memory " +
+                   (Succeeded(anonymous) ? "is allowed, so this is about files we ship" : anonymous);
+        }
+
+        /// <summary>
+        /// Every copy of the library this package has, in the order they are worth
+        /// asking about.
+        ///
+        /// `res/` first because it is the one this set has already survived being
+        /// asked about, then `bin/` — where the app's own assembly lives, the one
+        /// file of ours known to map executable here — and last a copy written into
+        /// the app's writable data directory, which is the only mount we can choose
+        /// rather than accept.
+        /// </summary>
+        private static IList<Location> Locate()
+        {
+            var found = new List<Location>();
+
+            string inResource = Combine(ResourceDirectory(), ProbeLibrary);
+            if (inResource != null)
+            {
+                found.Add(new Location("res/", inResource));
+            }
+
+            // `bin/` is not exposed by DirectoryInfo, and the assembly is in it.
+            // On Tizen that path arrives as `/proc/self/fd/<n>/bin`, which is also
+            // the form the successful `own code` reading used.
+            string inBin = Combine(AssemblyDirectory(), ProbeLibrary);
+            if (inBin != null)
+            {
+                found.Add(new Location("bin/", inBin));
+            }
+
+            if (found.Count == 0)
+            {
+                // Nothing to copy, so nothing to ask about the writable mount either.
+                return found;
+            }
+
+            string copied = CopyToData(found[0].Path);
+            if (copied != null)
+            {
+                found.Add(new Location("data/", copied));
+            }
+
+            return found;
+        }
+
+        /// <summary>
+        /// The library, copied into the app's own writable directory and made
+        /// executable. This is the one location whose mount we choose, and the SFD
+        /// hook that fits issue #17's refusal is documented as inspecting unsigned
+        /// ELF on writable mounts — so a copy here failing the same way is what
+        /// closes that reading rather than leaving it open.
+        /// </summary>
+        private static string CopyToData(string source)
         {
             try
             {
-                string resource = Application.Current == null
-                    ? null
-                    : Application.Current.DirectoryInfo.Resource;
-
-                if (string.IsNullOrEmpty(resource))
+                string data = DataDirectory();
+                if (string.IsNullOrEmpty(data))
                 {
                     return null;
                 }
 
-                string path = Path.Combine(resource, ProbeLibrary);
+                string target = Path.Combine(data, ProbeLibrary);
+                Trace("  probe: copy " + ProbeLibrary + " to data/");
+                File.Copy(source, target, true);
+
+                // Not needed to map a file executable, but a mode a real library
+                // would carry, so a refusal cannot be read as being about the bits.
+                chmod(target, ExecutableMode);
+                return target;
+            }
+            catch (Exception ex)
+            {
+                Trace("  probe: cannot copy to data/ — " + ex.GetType().Name + ": " + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// A page of anonymous memory, mapped executable. The runtime's own JIT does
+        /// this on every launch, so it is safe to ask and it is the control: if even
+        /// this is refused, the refusal is about executable memory and not about us.
+        /// </summary>
+        private static string MapAnonymousExecutable()
+        {
+            IntPtr length = (IntPtr)4096;
+            IntPtr address = mmap(IntPtr.Zero, length, ProtRead | ProtWrite | ProtExec,
+                                  MapPrivate | MapAnonymous, -1, IntPtr.Zero);
+            if (address == IntPtr.Zero || address.ToInt64() == -1)
+            {
+                return "refused — " + Errno(Marshal.GetLastWin32Error());
+            }
+
+            try
+            {
+                munmap(address, length);
+            }
+            catch (Exception)
+            {
+                // The mapping answered the question; leaking it costs one page.
+            }
+
+            return "ok";
+        }
+
+        /// <summary>
+        /// The same file, mapped executable through a second descriptor opened on
+        /// <c>/proc/self/fd/&lt;n&gt;</c>. Same inode and same mount, so a kernel
+        /// deciding on either of those answers identically — which is exactly what
+        /// makes it worth one line: if this succeeds where the ordinary path failed,
+        /// the policy is keyed on the path, and that is a thing a package can change.
+        /// </summary>
+        private static string MapThroughProcFd(int fd)
+        {
+            int second = -1;
+            try
+            {
+                string path = "/proc/self/fd/" + fd.ToString(CultureInfo.InvariantCulture);
+                second = open(path, ORdonly);
+                if (second < 0)
+                {
+                    return "cannot reopen — " + Errno(Marshal.GetLastWin32Error());
+                }
+
+                return Map(second, ProtRead | ProtExec, "PROT_READ|PROT_EXEC");
+            }
+            catch (Exception ex)
+            {
+                return "threw " + ex.GetType().Name;
+            }
+            finally
+            {
+                if (second >= 0)
+                {
+                    try
+                    {
+                        close(second);
+                    }
+                    catch (Exception)
+                    {
+                        // Best-effort, like everything else in here.
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// <c>res/</c> as the installer laid it out — the app's own read-only
+        /// directory, and where a real stub would have to live.
+        /// </summary>
+        private static string ResourceDirectory()
+        {
+            var info = Directories();
+            return info == null ? null : info.Resource;
+        }
+
+        /// <summary>The app's writable directory, and the one mount we choose.</summary>
+        private static string DataDirectory()
+        {
+            var info = Directories();
+            return info == null ? null : info.Data;
+        }
+
+        private static Tizen.Applications.DirectoryInfo Directories()
+        {
+            try
+            {
+                return Application.Current == null ? null : Application.Current.DirectoryInfo;
+            }
+            catch (Exception)
+            {
+                // Asked before the application object exists. Nothing to probe.
+                return null;
+            }
+        }
+
+        private static string AssemblyDirectory()
+        {
+            try
+            {
+                string self = typeof(NativeProbe).GetTypeInfo().Assembly.Location;
+                return string.IsNullOrEmpty(self) ? null : Path.GetDirectoryName(self);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static string Combine(string directory, string name)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(directory))
+                {
+                    return null;
+                }
+
+                string path = Path.Combine(directory, name);
                 return File.Exists(path) ? path : null;
             }
             catch (Exception)
             {
-                // Asked before the application object exists, or on a package that
-                // does not ship the library. Either way there is nothing to probe.
                 return null;
             }
+        }
+
+        /// <summary>
+        /// The Smack labels on one of our own copies. `SMACK64MMAP` is the one that
+        /// would carry an executable-mapping rule, and reading it on a file of ours
+        /// is safe in a way that reading it on the platform's is not.
+        /// </summary>
+        private static string LabelsOf(string path)
+        {
+            var found = new List<string>();
+            string[] labels = { "security.SMACK64", "security.SMACK64EXEC", "security.SMACK64MMAP" };
+
+            foreach (string label in labels)
+            {
+                string value = SmackWall.Xattr(path, label);
+                if (value != null)
+                {
+                    found.Add(label.Substring("security.".Length) + "=" + value);
+                }
+            }
+
+            return found.Count == 0 ? "(none readable)" : string.Join(" ", found.ToArray());
         }
 
         /// <summary>
@@ -272,6 +623,11 @@ namespace Overscan
             return name + ": ok";
         }
 
+        private static bool Succeeded(string reading)
+        {
+            return reading != null && reading.EndsWith("ok", StringComparison.Ordinal);
+        }
+
         /// <summary>
         /// The loader's own verdict. <c>RTLD_GLOBAL</c> because that is how a stub
         /// would have to be loaded for the engine's own <c>DT_NEEDED</c> to resolve
@@ -300,6 +656,20 @@ namespace Overscan
             return message == IntPtr.Zero
                 ? "(no message)"
                 : Marshal.PtrToStringAnsi(message);
+        }
+
+        /// <summary>
+        /// Onto the trail and into the report, in that order — the trail is the half
+        /// that survives a process this probe might kill.
+        /// </summary>
+        private static void Trace(string line)
+        {
+            Breadcrumbs.Drop(line);
+
+            lock (Gate)
+            {
+                Lines.Add(line);
+            }
         }
 
         private static string Errno(int errno)

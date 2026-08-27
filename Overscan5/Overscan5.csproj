@@ -28,6 +28,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      The probe library ships twice on purpose. `res/` needs no item at all (the
+      Tizen packaging task takes that folder as it stands), and this puts a second
+      copy in the output, which lands in the tpk's `bin/` beside Overscan.dll.
+
+      That is the directory the app's own assembly lives in, and the one file of
+      ours known to map executable on issue #17's set. Asking about an ELF there
+      is what separates "the directory" from "the file format" — see NativeProbe.
+    -->
+    <None Include="res/libovprobe.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>libovprobe.so</Link>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Build tasks + tpk packaging for the tizen50 TFM. -->
     <PackageReference Include="Tizen.NET.Sdk" Version="1.1.9" />
     <!-- TizenFX API level 5, pinned to the last 5.0.0.x. -->

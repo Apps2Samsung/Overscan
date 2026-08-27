@@ -1700,6 +1700,7 @@ namespace Overscan
                        "trail file : " + Breadcrumbs.Location + "\n" +
                        (full ? "\nefl ladder (ewk_init's own order)\n" + EflSubsystems.Dump() +
                                "\nengine implementation (libchromium-impl.so)\n" + ChromiumImpl.Dump() +
+                               "\nnative code of our own\n" + NativeProbe.Dump() +
                                "\npermission wall" +
                                (ChromiumImpl.Blocked == null
                                    ? "\n"

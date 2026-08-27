@@ -74,6 +74,9 @@ from "the engine ignores the click".
 `Overscan5/res/libovprobe.so` is the only native binary this repo ships: a tiny ARM
 shared object that exists so issue #17's set can be asked whether this app may load
 native code of its own at all. It is **committed**, because CI has no ARM toolchain.
+It ships twice — `res/` needs no `.csproj` item, and a `<None>` item puts a second
+copy in `bin/`, which is the directory the app's own assembly lives in and the only
+one on that set known to map a file of ours executable. Both copies are signed.
 
 Rebuild it only if `tools/elfprobe/ovprobe.s` changes:
 
