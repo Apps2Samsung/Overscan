@@ -552,7 +552,7 @@ namespace Overscan
         {
             Size2D screen = _window.WindowSize;
             int width = 470;
-            int height = 560;
+            int height = 604;
 
             _hints = new View
             {
@@ -579,6 +579,7 @@ namespace Overscan
             string[][] rows =
             {
                 new[] { "hold OK", "menu" },
+                new[] { "Ch up/down", "scroll the page" },
                 new[] { "0", "address bar" },
                 new[] { "1", "identify as…" },
                 new[] { "2", "type in field" },

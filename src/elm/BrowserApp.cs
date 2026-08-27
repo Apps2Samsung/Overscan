@@ -624,7 +624,9 @@ namespace Overscan
         {
             Size screen = _window.ScreenSize;
             int width = 470;
-            int height = 520;
+            // One row taller than the rows need, because the last line of this card
+            // is the unrecognised-button report and it must not fall off the bottom.
+            int height = 560;
             int left = screen.Width - width - 40;
             int top = screen.Height - height - 40;
 
@@ -665,6 +667,7 @@ namespace Overscan
             string[][ ] rows =
             {
                 new[] { "hold OK", "menu" },
+                new[] { "Ch up/down", "scroll the page" },
                 new[] { "0", "address bar" },
                 new[] { "1", "identify as…" },
                 new[] { "2", "pointer style" },
