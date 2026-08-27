@@ -46,12 +46,13 @@ namespace Overscan
         private string _engineFailure;
 
         /// <summary>
-        /// How long after a fed tap the page is asked what it saw. Long enough for
-        /// DALi's next update, the engine's delivery and the page's own handlers —
-        /// three hops, none of them ours — and short enough to still feel like an
-        /// answer about the press you just made.
+        /// How long after a frame click the page is asked what it saw. The click
+        /// leaves on another thread and has a server to start, a socket to open and
+        /// three messages to exchange before the engine has even been asked to
+        /// deliver anything, so this waits for the slow version of all of that —
+        /// and is still short enough to be an answer about the press you just made.
         /// </summary>
-        private const int FrameWitnessDelay = 400;
+        private const int FrameWitnessDelay = 1200;
 
         /// <summary>
         /// What the page reported after the last native tap: whether any real input
@@ -221,6 +222,12 @@ namespace Overscan
                     DiagLog.Add("load started");
                     _loading = true;
                     ShowChrome();
+
+                    // Whatever needed a debugging port, this is not it any more.
+                    // See NuiInspector.Stop: the window it is open for should be
+                    // the captcha, not the evening.
+                    NuiInspectorInput.Reset();
+                    NuiInspector.Stop(_web);
                 };
 
                 _web.PageLoadFinished += (s, e) =>
@@ -247,12 +254,6 @@ namespace Overscan
                 _cursor.Clicked += OnPageClicked;
                 DiagLog.Add("engine ready");
 
-                // Asks the one open question left about frames (issue #20). See
-                // NuiInspector: the layer below the engine does not deliver on that
-                // set, and the engine's own protocol is the only way in that remains.
-                // Whether the server starts on a retail TV is not something I can
-                // find out from here.
-                NuiInspector.Start(_web);
                 return true;
             }
             catch (Exception ex)
@@ -983,50 +984,99 @@ namespace Overscan
                 // the page script can reach inside it, so the click has to be a real
                 // one. Issue #20 is this, on Instagram's reCAPTCHA.
                 DiagLog.Add("click landed on a cross-origin frame: " + result);
-                ClickThroughFrame();
+                ClickThroughFrame(result);
             }
         }
 
         /// <summary>
-        /// Taps where the pointer is, through DALi rather than through the page.
+        /// Clicks inside a cross-origin frame, through the engine rather than
+        /// through the page or the platform under it.
         ///
-        /// The pointer's position is a fraction of the viewport, and the web view
-        /// fills the window, so the window's own pixels are the conversion. See
-        /// <see cref="NuiNativeTouch"/> for why this is a real touch and not a
-        /// dispatched event.
+        /// The point comes back with the script's own report — see
+        /// <see cref="PageScript"/> — and is in the page's CSS pixels, which is the
+        /// space the engine hit-tests in. Deriving it from the window instead would
+        /// be right today and wrong the moment a page is zoomed.
+        ///
+        /// <see cref="NuiInspectorInput"/> is the way in; <see cref="NuiNativeTouch"/>
+        /// stays as the fallback for a set where no inspector will start, on the
+        /// principle that a click that probably does nothing still beats no click at
+        /// all — but on the set in issue #20 it is the one that does nothing, four
+        /// builds over.
         /// </summary>
-        private void ClickThroughFrame()
+        private void ClickThroughFrame(string report)
         {
             try
             {
-                Size2D screen = _window.WindowSize;
-                int x = (int)Math.Round(_cursor.FractionX * screen.Width);
-                int y = (int)Math.Round(_cursor.FractionY * screen.Height);
+                int x;
+                int y;
+                bool havePoint = PointIn(report, out x, out y);
 
-                // Wiped before the feed so what comes back is only about this tap.
+                // Wiped before anything goes out, and not after: the click leaves on
+                // another thread, and a witness cleared behind it would erase the
+                // very event it was there to catch.
                 _cursor.ClearNativeWitness();
 
-                if (!NuiNativeTouch.Click(_window, x, y))
+                bool inspector = havePoint &&
+                                 NuiInspector.Ensure(_web) != 0 &&
+                                 NuiInspectorInput.Click(x, y);
+
+                if (!inspector)
                 {
-                    Flash("This frame cannot be clicked");
-                    return;
+                    // Window pixels, because the platform below the engine knows
+                    // nothing about a page's coordinate space.
+                    Size2D screen = _window.WindowSize;
+                    int windowX = (int)Math.Round(_cursor.FractionX * screen.Width);
+                    int windowY = (int)Math.Round(_cursor.FractionY * screen.Height);
+
+                    if (!NuiNativeTouch.Click(_window, windowX, windowY))
+                    {
+                        Flash("This frame cannot be clicked");
+                        return;
+                    }
                 }
 
-                // And then ask the page what actually arrived. The feed itself is
-                // blind — issue #20 reported "fed tap at 705,126" and an unmoved
-                // captcha, which narrows nothing down — so the answer has to come
-                // from the only place that can see real input: the page. Long enough
-                // after the release for the engine to have delivered it.
+                // And then ask the page what actually arrived. The click itself is
+                // blind from out here — issue #20 reported "fed tap at 705,126" and
+                // an unmoved captcha, which narrows nothing down — so the answer has
+                // to come from the only place that can see real input: the page.
                 _cursor.ReportNativeWitness(FrameWitnessDelay, witness =>
                 {
                     _frameWitness = witness;
                     DiagLog.Add("frame witness: " + witness);
+
+                    if (inspector && !NuiInspectorInput.Succeeded)
+                    {
+                        Flash("This frame cannot be clicked");
+                    }
                 });
             }
             catch (Exception ex)
             {
                 DiagLog.Add("frame click failed: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// The point out of a <c>FRAME:IFRAME@660,124</c> report. False for a build
+        /// of the script old enough not to carry one, which then takes the native
+        /// path and its window coordinates.
+        /// </summary>
+        private static bool PointIn(string report, out int x, out int y)
+        {
+            x = 0;
+            y = 0;
+
+            int at = report.IndexOf('@');
+            int comma = report.IndexOf(',', at + 1);
+            if (at < 0 || comma < 0)
+            {
+                return false;
+            }
+
+            return int.TryParse(report.Substring(at + 1, comma - at - 1),
+                                NumberStyles.Integer, CultureInfo.InvariantCulture, out x) &&
+                   int.TryParse(report.Substring(comma + 1),
+                                NumberStyles.Integer, CultureInfo.InvariantCulture, out y);
         }
 
         /// <summary>
@@ -1284,9 +1334,10 @@ namespace Overscan
                   "view geom : " + _cachedGeometry + "\n" +
                   "page metr : " + _lastMetrics + "\n" +
                   "vp fix    : " + (_viewportFix ? "ON" : "off") + "  (key 6)\n" +
-                  "frame click: " + NuiNativeTouch.LastResult + "\n" +
+                  "frame click: " + NuiInspectorInput.LastResult + "\n" +
                   "frame saw  : " + _frameWitness + "\n" +
-                  "inspector : " + NuiInspector.LastResult + "\n" +
+                  "native tap : " + NuiNativeTouch.LastResult + "\n" +
+                  "inspector  : " + NuiInspector.LastResult + "\n" +
                   "url       : " + _cachedUrl;
 
             return "Overscan diagnostics (NUI build)\n\n" +

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Runs the NUI build's inspector click against desktop chromium, on a page whose
+    button is inside a genuinely cross-site <iframe> — the shape of the captcha in
+    issue #20. The point is that the file under test is the real one: this project
+    compiles src/nui/NuiInspectorInput.cs itself, so a change to the protocol, the
+    JSON reading or the socket handling is exercised here before it is put on a TV
+    that takes a build-and-install round trip to hear back from.
+
+    Only the two things it depends on are stood in for: DiagLog (which calls into
+    Tizen.Log) and NuiInspector.Port (which starts an engine that is not here).
+
+        ./run.sh
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <RootNamespace>Overscan</RootNamespace>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>cdpharness</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Harness.cs" />
+    <Compile Include="../../src/nui/NuiInspectorInput.cs" />
+  </ItemGroup>
+
+</Project>

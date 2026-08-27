@@ -263,13 +263,23 @@ namespace Overscan
                 Trace("probe: mountinfo");
                 Add(added, "  mount: " + MountOf(path));
 
-                Trace("probe: getxattr " + path);
-                foreach (string line in Xattrs(path))
-                {
-                    Add(added, "  " + line);
-                }
-
+                // The verdict goes first, and the labels after it, because on the
+                // Q80 in issue #17 the process died inside `getxattr` — the trail
+                // ends on that line, five builds in — and took the answer with it.
+                // Reading and mapping the file is the answer: it separates "a
+                // privilege could lift this" from "nothing can", which is the whole
+                // question. The labels only ever explained *why*.
                 Verdict(path, added);
+
+                foreach (string label in Labels)
+                {
+                    Trace("probe: getxattr " + label);
+                    string value = Xattr(path, label);
+                    if (value != null)
+                    {
+                        Add(added, "  " + label.Substring("security.".Length) + "=" + value);
+                    }
+                }
 
                 Add(added, "for comparison");
                 foreach (string control in Controls)
@@ -296,6 +306,68 @@ namespace Overscan
         }
 
         /// <summary>
+        /// Whether this app can map a file of its own executable — and so whether
+        /// shipping a native library with the package is worth considering at all.
+        ///
+        /// The question is not idle. If the blocked library turns out to be one the
+        /// engine merely has to *find* rather than one it has to *use*, a stub
+        /// carrying the same soname, opened by absolute path before the engine
+        /// looks, would satisfy the loader out of the app's own directory. That is a
+        /// real decision with real caveats, and it is not worth taking a step toward
+        /// while it is unknown whether this firmware would let this app map anything
+        /// of its own as code in the first place.
+        ///
+        /// The app's own assembly is the file asked about, because it is already
+        /// installed in the directory such a library would live in, and asking about
+        /// it needs nothing written to disk.
+        /// </summary>
+        public static string OwnCode()
+        {
+            int fd = -1;
+            try
+            {
+                string self = typeof(SmackWall).Assembly.Location;
+                if (string.IsNullOrEmpty(self) || !File.Exists(self))
+                {
+                    return "cannot tell — this assembly has no path on disk";
+                }
+
+                Trace("probe: open own assembly");
+                fd = open(self, ORdonly);
+                if (fd < 0)
+                {
+                    return "cannot even read its own assembly: " +
+                           Errno(Marshal.GetLastWin32Error());
+                }
+
+                Trace("probe: mmap own assembly PROT_READ|PROT_EXEC");
+                string mapped = MapProbe(fd, ProtRead | ProtExec, "PROT_READ|PROT_EXEC");
+
+                return mapped.EndsWith("ok", StringComparison.Ordinal)
+                    ? "yes — " + Directory.GetParent(self).FullName + " maps executable"
+                    : "no — own assembly " + mapped;
+            }
+            catch (Exception ex)
+            {
+                return "cannot tell — " + ex.GetType().Name + ": " + ex.Message;
+            }
+            finally
+            {
+                if (fd >= 0)
+                {
+                    try
+                    {
+                        close(fd);
+                    }
+                    catch (Exception)
+                    {
+                        // Nothing here is worth failing a diagnostic over.
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// Which of the three refusals this is. Reading and mapping are asked
         /// separately because they fail for unrelated reasons and only the first is
         /// something a manifest can change.
@@ -319,11 +391,21 @@ namespace Overscan
                 }
 
                 Trace("probe: read header");
-                var head = new byte[4];
+
+                // Twenty bytes rather than four: the magic says it is an ELF, and
+                // e_machine at offset 18 says what for. That is the one fact a
+                // decision to build anything native on this side would turn on, and
+                // it costs sixteen bytes to have it in hand rather than assumed.
+                var head = new byte[20];
                 IntPtr got = read(fd, head, (IntPtr)head.Length);
-                bool elf = got.ToInt64() == 4 && head[0] == 0x7f &&
+                long read20 = got.ToInt64();
+                bool elf = read20 >= 4 && head[0] == 0x7f &&
                            head[1] == (byte)'E' && head[2] == (byte)'L' && head[3] == (byte)'F';
-                Add(added, "  open(O_RDONLY): ok" + (elf ? ", reads as ELF" : ", first bytes are not ELF"));
+                string machine = elf && read20 >= 20
+                    ? ", " + Machine(head[18] | (head[19] << 8))
+                    : string.Empty;
+                Add(added, "  open(O_RDONLY): ok" +
+                           (elf ? ", reads as ELF" + machine : ", first bytes are not ELF"));
 
                 Trace("probe: mmap PROT_READ");
                 string readable = MapProbe(fd, ProtRead, "PROT_READ");
@@ -423,6 +505,7 @@ namespace Overscan
             var found = new List<string>();
             foreach (string label in Labels)
             {
+                Trace("probe: getxattr " + label + " on " + path);
                 string value = Xattr(path, label);
                 if (value != null)
                 {
@@ -594,6 +677,24 @@ namespace Overscan
             catch (Exception ex)
             {
                 return "(" + ex.GetType().Name + ")";
+            }
+        }
+
+        /// <summary>ELF <c>e_machine</c>, named. Anything else is reported as itself.</summary>
+        private static string Machine(int machine)
+        {
+            switch (machine)
+            {
+                case 3:
+                    return "x86";
+                case 40:
+                    return "ARM (32-bit)";
+                case 62:
+                    return "x86-64";
+                case 183:
+                    return "AArch64";
+                default:
+                    return "e_machine " + machine.ToString(CultureInfo.InvariantCulture);
             }
         }
 
