@@ -584,8 +584,9 @@ Two halves to it:
   `evas_object_evas_get` on it gives the canvas; `NativeMouse` does the rest, and
   every part of it is best-effort.
 
-The script reports `FRAME:<tag>` back over the bridge and the native side follows up
-with the real click, rather than the native path being used for everything. That is
+The script reports `FRAME:<tag>@<x>,<y>` back over the bridge — the tag, and the
+point in the page's own CSS pixels — and the native side follows up with the real
+click, rather than the native path being used for everything. That is
 deliberate: **a real click on a text field focuses it, and a focused field raises
 the TV's IME**, which then swallows the remote — the exact failure the in-page
 pointer exists to avoid.
@@ -639,7 +640,7 @@ Two details that decide whether it lands:
   Timer with no live reference can be collected before its first tick and simply
   never fire, which would leave the engine with a contact still down).
 
-`frame click:` on the diagnostics screen says what the last attempt did.
+`native tap :` on the diagnostics screen says what the last attempt did.
 
 #### The feed is blind, so the page is asked
 
@@ -712,7 +713,7 @@ stays in the tree only because it is the thing that produced this evidence.
 `FeedTouchEvent` after all — the P/Invoke was not necessary. It is also not the
 problem: same call, same layer, same result.)
 
-#### What is left: the engine's own protocol
+#### The way in: the engine's own protocol
 
 One layer remains, and it is *inside* the engine rather than beneath it. Chromium's
 DevTools protocol has `Input.dispatchMouseEvent`, which the browser process injects
@@ -722,15 +723,73 @@ what makes it reach an out-of-process cross-origin frame. It is the mechanism
 Puppeteer and Playwright use for this exact problem, and it needs no privilege the
 app does not already have (`internet`, for a socket on loopback).
 
-TizenFX declares `CSharp_Dali_WebView_StartInspectorServer` in its interop layer at
-API 9 without exposing a managed wrapper, so the export is reachable the same way
-`FeedTouch` was. `NuiInspector` starts it and reports the port as `inspector :` on
-the diagnostics screen.
+TizenFX declares `CSharp_Dali_WebView_StartInspectorServer` and its `Stop` twin in
+its interop layer without exposing either wrapper in the API 9 surface, so both are
+reachable the same way `FeedTouch` was. `NuiInspector` starts one and reports the
+port as `inspector  :` on the diagnostics screen.
 
-That is deliberately only the question. Two things have to hold before a client is
-worth writing — that the server starts on a retail set, and that it is reachable —
-and neither can be established from here. A CDP client is a WebSocket client plus a
-protocol, and there is no sense writing it blind.
+Both of the unknowns are now answered, by the set in #20: the server starts on a
+retail TV with the privileges the app already has (`listening on 7011`), and it is
+reachable — `/json/list` fetched from a phone on the same network came back with the
+page's `webSocketDebuggerUrl`.
+
+`NuiInspectorInput` is the client. One background thread, because everything in it
+blocks and the DALi main loop may not; a `ClientWebSocket` kept open across clicks;
+and three messages per click — `mouseMoved`, `mousePressed`, `mouseReleased`, 90 ms
+apart, at the point the page reported. Nothing in it touches NUI.
+
+Four things about the shape of it are not obvious, and three of them are things the
+server on the other end does:
+
+- **The point is the page's, not the window's.** `Input.dispatchMouseEvent` takes
+  CSS pixels in the page's coordinate space, so `__ovs.click()` now returns
+  `FRAME:IFRAME@660,124` — the cursor's own position, which it already holds in that
+  space. Deriving it from the window would be right until a page is zoomed or the
+  viewport is forced (key 6), and then quietly wrong.
+- **The inspector's HTTP side answers 1.1 and only 1.1.** A `HTTP/1.0` request gets
+  silence and a socket held open, which from a client's side is indistinguishable
+  from nothing listening at all.
+- **It ignores `Connection: close`.** The response arrives complete and the socket
+  then stays up, so reading to the end of the stream reaches a read timeout rather
+  than an end — and throws away a perfectly good answer on the way. `Content-Length`
+  is what says where the body stops.
+- **A socket whose target has gone still reports itself `Open`.** It says otherwise
+  only when something is sent down it. So a click on a connection that was already
+  open gets one silent retry: drop it, rediscover the target, connect, send again.
+  (A page navigation alone does not do this — the page target is the view, not the
+  document — but a server stopped and started again does, and from out here the two
+  are identical until the send fails.)
+
+The target is chosen by `"type": "page"`. The list also carries `iframe` targets —
+the captcha's own renderer is one — and sending the click into the frame's target
+would defeat the point: it is the page-level hit test that routes a point to the
+right frame.
+
+#### The port is opened for the captcha, not for the evening
+
+The inspector server is unauthenticated and listens on every interface. For as long
+as it is up, anything else on the network can drive this browser: read the page,
+read its cookies, navigate it somewhere else. On a TV signed in to Instagram that is
+not a small thing.
+
+So it is not started at launch. `NuiInspector.Ensure` starts one the first time a
+click actually lands on a cross-origin frame, and `NuiInspector.Stop` takes it down
+on the next page load — the window it is open for is the captcha and a little
+either side of it, rather than every session on every page, the overwhelming
+majority of which have no frame in them to click.
+
+#### Proving it without a TV in the room
+
+A build for the TV has to be signed, installed, and reported back on by somebody who
+owns the set. `tools/cdpharness` is what keeps that round trip for questions only a
+TV can answer: it compiles `src/nui/NuiInspectorInput.cs` itself — the shipping file,
+not a copy — and clicks with it into a cross-site `<iframe>` on desktop chromium,
+which is the captcha's shape (another site, another renderer, unreachable from any
+script in the page). The frame reports what it saw to its own origin, and `run.sh`
+fails unless that says `trusted=true`.
+
+Three of the four points above came out of the first ten minutes of running it. From
+a TV, all three would have looked like the same thing: the engine ignoring the click.
 
 ### Why our own keyboard rather than the platform IME
 

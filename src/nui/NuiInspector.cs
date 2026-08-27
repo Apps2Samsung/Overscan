@@ -6,7 +6,9 @@ using Tizen.NUI.BaseComponents;
 namespace Overscan
 {
     /// <summary>
-    /// Starts the engine's own remote inspector, and reports the port it got.
+    /// Runs the engine's own inspector server, which is how a click gets into a
+    /// cross-origin frame on this build — see <see cref="NuiInspectorInput"/>,
+    /// which is the only thing that ever asks for it.
     ///
     /// This exists because the layer below the engine turned out to be a dead end.
     /// <see cref="NuiNativeTouch"/> feeds a touch into the DALi window, which is the
@@ -25,17 +27,26 @@ namespace Overscan
     /// for exactly this problem, and it is the only remaining way in that does not
     /// need a privilege this app cannot have.
     ///
-    /// Two things have to be true before any of that is worth building, and both are
-    /// unknown on a retail set: that the server starts at all, and that it is
-    /// reachable. So this is only the question, not the answer — start it, report the
-    /// port, and let the reporter try to open it. A CDP client is a fair amount of
-    /// code (a WebSocket client, for a start) and there is no sense writing it blind
-    /// a fourth time.
+    /// Whether a retail set would start one at all was the open question, and issue
+    /// #20 answered it: `listening on 7011`, on a 2025 TV, with the privileges the
+    /// app already had, and `/json/list` fetched from a phone on the same network.
     ///
-    /// The symbol is P/Invoked straight out of DALi's C# binder, for the same reason
-    /// and in the same way as <see cref="NuiNativeTouch"/>: TizenFX declares
-    /// <c>CSharp_Dali_WebView_StartInspectorServer</c> in its own interop layer at
-    /// API 9 — so the export is there — but exposes no managed wrapper for it.
+    /// That second half is also why this is <see cref="Ensure"/> and not a call at
+    /// start-up. The server is unauthenticated and listens on every interface: for
+    /// as long as it is up, anything else on the network can drive this browser —
+    /// read the page, read its cookies, navigate it. That is a fair price for the
+    /// seconds it takes to click a captcha, and no price at all worth paying for
+    /// the whole of every session on the vast majority of pages, which have no
+    /// frame in them to click. So it starts the first time a cross-origin frame is
+    /// actually hit, and <see cref="Stop"/> takes it down again when the browser
+    /// leaves the page that needed it.
+    ///
+    /// The symbols are P/Invoked straight out of DALi's C# binder, for the same
+    /// reason and in the same way as <see cref="NuiNativeTouch"/>: TizenFX declares
+    /// <c>CSharp_Dali_WebView_StartInspectorServer</c> and its <c>Stop</c> twin in
+    /// its own interop layer — so the exports are there — but the managed wrappers
+    /// on <c>WebView</c> are hidden, and were not in the API 9 surface this builds
+    /// against.
     /// </summary>
     internal static class NuiInspector
     {
@@ -52,21 +63,43 @@ namespace Overscan
         [DllImport(Binder, EntryPoint = "CSharp_Dali_WebView_StartInspectorServer")]
         private static extern uint StartInspectorServer(IntPtr webView, uint port);
 
+        /// <summary>Dali::Toolkit::WebView::StopInspectorServer() — true if it took one down.</summary>
+        [DllImport(Binder, EntryPoint = "CSharp_Dali_WebView_StopInspectorServer")]
+        private static extern bool StopInspectorServer(IntPtr webView);
+
         /// <summary>What happened, for the diagnostics screen.</summary>
         public static string LastResult { get; private set; } = "(not started)";
 
         /// <summary>
-        /// Best-effort, like everything else that reaches past the managed surface.
-        /// A failure here costs nothing — the browser is entirely usable without an
-        /// inspector, and the only thing lost is the answer to the question above.
+        /// The port it actually got, or 0 if there is no server. Read by
+        /// <see cref="NuiInspectorInput"/>, which is the only reason any of this
+        /// exists: the number is not the point, the click that goes through it is.
         /// </summary>
-        public static void Start(WebView web)
+        public static uint Port { get; private set; }
+
+        /// <summary>
+        /// Starts a server if there is not one already, and reports the port.
+        ///
+        /// Idempotent by design: the caller is the frame-click path, which asks
+        /// on every cross-origin click, and starting a second server on a port
+        /// already held would only turn a working one into a refusal.
+        ///
+        /// Best-effort, like everything else that reaches past the managed surface.
+        /// A failure costs the frame click and nothing else — the browser is
+        /// entirely usable without an inspector.
+        /// </summary>
+        public static uint Ensure(WebView web)
         {
+            if (Port != 0)
+            {
+                return Port;
+            }
+
             IntPtr handle = HandleOf(web);
             if (handle == IntPtr.Zero)
             {
                 DiagLog.Add("inspector: " + LastResult);
-                return;
+                return 0;
             }
 
             try
@@ -81,6 +114,7 @@ namespace Overscan
                     port = StartInspectorServer(handle, 0);
                 }
 
+                Port = port;
                 LastResult = port == 0
                     ? "engine refused to start one"
                     : "listening on " + port;
@@ -88,6 +122,54 @@ namespace Overscan
             catch (Exception ex)
             {
                 LastResult = "start failed — " + ex.GetType().Name + ": " + ex.Message;
+            }
+
+            DiagLog.Add("inspector: " + LastResult);
+            return Port;
+        }
+
+        /// <summary>
+        /// Takes the server down again.
+        ///
+        /// Called when the browser leaves the page that needed one, because an
+        /// unauthenticated debugging port on a home network is not something to
+        /// leave open for the rest of an evening over a captcha that was solved
+        /// ten minutes ago. If the engine will not close it the port simply stays
+        /// up, which is where every build before this one already was.
+        /// </summary>
+        public static void Stop(WebView web)
+        {
+            if (Port == 0)
+            {
+                return;
+            }
+
+            IntPtr handle = HandleOf(web);
+            if (handle == IntPtr.Zero)
+            {
+                return;
+            }
+
+            try
+            {
+                bool stopped = StopInspectorServer(handle);
+
+                // Only a server that actually went down is forgotten. A refusal
+                // leaves one listening, and forgetting it would have the next frame
+                // click ask for another: the preferred port is taken, so the engine
+                // would pick its own and the set would end up running two.
+                if (stopped)
+                {
+                    Port = 0;
+                }
+
+                LastResult = stopped ? "stopped" : "would not stop — still on " + Port;
+            }
+            catch (Exception ex)
+            {
+                // Same reasoning, and this is where a firmware without the export
+                // lands: the server it started is still up and still ours to use.
+                LastResult = "stop failed — " + ex.GetType().Name + ": " + ex.Message;
             }
 
             DiagLog.Add("inspector: " + LastResult);

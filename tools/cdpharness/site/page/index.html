@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>waiting</title>
+<style>
+  body { margin:0; font:16px sans-serif; background:#0b0d12; color:#eaeef6 }
+  #pad { height:100px; padding:16px }
+  iframe { width:400px; height:120px; border:2px solid #333 }
+</style></head><body>
+<div id="pad">the page (a.test) — the button is inside the frame below, on b.test</div>
+<iframe id="f" src="http://b.test:8802/index.html"></iframe>
+<pre id="out">nothing trusted here yet</pre>
+<script>
+/* The parent's half of the witness the app uses on the TV: a real click into a
+   cross-origin frame does not bubble out here, but the frame taking focus does,
+   and that is the parent-side proof that something real went in. */
+var st = { trusted: null, frameFocus: null };
+
+['pointerdown', 'mousedown', 'touchstart', 'click'].forEach(function (type) {
+  document.addEventListener(type, function (e) {
+    if (!e.isTrusted) { return; }
+    st.trusted = type + ' on ' + (e.target && e.target.tagName);
+    document.getElementById('out').textContent = 'page saw: ' + st.trusted;
+  }, true);
+});
+
+document.addEventListener('focusin', function (e) {
+  if (e.target && e.target.tagName === 'IFRAME') { st.frameFocus = 'IFRAME'; }
+}, true);
+
+/* run.sh reads the frame's position out of the title, because /json/list is the
+   only channel it has into the browser without a protocol client of its own. */
+window.addEventListener('load', function () {
+  var r = document.getElementById('f').getBoundingClientRect();
+  document.title = 'rect:' + Math.round(r.left) + ',' + Math.round(r.top) +
+                   ',' + Math.round(r.width) + ',' + Math.round(r.height);
+});
+</script>
+</body></html>

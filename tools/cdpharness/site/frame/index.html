@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>frame</title>
+<style>
+  body { margin:0; font:16px sans-serif; background:#eef }
+  #box { margin:20px; width:220px; height:60px; border:3px solid #48a0ff;
+         display:flex; align-items:center; justify-content:center }
+</style></head><body>
+<div id="box">not clicked</div>
+<script>
+/* Stands in for the captcha's checkbox: another origin, another renderer, and
+   only a real click gets in. What it saw goes back to its own server, because
+   nothing outside this frame is allowed to read it — which is the whole point. */
+document.getElementById('box').addEventListener('click', function (e) {
+  document.getElementById('box').textContent =
+    'clicked, trusted=' + e.isTrusted + ' at ' + Math.round(e.clientX) + ',' + Math.round(e.clientY);
+  new Image().src = '/hit?trusted=' + e.isTrusted +
+                    '&x=' + Math.round(e.clientX) + '&y=' + Math.round(e.clientY);
+});
+</script>
+</body></html>

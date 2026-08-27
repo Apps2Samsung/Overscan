@@ -283,9 +283,11 @@ namespace Overscan
         /// on the way out. Between them they settled #17: all nine came up, and the
         /// captured output was a bare <c>ls -l</c> of
         /// <c>libchromium-impl.so</c> — the shim's own evidence that its dlopen of
-        /// the implementation is what failed. So <see cref="ChromiumImpl"/> now does
-        /// that dlopen first, where dlerror() is readable and a missing dependency
-        /// can be supplied by absolute path before the engine looks for it.
+        /// the implementation is what failed. So <see cref="ChromiumImpl"/> does that
+        /// dlopen itself, where dlerror() is readable and a missing dependency can be
+        /// supplied by absolute path before the engine looks for it — but between the
+        /// two init attempts rather than in front of the first, for the reason
+        /// written down beside the call.
         /// </summary>
         private bool InitializeChromium()
         {
@@ -295,14 +297,6 @@ namespace Overscan
             {
                 Breadcrumbs.Drop("  " + line);
             }
-
-            // Before ewk_init, because ewk_init's own dlopen of this library is
-            // where issue #17 stops, and by then the reason is only in dlog.
-            // ChromiumImpl writes its own trail as it goes now, so there is nothing
-            // to walk afterwards — and nothing left in memory to lose if one of its
-            // calls does not return.
-            ChromiumImpl.Preload();
-            Breadcrumbs.Drop("engine implementation: " + ChromiumImpl.Summary);
 
             // Issue #17's trail ends here, on this line, every launch — so the
             // interesting question is no longer what ewk_init returns but whether it
@@ -328,6 +322,24 @@ namespace Overscan
             }
 
             Breadcrumbs.Drop("engine said: " + _engineStdErr);
+
+            // The implementation is loaded here, between the two attempts, and no
+            // longer before the first one.
+            //
+            // Its purpose is unchanged — open the 48 MB implementation by absolute
+            // path, so a dependency the engine's own search path cannot find is
+            // already in the process when the engine looks — and the retry is a
+            // perfectly good place to do that. What moving it buys is the first
+            // attempt: on the Q80 in issue #17, every build that did this dlopen
+            // before ewk_init has a trail that ends on `Chromium.Initialize()` and
+            // a process that never comes back, while `build-caef7bd`, the last one
+            // that did not, got a clean `refcount=0` twice over and lived to draw
+            // its failure screen. One set and one variable is not proof, but it is
+            // the same lesson #13 and #17 have each taught once already: whatever
+            // is most likely to not survive this firmware goes last, never in front
+            // of the thing it is meant to be explaining.
+            ChromiumImpl.Preload();
+            Breadcrumbs.Drop("engine implementation: " + ChromiumImpl.Summary);
 
             string argv = NativeEngine.SetArguments();
             Breadcrumbs.Drop("engine init returned 0 — retrying (" + argv + ")");
@@ -366,6 +378,7 @@ namespace Overscan
             // long as it likes and cannot cost anything — whereas running it before
             // ewk_init cost #13 and #17 a build each: the app died inside it and the
             // engine was never asked to start at all. See SmackWall.
+            Breadcrumbs.Drop("own code: " + SmackWall.OwnCode());
             SmackWall.InvestigateInBackground(ChromiumImpl.Blocked);
 
             _engineFailure =

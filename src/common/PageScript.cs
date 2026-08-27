@@ -11,9 +11,9 @@ namespace Overscan
     /// The one place a dispatched event cannot reach is inside a cross-origin
     /// <c>&lt;iframe&gt;</c> — a captcha, an embedded sign-in. A same-origin frame
     /// is entered here (see <c>descend</c>); a cross-origin one is reported back as
-    /// <c>FRAME:</c> so the app can push a real event in from outside the page
-    /// instead — <see cref="NativeMouse"/> on the ewk builds, and
-    /// <c>NuiNativeTouch</c> on the NUI one.
+    /// <c>FRAME:</c>, with the point it happened at, so the app can push a real
+    /// event in from outside the page instead — <see cref="NativeMouse"/> on the
+    /// ewk builds, and <c>NuiInspectorInput</c> on the NUI one.
     ///
     /// That feed is blind: from the app's side it either arrives or it does not, and
     /// both look the same. So the script watches for the two things that can only be
@@ -232,10 +232,13 @@ namespace Overscan
       if (isFrame(hit)) {
         var inner = descend(hit, st.x, st.y);
         if (!inner) {
-          /* Cross-origin: unreachable from script. Ask the native side to feed a
-             real mouse event, which chromium routes into the frame itself. */
+          /* Cross-origin: unreachable from script. Ask the native side to push a
+             real mouse event in, which chromium routes into the frame itself.
+             The point goes back with it, in this page's own CSS pixels: that is
+             the space the engine hit-tests in, and it is not the window's the
+             moment a page is zoomed or the viewport has been forced (key 6). */
           pulse();
-          return 'FRAME:' + hit.tagName;
+          return 'FRAME:' + hit.tagName + '@' + Math.round(st.x) + ',' + Math.round(st.y);
         }
 
         hit = inner.el;

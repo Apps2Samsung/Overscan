@@ -174,6 +174,14 @@ namespace Overscan
             // #17's trail ends inside ewk_init every launch and never comes back, so
             // anything sequenced after it is unreachable — and here a dead process
             // costs nothing, because Step names the call that killed it.
+            // Before the wall, and not after it, because the wall is where this
+            // process died last time and this answer is cheap, safe and decides
+            // whether there is anything to build on our side at all.
+            Step("4e2 can this app map its own code", () =>
+            {
+                Breadcrumbs.Drop("             own code: " + SmackWall.OwnCode());
+            });
+
             Step("4f permission wall", () =>
             {
                 if (ChromiumImpl.Blocked == null)
@@ -351,16 +359,25 @@ namespace Overscan
         }
 
         /// <summary>
-        /// The engine itself parses fine; dlopen fails resolving libmarlin.so.0
-        /// with EPERM. Opening that file directly separates "the privilege now
-        /// grants access" from "still denied" in one unambiguous line.
+        /// The engine itself parses fine; dlopen fails resolving a dependency with
+        /// EPERM. Opening that file directly separates "the privilege now grants
+        /// access" from "still denied" in one unambiguous line.
+        ///
+        /// The names are known ahead of time rather than taken from the refusal,
+        /// because this stage runs before the dlopen that names it — and that is
+        /// the point of doing it here at all. On the Q80 in issue #17 everything
+        /// after the wall stage was lost twice over: first to an engine that never
+        /// returns, then to a `getxattr` that killed the process. A plain read,
+        /// early, survives both.
         /// </summary>
         private static void ProbeDependency()
         {
             string[] targets =
             {
+                // Issue #13's blocker, and issue #17's.
                 "/usr/lib/libmarlin.so.0",
                 "/usr/lib/libmarlin.so",
+                "/usr/lib/libprivileged-service-client.so",
                 "/usr/lib/libchromium-ewk.so",
             };
 
