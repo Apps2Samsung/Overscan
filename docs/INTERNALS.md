@@ -539,7 +539,9 @@ returns `SF_STATUS_UEP_FILE_NOT_SIGNED`, which in enforce mode is another EPERM.
 A stub would be the first native `.so` this repo has ever shipped, so nothing we
 have measured says a native library of ours can be mapped executable at all.
 
-So the stub had a cheap prerequisite, and that is what the current build ships.
+So the stub had a cheap prerequisite, and `build-9d856d1` is the build that asks it.
+**That is where this stands as of 2026-08-27: shipped, asked on the issue, waiting
+on Willou-Gillou.** Nothing else is pending on that set.
 
 `Overscan5/res/libovprobe.so` is a real ARM shared object — one function, no
 `DT_NEEDED`, `SONAME libovprobe.so`, built freestanding by `tools/elfprobe/build.sh`
@@ -567,8 +569,25 @@ step of that investigation is the `getxattr` the Q80 has not come back from twic
 so anything queued behind it never runs at all. Both sit after the engine has
 already failed, so neither is in front of anything that still matters.
 
-If the mapping is refused, the stub is dead too and the honest answer to the
-reporter is that this TV cannot run Overscan.
+**What the next report decides, and there are only two branches.** The line to read
+is `own native :` in the `:8081` report.
+
+- **It maps and loads** — the last gate is met and the stub becomes buildable. It is
+  still Patrick's call, not a session's, for the reasons above. `tools/elfprobe`
+  already has the toolchain recipe and an assembly file to copy; a stub differs from
+  the probe only in its `SONAME` and in being `dlopen`ed by
+  `ChromiumImpl.Preload` before the implementation.
+- **The mapping is refused** — the same wall covers anything we ship, the stub is
+  dead too, and the honest answer is that this TV cannot run Overscan. Say so and
+  close #17 rather than asking that reporter for another install. That was written
+  into the issue reply in advance, so it will not come as a reversal.
+
+One packaging fact worth not re-deriving: a file in `Overscan5/res/` needs no
+`.csproj` change to be packaged, lands at `res/` in the tpk, and **is covered by
+`signature1.xml`** — checked against the published `build-9d856d1` asset, where
+`res/libovprobe.so` is byte-identical to the committed one. That last part matters
+because reporters re-sign with their own certificate: a file outside the signature
+would fail their install rather than ours.
 
 **The judgment is the point, and it is Patrick's to make, not a session's.** The
 stub grants nothing — it cannot give this app a privilege it does not have, and if
@@ -1044,6 +1063,30 @@ trail they look nothing alike: a crash ends on whatever call was in flight, an
 eviction ends on a memory line much larger than the ones before it. A slope only
 exists if something was writing numbers down before anyone knew there was a
 problem.
+
+### What is left on the 2025 sets
+
+Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the one
+person testing that half of this app in anger. Three things came back after the
+captcha was fixed. As of 2026-08-27 the state is:
+
+- **The session not surviving a restart — fixed, and it was a real bug.** Shipped in
+  `build-9d856d1`. Nothing pending.
+- **Reels crashing the app — a likely cause changed, unconfirmed.** `VideoHoleEnabled`
+  now defaults to false for the reasons above, and key `5` puts it back. Nobody here
+  has a set that runs this build, so this is the one thing in the app that was
+  changed on a theory rather than a measurement. **Waiting on:** the `previous run`
+  block from `:8081` after the next crash. The last line of it names the call that
+  died, and the `memory:` lines separate a crash from a low-memory eviction — which
+  need opposite fixes and which nothing before this build could tell apart. Ask for
+  that block, not for a description.
+- **"A frame at the top that cannot be clicked" on first launch — not diagnosed.**
+  It is not clear whether the reporter means part of the page or part of Overscan
+  (the address bar, or the remote card in the corner). Asked on the issue, with key
+  `7` as the way to tell those apart. Nothing has been changed for it.
+
+If video comes back black or silent rather than crashing, that is the in-page path
+failing on that set and key `5` is the answer — not a regression to chase.
 
 ## Emulator notes
 
