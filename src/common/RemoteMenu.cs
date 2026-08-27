@@ -48,6 +48,7 @@ namespace Overscan
         public const string ActionKeysToPage = "keystopage";
         public const string ActionFitPage = "fitpage";
         public const string ActionImages = "images";
+        public const string ActionVideoPath = "videopath";
         public const string ActionPointer = "pointer";
         public const string ActionDiagnostics = "diagnostics";
         public const string ActionHints = "hints";
