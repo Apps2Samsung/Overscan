@@ -140,6 +140,157 @@ namespace Overscan
             return redirected ? Read(path) : why;
         }
 
+        // ------------------------------------------------- the whole session
+
+        /// <summary>
+        /// Where the session capture stands, for the report.
+        /// </summary>
+        public static string SessionState { get; private set; } = "(not started)";
+
+        private static FileStream _sessionSink;
+        private static int _sessionOut = -1;
+        private static int _sessionErr = -1;
+
+        /// <summary>
+        /// Redirects stdout and stderr for the rest of the run, rather than for the
+        /// length of one call.
+        ///
+        /// The warning above about forking becomes the reason to do this. A child
+        /// process inherits the redirected descriptors and goes on writing to the
+        /// file — and on the NUI build the child is chromium's render process, which
+        /// is the thing suspected of taking the app down on issue #20. A native
+        /// crash prints before it dies: the runtime's own fatal handler, glibc's
+        /// assertion text, chromium's <c>Received signal</c> line. All of it goes to
+        /// stderr, all of it is invisible on a retail TV with no dlog reader, and
+        /// <see cref="Breadcrumbs"/> already moves this file aside at start-up so
+        /// the next launch can read what the last one printed.
+        ///
+        /// The size is watched (<see cref="TrimSession"/>) because an engine that
+        /// turns chatty must not be allowed to fill a stranger's TV.
+        ///
+        /// This shares its file with <see cref="Capture"/>, and the two must not
+        /// overlap: <c>Capture</c> opens the same path <c>FileMode.Create</c>, which
+        /// would truncate the file underneath the descriptors this holds. They do
+        /// not meet today — <c>Capture</c> wraps <c>Chromium.Initialize</c>, which
+        /// only the ewk packages and the probe call, and this is only called by the
+        /// NUI build — and a package that wants both needs to give one of them its
+        /// own file.
+        /// </summary>
+        public static bool StartSession()
+        {
+            string directory = Breadcrumbs.TrailDirectory;
+            if (directory == null)
+            {
+                SessionState = "not capturing: nowhere writable";
+                return false;
+            }
+
+            if (_sessionSink != null)
+            {
+                return true;
+            }
+
+            try
+            {
+                _sessionSink = new FileStream(Path.Combine(directory, "stderr.log"),
+                                              FileMode.Create, FileAccess.Write);
+
+                int fd = (int)_sessionSink.SafeFileHandle.DangerousGetHandle();
+                _sessionOut = dup(StdOut);
+                _sessionErr = dup(StdErr);
+
+                if (fd < 0 || _sessionOut < 0 || _sessionErr < 0)
+                {
+                    SessionState = "not capturing: could not duplicate descriptors";
+                    return false;
+                }
+
+                dup2(fd, StdOut);
+                dup2(fd, StdErr);
+                SessionState = "capturing to stderr.log";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                SessionState = "not capturing: " + ex.GetType().Name;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Puts the descriptors back. Called when the file has grown past anything
+        /// worth keeping — the tail is what gets read, but a file nobody bounds is
+        /// still a file on somebody's television.
+        /// </summary>
+        public static void StopSession(string why)
+        {
+            if (_sessionSink == null)
+            {
+                return;
+            }
+
+            try
+            {
+                fflush(IntPtr.Zero);
+            }
+            catch (Exception)
+            {
+                // The stderr lines are unbuffered and already on disk.
+            }
+
+            if (_sessionOut >= 0)
+            {
+                dup2(_sessionOut, StdOut);
+            }
+
+            if (_sessionErr >= 0)
+            {
+                dup2(_sessionErr, StdErr);
+            }
+
+            Safely(_sessionOut);
+            Safely(_sessionErr);
+            _sessionOut = -1;
+            _sessionErr = -1;
+
+            try
+            {
+                _sessionSink.Dispose();
+            }
+            catch (Exception)
+            {
+                // Going away regardless.
+            }
+
+            _sessionSink = null;
+            SessionState = "stopped: " + why;
+            Breadcrumbs.DropToTrail("stderr capture " + SessionState);
+        }
+
+        /// <summary>
+        /// Stops the capture if the file has grown past <paramref name="limitBytes"/>.
+        /// Cheap enough for a heartbeat: one stat of a file we already have open.
+        /// </summary>
+        public static void TrimSession(long limitBytes)
+        {
+            if (_sessionSink == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (_sessionSink.Length > limitBytes)
+                {
+                    StopSession("the engine wrote more than " + (limitBytes / 1024) + " KB");
+                }
+            }
+            catch (Exception)
+            {
+                // A length that cannot be read is not a reason to stop capturing.
+            }
+        }
+
         private static void Safely(int fd)
         {
             if (fd < 0)

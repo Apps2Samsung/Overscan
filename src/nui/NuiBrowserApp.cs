@@ -172,6 +172,29 @@ namespace Overscan
         /// </summary>
         private const int OkHoldRepeats = 6;
 
+        /// <summary>
+        /// How often this process's size goes on the trail while a video is playing.
+        /// It was five seconds throughout, and five seconds is what cost issue #20
+        /// the resolution that mattered: the reading before the death was already
+        /// twenty-five megabytes down, so whatever happened had happened by then and
+        /// there was nothing in between.
+        /// </summary>
+        private const int MemorySecondsWithVideo = 2;
+
+        /// <summary>
+        /// And how often otherwise. Two seconds everywhere would double the length
+        /// of a trail that goes into a report somebody has to copy out of a browser
+        /// on their phone, to buy resolution on pages where nothing is happening.
+        /// </summary>
+        private const int MemorySecondsIdle = 5;
+
+        /// <summary>
+        /// How much the engine may write to stdout/stderr before the capture is
+        /// given up. Generous for a crash message, small enough that a chatty
+        /// firmware cannot fill somebody's television.
+        /// </summary>
+        private const long StdErrLimitBytes = 1024 * 1024;
+
         /// <summary>Longest gap that still counts as the same hold.</summary>
         private const int OkRepeatGapMs = 400;
         private DateTime _flashUntil = DateTime.MinValue;
@@ -187,6 +210,7 @@ namespace Overscan
             _window = GetDefaultWindow();
             _window.BackgroundColor = new Color(0.039f, 0.043f, 0.055f, 1f);
             DiagLog.Add("window " + _window.WindowSize.Width + "x" + _window.WindowSize.Height);
+            WatchTheWindow();
 
             // Before the keyboard is built: it resolves its remembered layout the
             // first time KeyboardLayouts is touched, so initialising the store
@@ -236,6 +260,84 @@ namespace Overscan
             _tick = new Timer(150);
             _tick.Tick += (s, e) => OnTick();
             _tick.Start();
+        }
+
+        /// <summary>
+        /// Records the things that happen to this app rather than inside it.
+        ///
+        /// The trail from issue #20's `build-c0cd5ab` shows a run that ends with the
+        /// process's memory dropping by twenty-five megabytes in the last reading
+        /// before it goes. Something released a lot at once, and there is a reading
+        /// of that which has nothing to do with a crash: a window that stops being
+        /// visible makes the engine give up its graphics resources, and an app that
+        /// has been put in the background is one the platform may then close. From
+        /// the sofa "I pressed something and Overscan disappeared" and "Overscan
+        /// crashed" are the same sentence, and these lines are what tell them apart.
+        /// See <see cref="NuiDeathWatch"/> for the rest of the ladder.
+        /// </summary>
+        private void WatchTheWindow()
+        {
+            try
+            {
+                _window.FocusChanged += delegate (object sender, Window.FocusChangedEventArgs e)
+                {
+                    Breadcrumbs.DropToTrail("window focus " + (e.FocusGained ? "gained" : "LOST"));
+                };
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("focus watch failed: " + ex.Message);
+            }
+
+            try
+            {
+                _window.VisibilityChanged += delegate (object sender, Window.VisibilityChangedEventArgs e)
+                {
+                    Breadcrumbs.DropToTrail("window " + (e.Visibility ? "visible" : "HIDDEN"));
+                };
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("visibility watch failed: " + ex.Message);
+            }
+
+            try
+            {
+                LowMemory += delegate (object sender, Tizen.Applications.LowMemoryEventArgs e)
+                {
+                    // The platform's own warning, and the last thing an app gets
+                    // before the resource manager stops asking. The memory readings
+                    // say this is not what is happening here — which is worth being
+                    // able to state rather than assume. NUI has a MemoryLow signal of
+                    // its own but keeps it internal; this is the app-framework one,
+                    // inherited from CoreApplication, and it is public.
+                    Breadcrumbs.DropToTrail("PLATFORM SAYS MEMORY IS LOW: " + e.LowMemoryStatus);
+                };
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("low-memory watch failed: " + ex.Message);
+            }
+        }
+
+        protected override void OnPause()
+        {
+            Breadcrumbs.Drop("OnPause — this app is in the background now");
+            base.OnPause();
+        }
+
+        protected override void OnResume()
+        {
+            Breadcrumbs.Drop("OnResume");
+            base.OnResume();
+        }
+
+        protected override void OnTerminate()
+        {
+            // The one line that separates "the platform closed us" from "the process
+            // died": a termination runs this, a crash never gets here.
+            Breadcrumbs.Drop("OnTerminate — closing normally");
+            base.OnTerminate();
         }
 
         private bool TryStartEngine()
@@ -330,6 +432,7 @@ namespace Overscan
                     // the captcha, not the evening.
                     NuiInspectorInput.Reset();
                     NuiInspector.Stop(_web);
+                    NuiMediaWatch.Reset();
                 };
 
                 _web.PageLoadFinished += (s, e) =>
@@ -339,6 +442,7 @@ namespace Overscan
                     _progress.Hide();
                     Breadcrumbs.Drop("load finished: " + SafeUrl() + "  [" + ProcessMemory.Summary() + "]");
                     _cursor.Reinstall();
+                    InstallMediaWatch();
                     Probe();
                     ApplyViewportFix();
                     Store.RecordVisit(SafeUrl(), SafeTitle());
@@ -353,6 +457,8 @@ namespace Overscan
                     UpdateStatus();
                 };
 
+                WatchTheEngine();
+
                 _cursor = new NuiCursor(_web);
                 _cursor.Clicked += OnPageClicked;
                 Breadcrumbs.Drop("engine ready");
@@ -364,6 +470,62 @@ namespace Overscan
                 _engineFailure = ex.GetType().Name + ": " + ex.Message;
                 Breadcrumbs.Drop("ENGINE FAILURE " + _engineFailure);
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Listens to the page's console, which is the one thing the engine says
+        /// about itself that this app has never read.
+        ///
+        /// It is the return channel for <see cref="NuiMediaWatch"/> — see there for
+        /// why a <c>console.log</c> is used in preference to an evaluation — and it
+        /// also carries the engine's own errors, which is where a media pipeline
+        /// says it has failed. The fullscreen signals would have been worth having
+        /// here too, and are not available: NUI declares them as internal callbacks
+        /// rather than events at API 9.
+        /// </summary>
+        private void WatchTheEngine()
+        {
+            try
+            {
+                _web.ConsoleMessageReceived += delegate (object sender, WebViewConsoleMessageReceivedEventArgs e)
+                {
+                    try
+                    {
+                        WebConsoleMessage message = e.ConsoleMessage;
+                        if (message != null)
+                        {
+                            NuiMediaWatch.Console(message.Level.ToString(), message.Text);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // A diagnostic channel is not worth an exception on the
+                        // engine's own callback thread.
+                        DiagLog.Add("console message unreadable: " + ex.Message);
+                    }
+                };
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("console watch failed: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Puts the media census into the page. Alongside the cursor's own script and
+        /// for the same reason it is re-run on every load: a navigation takes the
+        /// previous page's copy with it.
+        /// </summary>
+        private void InstallMediaWatch()
+        {
+            try
+            {
+                _web.EvaluateJavaScript(NuiMediaWatch.Script());
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("media watch failed: " + ex.Message);
             }
         }
 
@@ -815,12 +977,20 @@ namespace Overscan
         /// </summary>
         private void NoteMemory()
         {
-            if (DateTime.UtcNow - _lastMemoryNote < TimeSpan.FromSeconds(5))
+            int seconds = NuiMediaWatch.VideoPlaying ? MemorySecondsWithVideo : MemorySecondsIdle;
+            if (DateTime.UtcNow - _lastMemoryNote < TimeSpan.FromSeconds(seconds))
             {
                 return;
             }
 
             _lastMemoryNote = DateTime.UtcNow;
+
+            // Piggy-backed on the one thing that already runs on a known interval,
+            // and it is a single stat of an open file. See
+            // NativeStdErr.StartSession: the capture runs for the whole session so
+            // that a crashing render process gets to say something, and a capture
+            // that runs for a whole session has to be bounded.
+            NativeStdErr.TrimSession(StdErrLimitBytes);
 
             long mb = ProcessMemory.ResidentMb();
             if (mb < 0)
@@ -1803,8 +1973,11 @@ namespace Overscan
                   "inspector  : " + NuiInspector.LastResult + "\n" +
                   "cookies   : " + _cookieState + "\n" +
                   "video     : " + VideoPathLine() + "\n" +
+                  "media     : " + NuiMediaWatch.LastCensus + "\n" +
                   "blank view: " + _blankState + "\n" +
                   "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
+                  "last words: " + NuiDeathWatch.LastWord + "\n" +
+                  "stderr    : " + NativeStdErr.SessionState + "\n" +
                   "url       : " + _cachedUrl;
 
             // The previous run's trail, exactly as the ElmSharp report carries it.
@@ -1815,6 +1988,7 @@ namespace Overscan
                    "trail file : " + Breadcrumbs.Location + "\n" +
                    engine + "\n\n" +
                    "previous run (last line is where it died)\n" + Breadcrumbs.Previous + "\n\n" +
+                   "previous run's native output\n" + Breadcrumbs.PreviousStdErr + "\n\n" +
                    "log\n" + DiagLog.Dump();
         }
 
