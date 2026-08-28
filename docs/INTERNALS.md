@@ -1213,43 +1213,123 @@ suspect the video path used to be; one that reaches rung 3 is a set where a
 sideloaded NUI WebView cannot be made to navigate, and that is the answer rather
 than another build.
 
+### The reels death is not an eviction, and it leaves no line at all
+
+`build-c0cd5ab` is the first build whose heartbeat survived to the end of a run,
+and the trail issue #20 sent back from it settles one thing and exposes another.
+The run that died ends like this:
+
+```
+15:24:37  memory: 87 MB resident (peak 91)
+15:24:42  memory: 89 MB resident (peak 91)
+15:24:47  memory: 89 MB resident (peak 91)
+15:24:52  memory: 64 MB resident (peak 91)
+```
+
+**The low-memory killer is not what takes this app away.** An eviction is a slope
+and there is no slope: flat around 90 MB for the whole session, with the last
+reading *down* twenty-five megabytes rather than up. Two builds' worth of theories
+about the video plane and about a memory-only profile are now both dead, and so is
+the memory one that replaced them.
+
+What the trail does not contain is just as important. `NuiProgram` writes
+`app loop returned` on a clean exit and `FATAL in Main` on an exception out of
+`Application.Run`, and **neither is there**. So the loop did not return and did
+not throw: something ended the process without unwinding it, five seconds after
+the app was in perfect health.
+
+Three things can do that, they need completely different fixes, and none of them
+left a mark. That is what `NuiDeathWatch`, the lifecycle overrides and
+`NuiMediaWatch` are for — every one of them exists to make one of these three
+answers visible on the next trail:
+
+1. **The platform closed us.** Tizen asks with SIGTERM
+   (`PosixSignalRegistration`, held in a static list for the same reason the
+   heartbeat is held in a field), and closes an app it has already paused without
+   asking. `OnPause`/`OnResume`/`OnTerminate` and the window's
+   `FocusChanged`/`VisibilityChanged` all reach the trail now. This answer is more
+   plausible than it looks: a window that stops being visible makes the engine give
+   up its graphics resources, which is exactly a twenty-five megabyte drop, and a
+   backgrounded app is one the platform may then terminate. From the sofa, "I
+   pressed something and Overscan vanished" and "Overscan crashed" are the same
+   sentence.
+2. **Our own code threw where `NuiProgram` cannot see it.** A managed exception
+   raised inside a native callback — a timer tick, an engine event — does not come
+   back out through `Application.Run`. It goes to `AppDomain.UnhandledException`,
+   which is hooked, and then the process dies.
+3. **A hard native crash inside the engine.** Nothing fires, and that absence is
+   the answer by elimination — SIGSEGV cannot be watched from managed code without
+   taking the runtime's own handler off it, which is not worth doing to learn
+   something the other two lines already tell us. What *can* be had is whatever the
+   engine printed on its way down: `NativeStdErr.StartSession` holds the
+   stdout/stderr redirection open for the whole run instead of one call, so
+   chromium's render process — a child, which inherits the descriptors — writes its
+   own last words into a file `Breadcrumbs.Init` moves aside for the next launch to
+   read. The warning in that class about not capturing across a fork is what makes
+   this work rather than what forbids it.
+
+The memory interval went from five seconds to two at the same time, because five
+is what cost the resolution here: the reading before the death had already dropped,
+so whatever happened had happened by then and there was nothing in between.
+
+#### Counting the decoders, over the console
+
+`NuiMediaWatch` puts a census of the page's `<video>` elements on the trail every
+two seconds — how many exist, how many are decoding, their dimensions,
+`readyState`, dropped frames and any `MediaError` — plus a line for a media
+`error` or `stalled` event. A TV has a small fixed number of hardware decoders and
+one video plane, and a feed that mounts a fresh `<video>` per reel and leaves the
+last few running is the shape of thing that exhausts them. If that is what happens
+here, the count in the last line before the death is the finding, and capping it is
+the fix.
+
+**The channel is the page's console, not `EvaluateJavaScript`.** NUI keeps a
+single pending result handler per view, so anything polling with a callback steals
+the answer from whatever the cursor or the frame-click path is in the middle of
+asking. A `console.log` travels the other way, arrives through
+`WebView.ConsoleMessageReceived`, and cannot collide with anything. The same hook
+carries the engine's own console errors, which is where a media pipeline says it
+has failed — bounded at 24 distinct lines per page, because Instagram alone
+produces a steady stream of them and the trail's value is that its last lines are
+readable.
+
+Two things were wanted here and are not available at API 9: `FullscreenEntered`
+and `FullscreenExited` are internal callbacks on NUI's `WebView` rather than
+events, and `NUIApplication.MemoryLow` is internal too — the low-memory warning
+used instead is `CoreApplication.LowMemory`, which is public and says the same
+thing.
+
 ### What is left on the 2025 sets
 
 Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the one
-person testing that half of this app in anger. As of 2026-08-28, after his fourth
-report (four diagnostics pages from `build-274157b`), the state is:
+person testing that half of this app in anger. As of 2026-08-28, after his fifth
+report (one diagnostics page from `build-c0cd5ab`, on what looks like a fresh
+install — `0 favourites, 4 history, 0 settings`, so his `5` is gone with the old
+profile), the state is:
 
-- **The session not surviving a restart — fixed, and it was a real bug.** Shipped in
-  `build-9d856d1`. Nothing pending.
-- **Reels crashing the app — still crashing, and both explanations offered so far
-  are wrong.** The video-plane theory died when the in-page path gave him a black
-  picture; the memory theory that replaced it does not survive his fourth report
-  either, where the run that died ended on `load finished … [74 MB resident]`. It
-  died with the engine's own overlay path in force. **What we cannot yet say is
-  crash or eviction**, and that is the timer's fault, not the evidence's: the
-  heartbeat had been collected long before, so there is no slope to read — the last
-  memory number in a 46-second session was the one from start-up. That is fixed;
-  the next report's `memory:` lines are the answer. **Waiting on:** a trail from a
-  build with a live heartbeat, taken after reels close the app.
-- **A black screen at every launch — not fixed, and the cause it was blamed on is
-  ruled out.** `build-274157b` deferred the video path to after the first page load
-  and the black screen came back unchanged. Two of his four reports settle it: one
-  dead launch under the **overlay** path, one under **in page**. The recovery that
-  was supposed to arbitrate never actually ran anything — it applied a fixed value
-  that was already in force, twice, and then declared the view dead. Both problems
-  are fixed above. **Waiting on:** which rung of the new ladder gets him a start
-  screen, which the report now states outright in `blank view:`. Rung 1 means the
-  view alone was broken; rung 2 means it was the profile on disk, which is the
-  suspect the video path used to be; rung 3 means a sideloaded NUI WebView cannot
-  be made to navigate on that set, and that is the answer rather than another build.
-- **"A frame at the top" — answered, and it is our own address bar.** It appears once
-  on first launch, which is intended: without it the first screen is a browser with no
-  visible way to type. Nothing to fix unless he says it is in the way.
-- **Scrolling with the channel rocker — asked for, and it already existed.** Both
-  builds have handed the channel keys to `ScrollPage` since their first release, and
-  nothing in the app said so: not the card, not the start screen, not the menu.
-  Documented now, and the general problem is #38, which is worth reading before adding
-  a fifth place that half-explains a key.
+- **The session not surviving a restart — fixed.** Shipped in `build-9d856d1`.
+  Nothing pending.
+- **The heartbeat — fixed, and the report proves it.** `memory:` lines every five
+  seconds from start-up to the last breath of the run, where before they stopped at
+  the first page load. Everything `OnTick` owns is running again.
+- **Reels crashing the app — still crashing, and now the *cause* has been narrowed
+  rather than replaced.** Eviction is ruled out by a flat memory slope; a managed
+  exception and a clean exit are ruled out by the two lines `NuiProgram` would have
+  written and did not. See *The reels death is not an eviction* above for the
+  three candidates that remain and the instrumentation each one now trips.
+  **Waiting on:** a trail from a build with the death watch in it, taken after the
+  app closes on a reel. Note that he redacted the URLs in this report, so it is an
+  assumption — worth checking — that the run which died was on Instagram at all.
+- **A black screen at every launch — did not recur, and is not confirmed fixed.**
+  Both runs in this report opened the start screen normally and `blank view:` reads
+  `(never blank)`, so the recovery ladder never had to run. That is one clean
+  launch on a fresh profile, not a fix: the machinery that would explain it is now
+  in place and untriggered. **Waiting on:** the next time it happens, when
+  `blank view:` will say which rung got a page loading.
+- **"A frame at the top" — answered, and it is our own address bar.** Nothing to
+  fix unless he says it is in the way.
+- **Scrolling with the channel rocker — asked for, and it already existed.**
+  Documented; the general problem is #38.
 - **Ad blocking — accepted in principle, not started. Proposal in #37.** The NUI
   WebView can refuse a request before it goes out (`RequestIntercepted`,
   `WebHttpRequestInterceptor`, `WebContext` are all in `Samsung.Tizen.Ref` 9.0.104),
@@ -1261,11 +1341,12 @@ report (four diagnostics pages from `build-274157b`), the state is:
   diagnostics report from the first version, because the check sits in the path of
   every request on TV hardware.
 
-Two things about that set are settled and should not be re-derived: **key `5` is
+Three things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
 picture, so a report of black or silent video is the in-page path failing and not a
-regression — and **the video path has nothing to do with a view that will not
-navigate**, which cost a build to learn.
+regression — **the video path has nothing to do with a view that will not
+navigate**, which cost a build to learn, and **the reels death is not the app
+growing too large**, which cost two.
 
 ## Emulator notes
 
