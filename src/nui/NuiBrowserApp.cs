@@ -22,6 +22,22 @@ namespace Overscan
         private NuiCursor _cursor;
         private NuiKeyboard _keyboard;
 
+        /// <summary>
+        /// The heartbeat, held in a field for exactly the reason
+        /// <see cref="NuiLater"/> keeps its own list: a NUI Timer with no live
+        /// reference is collected, and this one used to be a local in
+        /// <see cref="OnCreate"/>. It ticked until the first garbage collection —
+        /// which a page load reliably causes — and then stopped, silently, taking
+        /// the blank-view watchdog, the memory sampling and the deferred video path
+        /// with it. Issue #20's trails are what that looks like from a TV: the
+        /// `memory:` lines stop the moment pages start loading and never resume, the
+        /// report shows a peak *below* the resident size because nothing is
+        /// updating it any more, and a stored video preference is still waiting to
+        /// be applied when the run ends. The ElmSharp build has always kept its
+        /// equivalent in `_tick`; this one had not.
+        /// </summary>
+        private Timer _tick;
+
         private View _bar;
         private TextLabel _host;
         private TextLabel _path;
@@ -111,6 +127,13 @@ namespace Overscan
         /// <summary>What that load was for, so a recovery retries it and not home.</summary>
         private string _loadAskedFor;
         private int _blankRecoveries;
+
+        /// <summary>
+        /// What the blank-view watchdog has had to do, for the report. Volatile
+        /// because DiagServer answers on its own thread, and a plain string is the
+        /// only kind of state it is allowed to read.
+        /// </summary>
+        private volatile string _blankState = "(never blank)";
         private string _cookieState = "(not configured)";
         private bool _keysToPage;
         private bool _viewportFix;
@@ -210,9 +233,9 @@ namespace Overscan
                 Navigate(_startupUrl);
             }
 
-            var timer = new Timer(150);
-            timer.Tick += (s, e) => OnTick();
-            timer.Start();
+            _tick = new Timer(150);
+            _tick.Tick += (s, e) => OnTick();
+            _tick.Start();
         }
 
         private bool TryStartEngine()
@@ -291,7 +314,15 @@ namespace Overscan
 
                     // The engine answered, so the view is not the dead kind.
                     _loadAskedAt = DateTime.MinValue;
-                    _blankRecoveries = 0;
+                    if (_blankRecoveries > 0)
+                    {
+                        // Kept, not cleared: which rung got this view loading again
+                        // is the whole answer issue #20 is waiting for, and it would
+                        // otherwise be erased by the load that proves it worked.
+                        _blankState = "recovered after " + _blankRecoveries +
+                                      (_blankRecoveries == 1 ? " attempt" : " attempts");
+                        _blankRecoveries = 0;
+                    }
                     ShowChrome();
 
                     // Whatever needed a debugging port, this is not it any more.
@@ -416,16 +447,19 @@ namespace Overscan
         /// did. So the default is the engine's own again, and this is a toggle for
         /// the set that needs the other one rather than an opinion about all of them.
         ///
-        /// **Never call this on a view that has not loaded a page.** It used to be
-        /// called during start-up, straight after the WebView was constructed, and
-        /// on a Tizen 10 set a stored overlay applied there produced a view that
-        /// then never began a load at all: no PageLoadStarted, no error, an empty
-        /// url, a black screen every launch, surviving both an app restart and a TV
-        /// restart because the setting is on disk. The same property set on a live
-        /// view — the menu toggle, mid-session — works, which is how that reporter's
-        /// reels played in the first place. A preference is therefore read at
-        /// start-up and applied from <see cref="OnTick"/> once a page has been
-        /// through, and an install that has never chosen is never told anything.
+        /// **Not called on a view that has not loaded a page — and that is now a
+        /// habit rather than a finding.** It used to be called during start-up,
+        /// straight after the WebView was constructed, and a Tizen 10 set that then
+        /// never began a load at all made this the suspect: the black screen
+        /// appeared right after that reporter's own `5` put a preference on disk,
+        /// and it survived an app restart and a TV restart the way a file does. The
+        /// deferral shipped in `build-274157b` and the black screen came back
+        /// unchanged, with the trail showing a dead launch under the overlay path
+        /// and another under the in-page one. So the setting is not what does it.
+        /// The deferral stays because it costs nothing and the start-up ordering is
+        /// still the one thing about this property nobody has evidence *for*; what
+        /// does not stay is treating it as the explanation for a view that will not
+        /// navigate. That is <see cref="CheckSomethingLoaded"/>'s problem now.
         /// </summary>
         private void ApplyVideoPath(bool overlay)
         {
@@ -571,7 +605,8 @@ namespace Overscan
         }
 
         /// <summary>
-        /// Notices a web view that never even starts the load it was given.
+        /// Notices a web view that never even starts the load it was given, and
+        /// tries the things that could still change the answer.
         ///
         /// Every other failure this app can have leaves a line somewhere: a load
         /// that fails raises PageLoadError, a page that kills the process ends the
@@ -582,10 +617,30 @@ namespace Overscan
         /// afterwards is that the *absence* of "load started" happened to be
         /// visible in a log that had room for it.
         ///
-        /// So it is a symptom with a name now. The first recovery puts video back
-        /// in the page, because a stored overlay applied to a fresh view is the
-        /// known cause; if a second attempt does not load either, the cause is
-        /// something else and saying so is more use than another silent retry.
+        /// **The first version of this recovered by putting video back in the page,
+        /// and that was worth nothing.** The theory was that a stored overlay
+        /// applied to a fresh view is the cause; issue #20's fourth report killed
+        /// it twice over. A launch died with the overlay in force and another died
+        /// with the in-page path in force, so the setting is not what does it — and
+        /// because the recovery applied a fixed value rather than the *other* one,
+        /// in every trail we have it re-applied the path that was already in force.
+        /// It was a no-op that then declared the view dead. The one thing a rung of
+        /// this ladder must do is change something.
+        ///
+        /// So each rung now does, and each is named on the trail before it is tried,
+        /// which makes the report say which one worked:
+        ///
+        /// 1. **Rebuild the view.** A WebView is a managed object over an engine
+        ///    that outlives it; if what is wrong is this view rather than the
+        ///    engine's state, a new one is the whole fix and costs nothing.
+        /// 2. **Clear the stored session, then rebuild again.** The only thing on
+        ///    disk that a dead view could be reading is the profile
+        ///    <see cref="ConfigureCookies"/> gave it — the same profile that keeps
+        ///    a site logged in, and the only candidate left once the video path is
+        ///    out. Clearing it costs the sign-ins, which is why it is the second
+        ///    rung and not the first, and why it says so on screen.
+        /// 3. **Say the view is not starting loads at all** rather than retry in
+        ///    silence, because at that point nothing this app owns is left to try.
         /// </summary>
         private void CheckSomethingLoaded()
         {
@@ -598,18 +653,42 @@ namespace Overscan
             _loadAskedAt = DateTime.MinValue;
             _blankRecoveries++;
 
-            if (_blankRecoveries > 1)
+            Breadcrumbs.Drop("no load began within " + BlankViewSeconds + "s (attempt " +
+                             _blankRecoveries + ")");
+
+            if (_blankRecoveries == 1)
             {
-                Breadcrumbs.Drop("the web view is not starting loads at all");
+                _blankState = "no load began — rebuilt the view";
+                Flash("Nothing loaded — starting the browser engine over");
+                if (!RebuildWebView())
+                {
+                    return;
+                }
+            }
+            else if (_blankRecoveries == 2)
+            {
+                _blankState = "no load began twice — cleared the session and rebuilt";
+                Flash("Still nothing — clearing saved sign-ins and trying once more");
+                ClearStoredSession();
+                if (!RebuildWebView())
+                {
+                    return;
+                }
+            }
+            else
+            {
+                _blankState = "the web view is not starting loads at all";
+                Breadcrumbs.Drop(_blankState);
                 Flash("Nothing will load. Open http://<this TV>:8081 for the report.");
                 return;
             }
 
-            Breadcrumbs.Drop("no load began within " + BlankViewSeconds +
-                             "s — putting video back in the page and asking again");
-            ApplyVideoPath(false);
-            Flash("Nothing loaded — trying again with video in the page");
+            RetryLastLoad();
+        }
 
+        /// <summary>Asks again for whatever the dead view was given, home included.</summary>
+        private void RetryLastLoad()
+        {
             if (_loadAskedFor == null)
             {
                 ShowHome();
@@ -617,6 +696,110 @@ namespace Overscan
             else
             {
                 Navigate(_loadAskedFor);
+            }
+        }
+
+        /// <summary>
+        /// Throws this WebView away and builds another one.
+        ///
+        /// The engine is a process-wide thing that outlives any one view, so this
+        /// is not "restart the browser" — it is the cheapest way to find out
+        /// whether a view that will not navigate is broken in itself or is reading
+        /// something broken underneath it. Nothing else in the app has to know: the
+        /// chrome, the keyboard and the menu are DALi objects that never touched
+        /// the old view, and everything the new one needs is re-applied here.
+        ///
+        /// The video preference deliberately goes back to pending rather than being
+        /// carried over — see <see cref="ApplyVideoPath"/>. A rebuilt view has not
+        /// loaded a page, and the one rule that survives from the old theory is
+        /// that this property is only ever handed to a view that has.
+        /// </summary>
+        private bool RebuildWebView()
+        {
+            Breadcrumbs.Drop("rebuilding the web view");
+
+            try
+            {
+                if (_web != null)
+                {
+                    _window.Remove(_web);
+                    _web.Dispose();
+                    _web = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Best-effort like everything else past the managed surface: a view
+                // that will not go away quietly is still worth replacing.
+                Breadcrumbs.Drop("old view would not close: " + ex.GetType().Name + ": " + ex.Message);
+            }
+
+            _pageEverLoaded = false;
+
+            if (!TryStartEngine())
+            {
+                _blankState = "rebuild failed — " + (_engineFailure ?? "no engine");
+                Flash("The browser engine will not start. Press 3.");
+                return false;
+            }
+
+            ApplyPreset(_presetIndex);
+            Breadcrumbs.Drop("web view rebuilt");
+            return true;
+        }
+
+        /// <summary>
+        /// Empties everything the engine keeps between launches.
+        ///
+        /// This is the reinstall issue #20 was told it might need, without the
+        /// reinstall: the sign-ins go, the favourites and history do not, because
+        /// those are ours (<see cref="Store"/>) and live in files the engine has
+        /// never heard of. Every call is named on the trail *before* it is made,
+        /// for the usual reason — if one of them is what takes the process down,
+        /// the last line is the answer.
+        /// </summary>
+        private void ClearStoredSession()
+        {
+            try
+            {
+                WebCookieManager cookies = _web == null ? null : _web.CookieManager;
+                if (cookies != null)
+                {
+                    Breadcrumbs.Drop("clearing session: cookies");
+                    cookies.ClearCookies();
+                }
+            }
+            catch (Exception ex)
+            {
+                Breadcrumbs.Drop("cookies would not clear: " + ex.GetType().Name + ": " + ex.Message);
+            }
+
+            try
+            {
+                WebContext context = _web == null ? null : _web.Context;
+                if (context == null)
+                {
+                    Breadcrumbs.Drop("clearing session: engine offered no context");
+                    return;
+                }
+
+                Breadcrumbs.Drop("clearing session: cache");
+                context.ClearCache();
+
+                Breadcrumbs.Drop("clearing session: web storage");
+                context.DeleteAllWebStorage();
+
+                Breadcrumbs.Drop("clearing session: web databases");
+                context.DeleteAllWebDatabase();
+
+                Breadcrumbs.Drop("clearing session: application cache");
+                context.DeleteAllApplicationCache();
+
+                Breadcrumbs.Drop("session cleared");
+            }
+            catch (Exception ex)
+            {
+                Breadcrumbs.Drop("session would not clear: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -1620,6 +1803,7 @@ namespace Overscan
                   "inspector  : " + NuiInspector.LastResult + "\n" +
                   "cookies   : " + _cookieState + "\n" +
                   "video     : " + VideoPathLine() + "\n" +
+                  "blank view: " + _blankState + "\n" +
                   "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
                   "url       : " + _cachedUrl;
 

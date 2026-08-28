@@ -1141,36 +1141,110 @@ eviction ends on a memory line much larger than the ones before it. A slope only
 exists if something was writing numbers down before anyone knew there was a
 problem.
 
+### A timer nobody was holding, and everything that stopped with it
+
+`OnCreate` armed the 150ms heartbeat as a bare local:
+
+```csharp
+var timer = new Timer(150);
+timer.Tick += (s, e) => OnTick();
+timer.Start();
+```
+
+A NUI `Timer` with no live reference is collected, and this file says so itself —
+`NuiLater` keeps a list for exactly that reason, and the ElmSharp build has always
+kept its own in `_tick`. So the heartbeat ran until the first garbage collection,
+which a page load reliably causes, and then stopped. Nothing announced it. What
+stopped with it was everything `OnTick` is responsible for:
+
+- the blank-view watchdog, so a dead view was only noticed when it happened to be
+  dead *before* the first collection;
+- `NoteMemory`, so the memory slope that separates a crash from an eviction stops
+  being written down exactly when pages start loading — which is when it matters;
+- the deferred video path, so a stored preference was never handed over at all;
+- the chrome auto-hide.
+
+Issue #20's fourth report is what this looks like from a TV, and it is worth
+knowing how to read because none of it says "timer":
+
+- the trail's `memory:` lines stop the moment loads begin and never come back —
+  46 seconds of a browsing session with no heartbeat in it;
+- the report shows `memory : 149 MB resident, peak 127 MB`. A peak below the
+  resident size is impossible while something is updating the peak;
+- `video : in page` in the report with `_videoPathPending` still set, and no
+  `video path:` line anywhere in the run — the preference read at start-up and
+  never applied. This is also what made the trail *look* self-contradictory: the
+  toggle logged the opposite of what the store held, which is only possible if the
+  deferred apply never ran.
+
+The rule this leaves behind: on NUI, a timer, like anything else with a native
+object behind it, has to be held by something that outlives the method that made
+it.
+
+### The blank-view recovery has to change something
+
+`CheckSomethingLoaded` recovered by calling `ApplyVideoPath(false)` — a fixed
+value, on the theory that a stored overlay is what kills a fresh view. Issue #20's
+fourth report killed the theory and the recovery in one go:
+
+- one launch was dead with the **overlay** path in force (the menu toggle in that
+  run logged `in page`, which it can only do from overlay), and another was dead
+  with **in page** in force. A cause present in both directions is not the cause.
+- because the recovery applied a fixed `false` rather than the *other* path, in
+  every trail we have it re-applied the value already in force. It was a no-op,
+  and the "second attempt failed too" verdict that followed was measuring nothing.
+
+It is a ladder now, each rung named on the trail before it is tried and the rung
+that worked kept in the report as `blank view:`:
+
+1. **rebuild the WebView** — the view is a managed object over an engine that
+   outlives it, so if the view alone is broken this is the entire fix;
+2. **clear the stored session and rebuild again** — `WebCookieManager.ClearCookies`
+   plus `WebContext.ClearCache`/`DeleteAllWebStorage`/`DeleteAllWebDatabase`/
+   `DeleteAllApplicationCache`. This is the reinstall a reporter would otherwise be
+   asked for, without the reinstall: it costs the sign-ins and nothing else, since
+   favourites and history are ours and in files the engine has never heard of;
+3. **say the view is not starting loads at all**, because nothing this app owns is
+   left to try.
+
+The order is the diagnosis. A view that comes back at rung 1 was never reading
+anything on disk; one that comes back at rung 2 was, and the profile is the
+suspect the video path used to be; one that reaches rung 3 is a set where a
+sideloaded NUI WebView cannot be made to navigate, and that is the answer rather
+than another build.
+
 ### What is left on the 2025 sets
 
 Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the one
-person testing that half of this app in anger. Three things came back after the
-captcha was fixed. As of 2026-08-27 the state is:
+person testing that half of this app in anger. As of 2026-08-28, after his fourth
+report (four diagnostics pages from `build-274157b`), the state is:
 
 - **The session not surviving a restart — fixed, and it was a real bug.** Shipped in
   `build-9d856d1`. Nothing pending.
-- **Reels crashing the app — fixed, and the video theory was wrong.** The report on
-  2026-08-27 answered which setting he is on: `video : hardware overlay`. So he
-  pressed `5`, the in-page default is what gave him a black picture, and the crash
-  was fixed by the memory-only profile beside it rather than by anything about
-  planes. The default is the engine's own again, shipped in `build-274157b`.
-  Nothing pending.
-- **A black screen at every launch — cause found, fix shipped, unconfirmed.** The
-  same report showed the app alive and the web view dead: `home screen shown`, then
-  ten seconds of nothing, no `load started`, `url` empty, `page metr : (not measured
-  yet)`, and the previous run's trail the same. It survived an app restart and a TV
-  restart, so it lived on disk — and the only new thing on disk was the `videoOverlay`
-  preference his own `5` had just written. Applying it to a WebView that has not
-  loaded a page is what does it; see the section above. **Waiting on:** whether
-  `build-274157b` gets him a start screen again. If it does not, the on-disk suspect
-  left is the persistent profile (`ConfigureCookies`, `PrivateBrowsingEnabled=false`)
-  and the test is a reinstall, which costs him the Instagram login that build fixed —
-  so ask for the report first, where `no load began within 6s` will now say plainly
-  whether the view is dead for a second reason.
+- **Reels crashing the app — still crashing, and both explanations offered so far
+  are wrong.** The video-plane theory died when the in-page path gave him a black
+  picture; the memory theory that replaced it does not survive his fourth report
+  either, where the run that died ended on `load finished … [74 MB resident]`. It
+  died with the engine's own overlay path in force. **What we cannot yet say is
+  crash or eviction**, and that is the timer's fault, not the evidence's: the
+  heartbeat had been collected long before, so there is no slope to read — the last
+  memory number in a 46-second session was the one from start-up. That is fixed;
+  the next report's `memory:` lines are the answer. **Waiting on:** a trail from a
+  build with a live heartbeat, taken after reels close the app.
+- **A black screen at every launch — not fixed, and the cause it was blamed on is
+  ruled out.** `build-274157b` deferred the video path to after the first page load
+  and the black screen came back unchanged. Two of his four reports settle it: one
+  dead launch under the **overlay** path, one under **in page**. The recovery that
+  was supposed to arbitrate never actually ran anything — it applied a fixed value
+  that was already in force, twice, and then declared the view dead. Both problems
+  are fixed above. **Waiting on:** which rung of the new ladder gets him a start
+  screen, which the report now states outright in `blank view:`. Rung 1 means the
+  view alone was broken; rung 2 means it was the profile on disk, which is the
+  suspect the video path used to be; rung 3 means a sideloaded NUI WebView cannot
+  be made to navigate on that set, and that is the answer rather than another build.
 - **"A frame at the top" — answered, and it is our own address bar.** It appears once
   on first launch, which is intended: without it the first screen is a browser with no
-  visible way to type. Nothing to fix unless he says it is in the way. This closes the
-  only part of #20 that was undiagnosed.
+  visible way to type. Nothing to fix unless he says it is in the way.
 - **Scrolling with the channel rocker — asked for, and it already existed.** Both
   builds have handed the channel keys to `ScrollPage` since their first release, and
   nothing in the app said so: not the card, not the start screen, not the menu.
@@ -1187,8 +1261,11 @@ captcha was fixed. As of 2026-08-27 the state is:
   diagnostics report from the first version, because the check sits in the path of
   every request on TV hardware.
 
-If video comes back black or silent rather than crashing, that is the in-page path
-failing on that set and key `5` is the answer — not a regression to chase.
+Two things about that set are settled and should not be re-derived: **key `5` is
+his, not ours** — the engine's overlay path is the only one that gives him a
+picture, so a report of black or silent video is the in-page path failing and not a
+regression — and **the video path has nothing to do with a view that will not
+navigate**, which cost a build to learn.
 
 ## Emulator notes
 
