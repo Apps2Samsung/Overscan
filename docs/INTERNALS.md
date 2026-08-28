@@ -1153,7 +1153,8 @@ captcha was fixed. As of 2026-08-27 the state is:
   2026-08-27 answered which setting he is on: `video : hardware overlay`. So he
   pressed `5`, the in-page default is what gave him a black picture, and the crash
   was fixed by the memory-only profile beside it rather than by anything about
-  planes. The default is the engine's own again. Nothing pending.
+  planes. The default is the engine's own again, shipped in `build-274157b`.
+  Nothing pending.
 - **A black screen at every launch — cause found, fix shipped, unconfirmed.** The
   same report showed the app alive and the web view dead: `home screen shown`, then
   ten seconds of nothing, no `load started`, `url` empty, `page metr : (not measured
@@ -1161,7 +1162,7 @@ captcha was fixed. As of 2026-08-27 the state is:
   restart, so it lived on disk — and the only new thing on disk was the `videoOverlay`
   preference his own `5` had just written. Applying it to a WebView that has not
   loaded a page is what does it; see the section above. **Waiting on:** whether
-  the build that carries this gets him a start screen again. If it does not, the on-disk suspect
+  `build-274157b` gets him a start screen again. If it does not, the on-disk suspect
   left is the persistent profile (`ConfigureCookies`, `PrivateBrowsingEnabled=false`)
   and the test is a reinstall, which costs him the Instagram login that build fixed —
   so ask for the report first, where `no load began within 6s` will now say plainly
