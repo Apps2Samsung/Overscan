@@ -1090,19 +1090,45 @@ anywhere, every launch. `WebSettings.PrivateBrowsingEnabled` is now set to false
 explicitly alongside it: with it on, local storage is memory-only too, and the
 engine's default for it is not documented anywhere readable.
 
-**Video was going out through a hardware plane.** A TV decodes video on hardware
-and shows it on an overlay plane, punching a transparent hole through the page
-where the picture belongs. That is right for the set's own browser, which owns
-the screen; it is wrong for an app whose window DALi composites itself, and there
-are only a couple of those planes in the whole set. A reel feed asks for one per
-video as it scrolls, which is the shape of "reels close Overscan, other video is
-fine". `WebView.VideoHoleEnabled` now defaults to false — the in-page path, where
-the engine decodes to a texture like any other pixels — and key `5` toggles it,
-because the trade is real (a copy per frame, and some sets may not offer that path
-at all) and which way a given TV needs cannot be found out from here.
+**Video was going out through a hardware plane — and that turned out not to be
+the problem.** A TV decodes video on hardware and shows it on an overlay plane,
+punching a transparent hole through the page where the picture belongs. That is
+right for the set's own browser, which owns the screen; it looked wrong for an app
+whose window DALi composites itself, given there are only a couple of those planes
+in the whole set and a reel feed asks for one per video as it scrolls. So
+`WebView.VideoHoleEnabled` was defaulted to false — the in-page path — with key `5`
+to toggle it.
 
-Neither of those is confirmed from a TV yet. What *is* now possible is finding
-out: the NUI build had no `Breadcrumbs` at all, so a page that killed the process
+The reporter's answer killed the theory. His reels stopped crashing in that build
+and came back **black**; pressing `5` for the overlay is what made them play. What
+actually fixed the crash is the change sitting next to it: with private browsing
+on, an endless feed piles its storage up in RAM until the low-memory killer
+arrives, and *that* fits "reels close the app, other video is fine" — an infinite
+scroll — far better than a plane shortage does. The default is the engine's own
+again, and the toggle stays for the set that wants the other one.
+
+**Applying that setting to a WebView that has not loaded a page kills the view.**
+`ApplyVideoPath` used to be called during start-up, straight after the constructor.
+On a Tizen 10 set a stored overlay applied there gave a view that then never began
+a load at all — no `PageLoadStarted`, no `PageLoadError`, an empty url, a black
+screen on every launch, surviving an app restart *and* a TV restart because the
+preference is on disk. The same property set on a live view works, which is how
+that reporter's reels played in the first place. A stored preference is therefore
+read at start-up and applied from `OnTick` once a page has been through, and an
+install that has never pressed `5` is never told anything at all.
+
+`CheckSomethingLoaded` exists because of how nearly invisible that was. Every other
+failure leaves a line: a load that fails raises `PageLoadError`, a page that kills
+the process ends the trail on its address, a launch that dies never gets that far.
+A view that silently declines to navigate leaves nothing — the app is alive, the
+menu opens, `:8081` answers, and the screen is black. It was readable only because
+the *absence* of "load started" happened to fit in a log with room for it. Six
+seconds after a load is asked for with none begun, the trail says so by name, video
+goes back in the page, and the same load is asked for again; a second failure says
+the view is not starting loads at all rather than retrying in silence.
+
+The session fix is confirmed from a TV; the video theory was not, and was wrong.
+What made both answerable is that the NUI build had no `Breadcrumbs` at all, so a page that killed the process
 left nothing behind but the user's word for it. It calls `Breadcrumbs.Init` in
 `Main` like the ElmSharp build, drops the address it is opening on the way in, and
 the report carries the previous run's trail.
@@ -1123,16 +1149,23 @@ captcha was fixed. As of 2026-08-27 the state is:
 
 - **The session not surviving a restart — fixed, and it was a real bug.** Shipped in
   `build-9d856d1`. Nothing pending.
-- **Reels crashing the app — fixed on that set, and the theory was right about
-  video. Which *setting* fixed it is the open question.** The reporter came back
-  with "Video: in page/overlay fixed the black screen reels issue no crashes now",
-  which does not say which of the two positions he is on — and the two answers point
-  opposite ways. In page (the new default) being the one means ship it as it stands;
-  overlay meaning he pressed `5` means the new default is what produced his black
-  screen and the crash was fixed by something else in that build, in which case the
-  default is wrong for the next person. **Waiting on:** which word the *Video* row in
-  the menu shows. Asked on the issue. Do not change the default until that answer is
-  in — a coin flip here ships a black screen to everybody who does not know about `5`.
+- **Reels crashing the app — fixed, and the video theory was wrong.** The report on
+  2026-08-27 answered which setting he is on: `video : hardware overlay`. So he
+  pressed `5`, the in-page default is what gave him a black picture, and the crash
+  was fixed by the memory-only profile beside it rather than by anything about
+  planes. The default is the engine's own again. Nothing pending.
+- **A black screen at every launch — cause found, fix shipped, unconfirmed.** The
+  same report showed the app alive and the web view dead: `home screen shown`, then
+  ten seconds of nothing, no `load started`, `url` empty, `page metr : (not measured
+  yet)`, and the previous run's trail the same. It survived an app restart and a TV
+  restart, so it lived on disk — and the only new thing on disk was the `videoOverlay`
+  preference his own `5` had just written. Applying it to a WebView that has not
+  loaded a page is what does it; see the section above. **Waiting on:** whether
+  the build that carries this gets him a start screen again. If it does not, the on-disk suspect
+  left is the persistent profile (`ConfigureCookies`, `PrivateBrowsingEnabled=false`)
+  and the test is a reinstall, which costs him the Instagram login that build fixed —
+  so ask for the report first, where `no load began within 6s` will now say plainly
+  whether the view is dead for a second reason.
 - **"A frame at the top" — answered, and it is our own address bar.** It appears once
   on first launch, which is intended: without it the first screen is a browser with no
   visible way to type. Nothing to fix unless he says it is in the way. This closes the
