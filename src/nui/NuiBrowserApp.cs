@@ -55,6 +55,14 @@ namespace Overscan
         private const int FrameWitnessDelay = 1200;
 
         /// <summary>
+        /// How long a load may take to *begin* before the view is called dead. Not
+        /// how long a page may take to arrive — PageLoadStarted fires as soon as the
+        /// engine accepts the navigation, well before a byte is fetched, so this is
+        /// generous even on a set that takes seven seconds to open DuckDuckGo.
+        /// </summary>
+        private const int BlankViewSeconds = 6;
+
+        /// <summary>
         /// What the page reported after the last native tap: whether any real input
         /// arrived at all, and whether a cross-origin frame took focus. The feed
         /// itself cannot tell us either (issue #20), and these two facts are what
@@ -74,7 +82,35 @@ namespace Overscan
         private bool _overlayVisible;
         private bool _hintsWanted = true;
         private bool _imagesOn = true;
-        private bool _videoOverlay;
+        private bool _videoOverlay = true;
+
+        /// <summary>
+        /// A stored video path that has been read but not yet handed to the
+        /// engine. False on an install where the key has never been chosen, so
+        /// such a set is never told anything at all and stays exactly where it
+        /// was before the toggle existed.
+        /// </summary>
+        private volatile bool _videoPathPending;
+
+        /// <summary>
+        /// Whether `5` has ever been pressed on this install. Cached rather than
+        /// asked of <see cref="Store"/>, because the report is built on
+        /// DiagServer's thread and nothing there may touch the main thread's state.
+        /// </summary>
+        private volatile bool _videoPathChosen;
+        private bool _pageEverLoaded;
+
+        /// <summary>
+        /// When a load was last asked for, cleared the moment the engine says it
+        /// started one. See <see cref="CheckSomethingLoaded"/>: a load that is
+        /// never even *begun* is the one failure this app could not see, and the
+        /// black screen on issue #20 was it.
+        /// </summary>
+        private DateTime _loadAskedAt = DateTime.MinValue;
+
+        /// <summary>What that load was for, so a recovery retries it and not home.</summary>
+        private string _loadAskedFor;
+        private int _blankRecoveries;
         private string _cookieState = "(not configured)";
         private bool _keysToPage;
         private bool _viewportFix;
@@ -236,7 +272,14 @@ namespace Overscan
                 }
 
                 ConfigureCookies();
-                ApplyVideoPath(Store.GetBool("videoOverlay", false));
+
+                // Read here, applied later. See ApplyVideoPath: on this set a
+                // stored overlay handed to a WebView that has never loaded
+                // anything gives a view that never loads anything either, so
+                // the preference waits for a page to have gone through.
+                _videoOverlay = Store.GetBool("videoOverlay", true);
+                _videoPathChosen = Store.Get("videoOverlay", null) != null;
+                _videoPathPending = _videoPathChosen;
 
                 _web.PageLoadStarted += (s, e) =>
                 {
@@ -245,6 +288,10 @@ namespace Overscan
                     // anyone will want to know.
                     Breadcrumbs.Drop("load started: " + SafeUrl());
                     _loading = true;
+
+                    // The engine answered, so the view is not the dead kind.
+                    _loadAskedAt = DateTime.MinValue;
+                    _blankRecoveries = 0;
                     ShowChrome();
 
                     // Whatever needed a debugging port, this is not it any more.
@@ -257,6 +304,7 @@ namespace Overscan
                 _web.PageLoadFinished += (s, e) =>
                 {
                     _loading = false;
+                    _pageEverLoaded = true;
                     _progress.Hide();
                     Breadcrumbs.Drop("load finished: " + SafeUrl() + "  [" + ProcessMemory.Summary() + "]");
                     _cursor.Reinstall();
@@ -353,22 +401,36 @@ namespace Overscan
         /// A TV decodes video on hardware and shows it on an overlay plane, with a
         /// transparent hole punched through the page where the picture belongs.
         /// That is the right arrangement for the set's own browser, which owns the
-        /// screen. It is a poor one for an app: DALi composites this window itself,
-        /// there are only a couple of those planes in the whole set, and a page like
-        /// an Instagram reel feed asks for one per video as it scrolls.
-        /// Overscan dying on reels and not on other video (issue #20) has that
-        /// shape, so the default here is now the in-page path, where the engine
-        /// decodes to a texture and hands it to us like any other pixels.
+        /// screen, and a questionable one for an app whose window DALi composites
+        /// itself — so this was made a toggle, with the in-page path as the default,
+        /// on the theory that a reel feed asking for one plane per video is what
+        /// killed Overscan on Instagram (issue #20).
         ///
-        /// It is a toggle rather than a decision because the trade is real: the
-        /// in-page path costs a copy per frame and some sets may not offer it at
-        /// all. If video turns black or stops playing, the overlay is one menu
-        /// entry away — and which way a given TV needs is exactly the thing we
-        /// cannot find out from here.
+        /// **The theory was wrong and the default was a mistake.** The reporter's
+        /// reels stopped crashing in the same build, but they came back *black*, and
+        /// pressing `5` for the overlay is what made them play. The crash it was
+        /// meant to fix was the memory-only profile beside it — see
+        /// <see cref="ConfigureCookies"/>: with private browsing on, an endless feed
+        /// accumulates its storage in RAM until the low-memory killer arrives, which
+        /// fits "reels close the app, other video is fine" better than planes ever
+        /// did. So the default is the engine's own again, and this is a toggle for
+        /// the set that needs the other one rather than an opinion about all of them.
+        ///
+        /// **Never call this on a view that has not loaded a page.** It used to be
+        /// called during start-up, straight after the WebView was constructed, and
+        /// on a Tizen 10 set a stored overlay applied there produced a view that
+        /// then never began a load at all: no PageLoadStarted, no error, an empty
+        /// url, a black screen every launch, surviving both an app restart and a TV
+        /// restart because the setting is on disk. The same property set on a live
+        /// view — the menu toggle, mid-session — works, which is how that reporter's
+        /// reels played in the first place. A preference is therefore read at
+        /// start-up and applied from <see cref="OnTick"/> once a page has been
+        /// through, and an install that has never chosen is never told anything.
         /// </summary>
         private void ApplyVideoPath(bool overlay)
         {
             _videoOverlay = overlay;
+            _videoPathPending = false;
 
             try
             {
@@ -489,6 +551,16 @@ namespace Overscan
 
             NoteMemory();
 
+            // Deliberately here and not in the load-finished callback: the engine
+            // is still inside its own notification there, and the one thing this
+            // property has already been shown to do is upset a view being set up.
+            if (_videoPathPending && _pageEverLoaded)
+            {
+                ApplyVideoPath(_videoOverlay);
+            }
+
+            CheckSomethingLoaded();
+
             bool busy = _loading || _keyboard.IsVisible || _overlayVisible;
             if (_chromeVisible && !busy && DateTime.UtcNow - _lastActivity > TimeSpan.FromSeconds(4))
             {
@@ -496,6 +568,56 @@ namespace Overscan
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Notices a web view that never even starts the load it was given.
+        ///
+        /// Every other failure this app can have leaves a line somewhere: a load
+        /// that fails raises PageLoadError, a page that kills the process ends the
+        /// trail on its address, a launch that dies never gets here at all. A view
+        /// that silently declines to navigate leaves nothing — the app is alive,
+        /// the menu opens, the report answers, and the screen is black. Issue #20
+        /// spent a round trip on exactly that, and the only reason it was readable
+        /// afterwards is that the *absence* of "load started" happened to be
+        /// visible in a log that had room for it.
+        ///
+        /// So it is a symptom with a name now. The first recovery puts video back
+        /// in the page, because a stored overlay applied to a fresh view is the
+        /// known cause; if a second attempt does not load either, the cause is
+        /// something else and saying so is more use than another silent retry.
+        /// </summary>
+        private void CheckSomethingLoaded()
+        {
+            if (_loadAskedAt == DateTime.MinValue ||
+                DateTime.UtcNow - _loadAskedAt < TimeSpan.FromSeconds(BlankViewSeconds))
+            {
+                return;
+            }
+
+            _loadAskedAt = DateTime.MinValue;
+            _blankRecoveries++;
+
+            if (_blankRecoveries > 1)
+            {
+                Breadcrumbs.Drop("the web view is not starting loads at all");
+                Flash("Nothing will load. Open http://<this TV>:8081 for the report.");
+                return;
+            }
+
+            Breadcrumbs.Drop("no load began within " + BlankViewSeconds +
+                             "s — putting video back in the page and asking again");
+            ApplyVideoPath(false);
+            Flash("Nothing loaded — trying again with video in the page");
+
+            if (_loadAskedFor == null)
+            {
+                ShowHome();
+            }
+            else
+            {
+                Navigate(_loadAskedFor);
+            }
         }
 
         /// <summary>
@@ -838,9 +960,10 @@ namespace Overscan
 
                 case RemoteMenu.ActionVideoPath:
                     ApplyVideoPath(!_videoOverlay);
+                    _videoPathChosen = true;
                     Store.Set("videoOverlay", _videoOverlay);
                     Flash(_videoOverlay
-                        ? "Video: hardware overlay"
+                        ? "Video: hardware overlay — the TV's own path"
                         : "Video: in page — try this if video closes the app");
 
                     // The engine reads this when a video element is created, so the
@@ -1291,6 +1414,8 @@ namespace Overscan
             try
             {
                 _atHome = true;
+                _loadAskedAt = DateTime.UtcNow;
+                _loadAskedFor = null;
                 _web.LoadHtmlString(HomePage.Build(Store.AllFavourites, Store.RecentHistory, Urls.Home));
                 _cursor.Center();
                 DiagLog.Add("home screen shown");
@@ -1305,6 +1430,8 @@ namespace Overscan
         private void Navigate(string url)
         {
             _atHome = false;
+            _loadAskedAt = DateTime.UtcNow;
+            _loadAskedFor = url;
             Breadcrumbs.Drop("navigate: " + url);
             _web.LoadUrl(url);
             _cursor.Center();
@@ -1492,7 +1619,7 @@ namespace Overscan
                   "native tap : " + NuiNativeTouch.LastResult + "\n" +
                   "inspector  : " + NuiInspector.LastResult + "\n" +
                   "cookies   : " + _cookieState + "\n" +
-                  "video     : " + (_videoOverlay ? "hardware overlay" : "in page") + "  (key 5)\n" +
+                  "video     : " + VideoPathLine() + "\n" +
                   "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
                   "url       : " + _cachedUrl;
 
@@ -1505,6 +1632,26 @@ namespace Overscan
                    engine + "\n\n" +
                    "previous run (last line is where it died)\n" + Breadcrumbs.Previous + "\n\n" +
                    "log\n" + DiagLog.Dump();
+        }
+
+        /// <summary>
+        /// What the engine has actually been told, which is not the same thing as
+        /// what the setting says. A report reading "hardware overlay" while the
+        /// property had never been set is a large part of why the black screen on
+        /// issue #20 took a round trip to find, so an untouched engine says so.
+        /// </summary>
+        private string VideoPathLine()
+        {
+            string path = _videoOverlay ? "hardware overlay" : "in page";
+
+            if (!_videoPathChosen)
+            {
+                return "engine default, untouched  (key 5)";
+            }
+
+            return _videoPathPending
+                ? path + "  (key 5 — chosen, applies after the first page)"
+                : path + "  (key 5)";
         }
 
         private static string ShortPreset(string label)
