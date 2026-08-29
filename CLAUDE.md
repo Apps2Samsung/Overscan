@@ -69,6 +69,20 @@ It compiles the shipping file itself and clicks into a genuinely cross-site
 minutes of existing, each of which would have been indistinguishable, from a TV,
 from "the engine ignores the click".
 
+### The decoder-cap harness
+
+Any change to `NuiVideoCap` — the sweep that gives a reel's hardware decoder back —
+is exercised against desktop chromium first:
+
+```sh
+tools/videocap/run.sh            # CHROME=/path/to/chrome if it is not on PATH
+```
+
+It lifts the script out of the shipping `.cs` and runs it over a real `<video>` in a
+real layout engine. It is the only script we inject that *changes* the page, and
+every way it can be wrong reaches us from a TV as "the video is black now", which is
+indistinguishable from the engine's own failures.
+
 ### The native probe library
 
 `Overscan5/res/libovprobe.so` is the only native binary this repo ships: a tiny ARM

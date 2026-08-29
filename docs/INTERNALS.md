@@ -540,8 +540,14 @@ A stub would be the first native `.so` this repo has ever shipped, so nothing we
 have measured says a native library of ours can be mapped executable at all.
 
 So the stub had a cheap prerequisite, and `build-9d856d1` is the build that asked
-it. **The Q80 answered on 2026-08-27, and the answer was no** — see *The exec
-mapping is refused, and where that leaves it* below.
+it. **The Q80 answered on 2026-08-27 for `res/`, and the answer was no** — see *The
+exec mapping is refused, and where that leaves it* below.
+
+**The other four locations are still unanswered.** `build-85d0e4e` shipped to ask
+them and the set killed the app on the first rung instead, so the "if every location
+refuses, close #17" branch is **not** reached: only `res/` has ever answered. The
+ladder now resumes across launches — see *The ladder has to survive its own
+questions* — and the next report from that set is what decides it.
 
 `Overscan5/res/libovprobe.so` is a real ARM shared object — one function, no
 `DT_NEEDED`, `SONAME libovprobe.so`, built freestanding by `tools/elfprobe/build.sh`
@@ -647,6 +653,56 @@ instead of sooner, which may be worse than failing now. Against that: it is a
 compatibility shim of exactly the kind an app ships when a platform library is
 absent, and it is the only remaining path to that TV running this browser at all.
 Do not build it speculatively, and do not ship it without asking.
+
+### The ladder has to survive its own questions
+
+`build-85d0e4e` shipped that five-location table and came back having answered one
+row of it. The Q80's trail ends here:
+
+```
+18:32:45    res/ mmap PROT_READ|PROT_EXEC: EPERM (operation not permitted)
+18:32:45    probe: mmap PROT_READ|PROT_EXEC via /proc/self/fd res/
+```
+
+— and nothing after. `bin/`, `bin/ (assembly path)`, `lib/` and `data/` were never
+asked, and the report header still read `own native : (not asked)` on a run where
+the probe plainly ran, because `Summary` is only set once the whole walk returns.
+A second launch in the same report ends one line earlier, at the plain exec mmap.
+So the `/proc/self/fd` retry — the call that build added — is what ends the launch,
+and on this set an executable mapping is refused with a signal rather than an
+errno some of the time.
+
+That is the fourth time a probe has stood in front of the thing it was meant to
+explain (#13, #17, #17, now #17 again), and the first time it stood in front of
+*itself*. The comment on `NativeProbe.Run` predicted the risk and the ordering did
+not survive it: one fatal rung eats the four behind it, every launch, forever.
+
+**`NativeProbe.Ledger` is the fix, and it is `Breadcrumbs`' own trade carried one
+step further.** Each of the three calls that can kill — the exec mmap, the
+`/proc/self/fd` retry, the `dlopen` — writes its own name to
+`data/probe-ledger.txt` before it is made and its answer to the same file after. A
+launch that never comes back leaves a name with no answer; the next launch reads
+that as `KILLED THE PROCESS`, records it, skips it and carries on to the next rung.
+So every launch makes at least one step of progress even if every step is fatal,
+the ladder converges, and the instruction to a reporter is the simplest one there
+has ever been on this issue: open it again until the report stops saying `(not
+asked)`.
+
+Three things that are easy to get wrong here and are already right:
+
+- **The replayed answer comes back bare.** `Succeeded` tests the end of the string,
+  so decorating a resumed `ok` with "(asked on an earlier launch)" would silently
+  turn every replayed success into a failure. The note goes on the trail instead.
+- **The file is stamped `ledger 1`.** A ledger from another build is deleted rather
+  than parsed, or the first run of a new ladder would report the old one's answers.
+  Bump `LedgerVersion` whenever a step changes its name or its meaning.
+- **A killed step is a verdict, not a gap.** `Location.KilledUs` reaches the summary
+  as "asking `res/` ended the launch", which is a *harder* refusal than `EPERM` and
+  worth naming as one. A set that kills the asker is not a set a stub loads on.
+
+The `Launches` count in the verdict is there for the same reason: a number above one
+says the set chose to die rather than answer, and that is a finding rather than an
+accident of the reporter's evening.
 
 ### `ELM_ACCEL` has to be set before the window exists
 
@@ -1299,27 +1355,107 @@ events, and `NUIApplication.MemoryLow` is internal too — the low-memory warnin
 used instead is `CoreApplication.LowMemory`, which is public and says the same
 thing.
 
+### It is the engine's decoder, and it is the third one that kills it
+
+`build-85d0e4e` is the build that answered it. Of the three candidates above it is
+the third — a hard native crash inside the engine — and the stderr session added
+for exactly this case is what caught it. The previous run's native output ends:
+
+```
+16:43:30  GstOmxUhdVideoDec ... omxuhdvideodec0   (+ gst_buffer_map_range assertion)
+16:43:48  GstOmxUhdVideoDec ... omxuhdvideodec1   (+ gst_buffer_map_range assertion)
+16:43:59  GstOmxUhdVideoDec ... omxuhdvideodec2   (+ gst_buffer_map_range assertion)
+          DotNET onSigsegv called on org.apps2samsung.overscan / render_thread-o(4690)
+```
+
+Neither `app loop returned` nor `FATAL in Main`, no SIGTERM, no `OnPause`, no
+`unhandled managed exception` — the two lifecycle answers stayed silent and the
+segfault landed in chromium's **render thread**. So nothing this app is allowed to
+do can catch it, and nothing this app did caused it.
+
+**What it can do is not walk into it.** Three facts line up:
+
+- **One `GstOmxUhdVideoDec` per reel, and none of them go away.** The decoders are
+  numbered `0`, `1`, `2` over twenty-nine seconds, and the process dies as the third
+  is allocated. A TV has very few UHD decoder instances; three concurrent is over
+  the line on this set.
+- **`playing=1 of 16`.** Sixteen `<video>` elements mounted, one decoding. So it is
+  not concurrent playback that exhausts it — a *paused* reel keeps the decoder it
+  was given. This is precisely the shape `NuiMediaWatch` was built to look for, and
+  the count is the finding.
+- **The decoder is a UHD one for a `360x360` video.** Nothing to be done about that
+  from here; it is the engine's own pipeline choice. It only makes the ceiling
+  lower.
+
+`NuiVideoCap` takes those decoders back: every two seconds, any `<video>` more than
+one screen outside the viewport, paused, and with `readyState > 0` has its source
+removed and `load()` called. **Pausing is not enough — all sixteen were already
+paused.** Removing the source is the only thing that makes the engine drop the
+pipeline.
+
+Four decisions in it that should not be re-derived:
+
+- **An ordinary URL is remembered on the element and restored when it scrolls back;
+  a `blob:` or `srcObject` source is released but never restored.** That source
+  belongs to a `MediaSource` the page built and may have revoked, so putting it back
+  would be a guess. Those releases are counted separately on the trail, so the next
+  report says which kind this feed actually uses rather than leaving it arguable.
+- **An element fed by `<source>` children is left alone.** `load()` would pick the
+  same child straight back up, so there is nothing to gain and a working video to
+  lose.
+- **A far-offscreen video that is still *playing* is left alone.** Its audio is
+  probably what the viewer is listening to.
+- **`removeAttribute('src')` and then `load()`, never `src = ''`.** An empty string
+  resolves against the document and sends the element off to fetch the page itself.
+
+Elements it has released are flagged `__ovsReleased`, and `NuiMediaWatch`'s distress
+handler skips them: an element we just took the source from is *expected* to
+complain, and reporting that would spend the 24-line error budget on our own doing
+and bury the pipeline failures the budget exists for.
+
+**`tools/videocap/run.sh` is where this is checked.** It is the first script in the
+repo that changes the page rather than reading it, and every way it can be wrong
+arrives from a TV as "the video is black now" — indistinguishable from the engine's
+own failures. So the sweep is asked against desktop chromium first, on a real
+`<video>` in a real layout engine, with the script lifted out of `NuiVideoCap.cs`
+rather than copied, for the same reason `tools/cdpharness` compiles the shipping
+file.
+
+**This does not fix the segfault and the reply on the issue says so.** It keeps the
+app from reaching the allocation that trips it, which is the only lever on this side
+of the wall. If a reel feed still gets to three decoders, the trail will now say how
+many were released on the way.
+
 ### What is left on the 2025 sets
 
 Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the one
-person testing that half of this app in anger. As of 2026-08-28, after his fifth
-report (one diagnostics page from `build-c0cd5ab`, on what looks like a fresh
-install — `0 favourites, 4 history, 0 settings`, so his `5` is gone with the old
-profile), the state is:
+person testing that half of this app in anger. As of 2026-08-29, after his sixth
+report — four diagnostics pages from `build-85d0e4e`, one per video setting, and
+the first ones that carry the engine's own dying words — the state is:
 
 - **The session not surviving a restart — fixed.** Shipped in `build-9d856d1`.
   Nothing pending.
 - **The heartbeat — fixed, and the report proves it.** `memory:` lines every five
   seconds from start-up to the last breath of the run, where before they stopped at
   the first page load. Everything `OnTick` owns is running again.
-- **Reels crashing the app — still crashing, and now the *cause* has been narrowed
-  rather than replaced.** Eviction is ruled out by a flat memory slope; a managed
-  exception and a clean exit are ruled out by the two lines `NuiProgram` would have
-  written and did not. See *The reels death is not an eviction* above for the
-  three candidates that remain and the instrumentation each one now trips.
-  **Waiting on:** a trail from a build with the death watch in it, taken after the
-  app closes on a reel. Note that he redacted the URLs in this report, so it is an
-  assumption — worth checking — that the run which died was on Instagram at all.
+- **Reels crashing the app — cause found, and it is the engine.** `build-85d0e4e`'s
+  native output ends `DotNET onSigsegv called on ... render_thread` as a third
+  `GstOmxUhdVideoDec` is allocated, with `playing=1 of 16` on the same trail. It is
+  a segfault inside chromium's own GStreamer path, so it cannot be caught from
+  managed code and it was never ours. See *It is the engine's decoder* above.
+  Confirmed by the reporter: it is Instagram reels and nothing else.
+  **Shipped in reply:** `NuiVideoCap`, which gives back the decoder of any reel more
+  than one screen offscreen — the only lever on this side of the wall. It is a
+  mitigation, not a fix, and the issue reply says so.
+  **Waiting on:** whether the app still closes on reels, and what the new
+  `video cap :` line says it released on the way.
+- **The settings being wiped was reinstalls, not a bug.** Every build had to be
+  reinstalled because TizenBrew's installer rejected the author certificate; he is
+  on the Apps2Samsung installer now. So a `0 settings` header is not evidence of
+  anything, and `5` being lost each time is expected.
+- **In-app video now shows a green screen and still crashes.** Overlay plays reels.
+  Consistent with what is already settled below: the overlay path is the only one
+  that gives him a picture, and key `5` is his.
 - **A black screen at every launch — did not recur, and is not confirmed fixed.**
   Both runs in this report opened the start screen normally and `blank view:` reads
   `(never blank)`, so the recovery ladder never had to run. That is one clean

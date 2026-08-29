@@ -102,6 +102,14 @@ namespace Overscan
                 return;
             }
 
+            // The decoder cap's own channel. Kept out of LastCensus: the report's
+            // `media :` line has to stay the count of what is decoding.
+            if (text.StartsWith(NuiVideoCap.Prefix, StringComparison.Ordinal))
+            {
+                NuiVideoCap.Note(Trim(text.Substring(NuiVideoCap.Prefix.Length)));
+                return;
+            }
+
             // Errors only. A page's ordinary logging is not evidence about anything
             // and would bury what is.
             if (level == null || level.IndexOf("Error", StringComparison.OrdinalIgnoreCase) < 0)
@@ -226,6 +234,11 @@ namespace Overscan
     try {
       var t = e && e.target;
       if (!t || (t.tagName !== 'VIDEO' && t.tagName !== 'AUDIO')) { return; }
+
+      /* An element NuiVideoCap has just taken the source away from is expected to
+         complain. Reporting that would spend the error budget on our own doing and
+         bury the pipeline failures the budget exists for. */
+      if (t.__ovsReleased) { return; }
       report(t.tagName.toLowerCase() + ' ' + e.type +
              (t.error ? ' code ' + t.error.code : '') + ' rs' + t.readyState);
     } catch (_) {}
