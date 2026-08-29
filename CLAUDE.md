@@ -173,6 +173,12 @@ around spending it well.
   is recorded by name and the app carries on — a browser that cannot click into a
   frame is still a browser.
 - Commits and PRs carry no tool attribution.
+- **Never write `close #N` / `fixes #N` in a commit message or PR body**, even inside a
+  quoted sentence about *not* closing it. GitHub acts on the keyword wherever it
+  appears and merging silently closes the issue — which on #13, #17 and #20 is the
+  signal "this set cannot run Overscan", sent to somebody who has been giving up their
+  evenings. Write "issue 17" or "#17" without a verb in front of it. This has happened
+  once, on PR #45.
 - Checkout gotcha: on a `/mnt/c` Windows checkout every tracked file reports as
   modified. It is CRLF churn against `.gitattributes`, not work —
   `git diff --ignore-all-space` comes back empty. Working from a clone in a Linux
