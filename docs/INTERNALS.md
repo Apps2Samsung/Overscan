@@ -1395,11 +1395,12 @@ pipeline.
 
 Four decisions in it that should not be re-derived:
 
-- **An ordinary URL is remembered on the element and restored when it scrolls back;
-  a `blob:` or `srcObject` source is released but never restored.** That source
-  belongs to a `MediaSource` the page built and may have revoked, so putting it back
-  would be a guess. Those releases are counted separately on the trail, so the next
-  report says which kind this feed actually uses rather than leaving it arguable.
+- **Nothing is released that cannot be put back.** An ordinary URL is remembered on
+  the element and restored when it scrolls near again. A `blob:` or `srcObject`
+  source belongs to a `MediaSource` the page built and may have revoked, so taking
+  it away is permanent — they are counted as `held` and left alone. See *Releasing a
+  source we cannot restore* below: shipping the other way round cost the reporter his
+  one working configuration.
 - **An element fed by `<source>` children is left alone.** `load()` would pick the
   same child straight back up, so there is nothing to gain and a working video to
   lose.
@@ -1426,6 +1427,45 @@ app from reaching the allocation that trips it, which is the only lever on this 
 of the wall. If a reel feed still gets to three decoders, the trail will now say how
 many were released on the way.
 
+#### Releasing a source we cannot restore
+
+`build-3368aea` shipped the cap releasing `blob:` sources too, on the reasoning that
+a crash is worse than a guess and the feed would re-source the element itself. It
+does not. The report came back:
+
+```
+video     : hardware overlay  (key 5)
+media     : playing=1 of 9 — 0x0 rs0
+video cap : released 9 (9 blob), restored 0
+```
+
+Nine reels, every one of them MSE-backed, every one released, none restorable — and
+the *visible* video sitting at `0x0 rs0`, which is a blank screen. Overlay was the
+one configuration that played reels on that set, and this turned it into "plays 1 or
+2 reels, then blank". A net loss: the crash was still there and now the working path
+was gone too.
+
+**So the rule is the one the name already implies: release only what can be put
+back.** `blob:` and `srcObject` are counted as `held` and never touched. The
+consequence is worth stating plainly rather than discovering again — **on an MSE feed
+this class does nothing at all**, Instagram reels included, and the decoder
+exhaustion behind issue #20 is untouched by it. The `held` count is what says so from
+the next report.
+
+Two things this cost that are worth keeping:
+
+- **A mitigation that changes the page is not free, and the report has to be able to
+  price it.** The `video cap :` line is what made this diagnosable in one round trip
+  instead of an argument about whether the build made things worse.
+- **`tools/videocap/run.sh` had every case right and still shipped this**, because
+  the case it did not have was "the source is one we cannot restore, so do not
+  release it" — that was a *decision*, tested faithfully, and wrong. The harness now
+  asserts the opposite and would fail the old behaviour. A test that encodes the
+  decision cannot catch the decision.
+
+There is no known way to make the engine release an MSE-backed decoder without
+destroying the element. If one is found, it goes here.
+
 ### What is left on the 2025 sets
 
 Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the one
@@ -1444,11 +1484,15 @@ the first ones that carry the engine's own dying words — the state is:
   a segfault inside chromium's own GStreamer path, so it cannot be caught from
   managed code and it was never ours. See *It is the engine's decoder* above.
   Confirmed by the reporter: it is Instagram reels and nothing else.
-  **Shipped in reply:** `NuiVideoCap`, which gives back the decoder of any reel more
-  than one screen offscreen — the only lever on this side of the wall. It is a
-  mitigation, not a fix, and the issue reply says so.
-  **Waiting on:** whether the app still closes on reels, and what the new
-  `video cap :` line says it released on the way.
+  **`NuiVideoCap` does not help here, and `build-3368aea` proved it twice over.**
+  It released all nine MSE-backed reels, restored none, and turned overlay — his one
+  working configuration — into a blank screen after one or two reels. It is now
+  limited to sources it can restore, which on Instagram means it does nothing.
+  Shipped in `build-<next>`. See *Releasing a source we cannot restore* above.
+  **Where that leaves #20:** the crash is the engine's, in a path no managed code
+  reaches, and there is no known way to free an MSE decoder without destroying the
+  element. Unless a report shows otherwise, reels on that set are not fixable from
+  here and the issue should say so.
 - **The settings being wiped was reinstalls, not a bug.** Every build had to be
   reinstalled because TizenBrew's installer rejected the author certificate; he is
   on the Apps2Samsung installer now. So a `0 settings` header is not evidence of

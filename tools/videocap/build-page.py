@@ -49,6 +49,9 @@ function mk(id, top, opts){
   Object.defineProperty(v,'readyState',{get:function(){return opts.readyState;}});
   Object.defineProperty(v,'paused',{get:function(){return opts.paused;}});
   Object.defineProperty(v,'currentSrc',{get:function(){return '';}});
+  /* A getter, not a real MediaStream: constructing one and assigning it hangs
+     headless chrome indefinitely, and the sweep only ever reads this for truth. */
+  if(opts.srcObject){ Object.defineProperty(v,'srcObject',{get:function(){return {stub:1};}}); }
   v.pause=function(){}; v.load=function(){ v.__loads=(v.__loads||0)+1; };
   document.getElementById('stack').appendChild(v);
   return v;
@@ -62,6 +65,7 @@ var farBlob = mk('farBlob',  H*5,   {src:'blob:http://a/xyz',  readyState:2, pau
 var farIdle = mk('farIdle',  H*6,   {src:'http://a/3.mp4',     readyState:0, paused:true});
 var farKids = mk('farKids',  H*7,   {sourceChild:true,         readyState:2, paused:true});
 var farPlay = mk('farPlay',  H*8,   {src:'http://a/4.mp4',     readyState:2, paused:false});
+var farObj  = mk('farObj',   H*9,   {srcObject:true,           readyState:2, paused:true});
 var near    = mk('near',     H*1.5, {src:'http://a/5.mp4',     readyState:2, paused:true});
 
 var log=[];
@@ -79,13 +83,15 @@ setTimeout(function(){
   check('far url remembered',              farUrl.__ovsSrc==='http://a/2.mp4');
   check('far url flagged for the census',  farUrl.__ovsReleased===true);
   check('far url reloaded once',           farUrl.__loads===1);
-  check('far blob released',               farBlob.getAttribute('src')===null);
+  check('far blob left alone',             farBlob.getAttribute('src')==='blob:http://a/xyz');
+  check('far blob not flagged',            farBlob.__ovsReleased!==true);
   check('far blob not remembered',         !farBlob.__ovsSrc);
+  check('far srcObject left alone',        farObj.__ovsReleased!==true);
   check('holding nothing left alone',      farIdle.getAttribute('src')==='http://a/3.mp4');
   check('<source> children left alone',    farKids.__ovsReleased!==true);
   check('still playing left alone',        farPlay.getAttribute('src')==='http://a/4.mp4');
   check('reported to the console',         log.length>0);
-  check('counted 2 released, 1 blob',      /released 2 \\(1 blob\\), restored 0/.test(log[log.length-1]||''));
+  check('counted 1 released, 2 held',      /released 1, restored 0, held 2 \\(no restorable source\\)/.test(log[log.length-1]||''));
 
   farUrl.style.top = (window.scrollY + 10) + 'px';
 
