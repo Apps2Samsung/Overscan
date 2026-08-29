@@ -16,9 +16,16 @@ namespace Overscan
     /// </summary>
     internal sealed class NuiCursor
     {
-        private const double StepMin = 0.020;
+        // A fraction of the viewport, so on a 1920x1080 set the smallest step is
+        // about 13px across and 8px down. It used to be 0.020 — 38px across — and
+        // issue #20's reporter could not land on Instagram's mute button or the ✕
+        // that closes a reel, because a step wider than the target can straddle it
+        // whatever it starts from. The floor is what has to be smaller than the
+        // smallest thing worth clicking; the ceiling is what crosses the screen, and
+        // holding the key still gets there in about eight repeats.
+        private const double StepMin = 0.007;
         private const double StepMax = 0.110;
-        private const double StepGrowth = 1.35;
+        private const double StepGrowth = 1.50;
         private static readonly TimeSpan RepeatWindow = TimeSpan.FromMilliseconds(220);
 
         private readonly WebView _web;

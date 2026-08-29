@@ -1357,6 +1357,13 @@ thing.
 
 ### It is the engine's decoder, and it is the third one that kills it
 
+> **Superseded in part — read *It is not the count* below before acting on this.**
+> The segfault is real and it is the engine's, and that half stands. The *reason*
+> recorded here — that the set runs out of decoders at three — does not: a later
+> trail shows twenty-three of them in nine minutes on another path without a
+> wobble. What follows is kept because `NuiVideoCap` was built on it and the
+> reasoning is still the record of how the crash was found.
+
 `build-85d0e4e` is the build that answered it. Of the three candidates above it is
 the third — a hard native crash inside the engine — and the stderr session added
 for exactly this case is what caught it. The previous run's native output ends:
@@ -1466,48 +1473,160 @@ Two things this cost that are worth keeping:
 There is no known way to make the engine release an MSE-backed decoder without
 destroying the element. If one is found, it goes here.
 
+### It is not the count — it is which sink the path uses
+
+`build-e78c0bc`'s reports are the first carrying the engine's own native output from
+**two video paths in the same evening**, and putting them side by side takes the
+decoder-budget theory above apart.
+
+The in-page run scrolled reels for nine minutes and built **twenty-three** decoders:
+
+```
+16:59:29  omxtzuhdvideodec0
+17:00:01  omxtzuhdvideodec3      <- default mode was already dead by here
+...
+17:05:04  omxtzuhdvideodec22
+```
+
+One per reel, created and torn down as he scrolled, and it never crashed. So the set
+is **not** out of decoders at three or four, a paused reel does **not** permanently
+keep what it was given, and *"three concurrent is over the line on this set"* — the
+finding recorded above from `build-85d0e4e` — is wrong. It was a fair reading of one
+trail that only had one path in it. What the number 3 or 4 actually marks is how many
+times that particular path had rolled its dice.
+
+The three video settings take three genuinely different native routes:
+
+| key `5` setting | `VideoHoleEnabled` | decoder | video sink | result |
+| --- | --- | --- | --- | --- |
+| hardware overlay | `true` | — | overlay plane, no rectangle | **plays** |
+| in page | `false` | `omxtzuhdvideodec` | `directvideosink` + render rect | black, stable |
+| engine default | never set | `omxuhdvideodec` | **`fakesink`** | segfaults on the 4th |
+
+Two things follow, and both are worth more than the cap ever was.
+
+**The untouched engine is the only configuration that crashes.** Its video goes to a
+`fakesink` — decoded correctly and thrown away — with `GstOmxUhdVideoDec has no
+property named 'tbm-buffer-type'` in front of it, which is the engine asking its own
+decoder for a buffer type it does not implement. That path was never going to put a
+picture on screen whatever we did about decoders. Leaving `VideoHoleEnabled` alone
+was meant to be the modest choice, an engine default rather than an opinion about
+every set; it turns out to select a broken pipeline. So the NUI build now sets the
+property **always**, defaulting to overlay, and a fresh install no longer lands in
+the one configuration that dies. `VideoPathLine` still distinguishes *our* default
+from a chosen one, because a report has to say which it is looking at.
+
+**In-page mode fails on one assertion, and always the same one.** Eighty-eight
+attempts in nine minutes, no successes:
+
+```
+gst_video_overlay_set_render_rectangle:
+  assertion '(width == -1 && height == -1) || (width > 0 && height > 0)' failed
+```
+
+So "in page" on this engine is not compositing frames into the page's texture at all
+— it is a hole punch like the overlay, positioned per element instead of over the
+whole window, and the rectangle it is handed has a width or height of zero or less.
+The video decodes perfectly throughout (`rs4`, correct dimensions, audio playing) and
+is drawn into a rectangle of no size. **That is the black screen** — a geometry
+handoff, not a decode failure. It is also why overlay works: overlay passes no
+rectangle at all, which is the `-1, -1` whole-screen branch, the one branch that
+satisfies that assertion. Overlay is not succeeding at what in-page fails; it is
+skipping it.
+
+#### Why the obvious fix was not shipped with the finding
+
+The guess writes itself: Instagram's reel carousel is transformed, clipped and
+scroll-snapped, so flatten the video's box and the rectangle comes back. It was not
+shipped, and the reason is the count. **Eighty-eight failures, zero successes, across
+reels of four different intrinsic sizes.** A cause in the page's own layout would
+succeed *sometimes*. A cause in the hosting fails exactly this way — always,
+everywhere, whatever the page does — and NUI composites the web view as a texture,
+with no native window of its own for the engine to ask about, which is precisely the
+shape that would make every per-element rectangle collapse while the whole-window one
+still works.
+
+So `NuiVideoRect` measures instead: what box the page thinks the playing video has,
+its intrinsic size, its computed visibility, how many ancestors carry a transform,
+a clip or a non-visible overflow, how many of them are themselves zero-sized, and
+the dpr and visual-viewport mapping the engine would have to scale through. One line
+on the trail and one `video rect :` line in the report, and it decides the question
+outright:
+
+- **A good box — `340x600`, `tf 0`, no zero parents — while the sink is still
+  refused.** The rectangle is lost between the page and the sink, inside the engine's
+  own hosting. Nothing on this side of the wall reaches it: in-page video is finished
+  on that set and hardware overlay is what Overscan has to offer it.
+- **A genuinely zero or collapsed box.** Flattening it is worth the next build, and
+  now there is a measurement saying which ancestor to flatten.
+
+`tools/videorect/run.sh` holds it to being read-only, which is the whole point of it.
+The page marks every call the probe must not make — `pause`, `load`, `play`, a
+changed `src`, a changed DOM — and the run fails if any of them happens. This issue
+has already had one build that changed a page on a guess and cost the reporter his
+one working configuration; a probe sent to explain a black screen must not be able to
+cause one.
+
 ### What is left on the 2025 sets
 
 Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the one
-person testing that half of this app in anger. As of 2026-08-29, after his sixth
-report — four diagnostics pages from `build-85d0e4e`, one per video setting, and
-the first ones that carry the engine's own dying words — the state is:
+person testing that half of this app in anger. As of 2026-08-29, after his eighth
+report — three diagnostics pages from `build-e78c0bc`, one per video setting, and
+the first set carrying the engine's own native output from two paths at once — the
+state is:
 
 - **The session not surviving a restart — fixed.** Shipped in `build-9d856d1`.
   Nothing pending.
 - **The heartbeat — fixed, and the report proves it.** `memory:` lines every five
   seconds from start-up to the last breath of the run, where before they stopped at
   the first page load. Everything `OnTick` owns is running again.
-- **Reels crashing the app — cause found, and it is the engine.** `build-85d0e4e`'s
-  native output ends `DotNET onSigsegv called on ... render_thread` as a third
-  `GstOmxUhdVideoDec` is allocated, with `playing=1 of 16` on the same trail. It is
-  a segfault inside chromium's own GStreamer path, so it cannot be caught from
-  managed code and it was never ours. See *It is the engine's decoder* above.
-  Confirmed by the reporter: it is Instagram reels and nothing else.
-  **`NuiVideoCap` does not help here, and `build-3368aea` proved it twice over.**
-  It released all nine MSE-backed reels, restored none, and turned overlay — his one
-  working configuration — into a blank screen after one or two reels. It is now
-  limited to sources it can restore, which on Instagram means it does nothing.
-  Shipped in `build-<next>`. See *Releasing a source we cannot restore* above.
-  **Where that leaves #20:** the crash is the engine's, in a path no managed code
-  reaches, and there is no known way to free an MSE decoder without destroying the
-  element. Unless a report shows otherwise, reels on that set are not fixable from
-  here and the issue should say so.
+- **Reels crashing the app — it is the engine, and it is the *engine-default*
+  video path specifically.** The segfault lands in chromium's render thread, so it
+  cannot be caught from managed code and it was never ours. What changed with
+  `build-e78c0bc` is which configuration owns it: the untouched engine sends video
+  to a `fakesink` and dies on the fourth decoder, while the in-page path built
+  twenty-three decoders in nine minutes without one. So it is not a decoder budget
+  and capping the count would not have helped. See *It is not the count — it is
+  which sink the path uses* above. **Fixed as far as a fresh install is concerned:**
+  `VideoHoleEnabled` is now always set, defaulting to overlay, so nobody lands in
+  the crashing configuration by default. Shipped in `build-<next>`.
+  **`NuiVideoCap` remains a no-op on this feed** and `build-3368aea` proved twice
+  over why it must stay one — see *Releasing a source we cannot restore* above.
+- **Reels playing black in the in-page path — cause found, and the next report
+  decides whether it is ours.** The engine hands its sink a render rectangle with a
+  zero width or height, 88 times out of 88, and draws a perfectly decoded video into
+  it. `NuiVideoRect` now reports what box the page thinks the video has.
+  **Waiting on:** the `video rect :` line from `build-<next>` in the in-page setting.
+  A good box means the rectangle is lost inside the engine's hosting and in-page
+  video is finished on that set; a zero or collapsed box means flattening it is the
+  next build. Either answer closes the question, and the reply on the issue says so
+  in advance.
 - **The settings being wiped was reinstalls, not a bug.** Every build had to be
   reinstalled because TizenBrew's installer rejected the author certificate; he is
   on the Apps2Samsung installer now. So a `0 settings` header is not evidence of
   anything, and `5` being lost each time is expected.
-- **In-app video now shows a green screen and still crashes.** Overlay plays reels.
-  Consistent with what is already settled below: the overlay path is the only one
-  that gives him a picture, and key `5` is his.
+- **In-app video shows a black screen; overlay plays reels.** Consistent with what
+  is settled below — the overlay path is the only one that gives him a picture — and
+  now explained rather than merely observed. `build-3368aea`'s regression, which had
+  turned overlay itself into a blank screen after one or two reels, is confirmed
+  fixed by his report on `build-e78c0bc`: `released 0, restored 0, held 249`.
 - **A black screen at every launch — did not recur, and is not confirmed fixed.**
   Both runs in this report opened the start screen normally and `blank view:` reads
   `(never blank)`, so the recovery ladder never had to run. That is one clean
   launch on a fresh profile, not a fix: the machinery that would explain it is now
   in place and untriggered. **Waiting on:** the next time it happens, when
   `blank view:` will say which rung got a page loading.
-- **"A frame at the top" — answered, and it is our own address bar.** Nothing to
-  fix unless he says it is in the way.
+- **"A frame at the top" — it is our own address bar, and he has now said it is in
+  the way.** It was shown on *every* key down, cursor moves included, each repeat
+  re-arming its own four-second idle timer, so it was on screen the whole time
+  anyone was using the browser. Pointer keys no longer show it; an open menu now
+  counts as busy so the bar cannot time out underneath one. Shipped in
+  `build-<next>`.
+- **The pointer skipping small targets — fixed.** The smallest step was 2% of the
+  viewport, 38px across on a 1080p set, which can straddle Instagram's mute button
+  or the ✕ on a reel whatever it starts from. It is 0.7% now, about 13px, with
+  faster acceleration so crossing the screen still takes about eight repeats.
+  Shipped in `build-<next>`.
 - **Scrolling with the channel rocker — asked for, and it already existed.**
   Documented; the general problem is #38.
 - **Ad blocking — accepted in principle, not started. Proposal in #37.** The NUI
@@ -1521,12 +1640,13 @@ the first ones that carry the engine's own dying words — the state is:
   diagnostics report from the first version, because the check sits in the path of
   every request on TV hardware.
 
-Three things about that set are settled and should not be re-derived: **key `5` is
+Four things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
 picture, so a report of black or silent video is the in-page path failing and not a
 regression — **the video path has nothing to do with a view that will not
-navigate**, which cost a build to learn, and **the reels death is not the app
-growing too large**, which cost two.
+navigate**, which cost a build to learn, **the reels death is not the app growing
+too large**, which cost two, and **it is not a decoder budget either**, which cost
+a whole class that does nothing on the feed it was written for.
 
 ## Emulator notes
 

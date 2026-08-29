@@ -110,6 +110,16 @@ namespace Overscan
                 return;
             }
 
+            // The geometry probe's, for the same reason. Its line is long by design
+            // — every field on it is one candidate for the zero that the in-page
+            // path's render rectangle collapses to — so it gets the same trimming
+            // as the rest and the report shows the whole of the last one.
+            if (text.StartsWith(NuiVideoRect.Prefix, StringComparison.Ordinal))
+            {
+                NuiVideoRect.Note(Trim(text.Substring(NuiVideoRect.Prefix.Length)));
+                return;
+            }
+
             // Errors only. A page's ordinary logging is not evidence about anything
             // and would bury what is.
             if (level == null || level.IndexOf("Error", StringComparison.OrdinalIgnoreCase) < 0)

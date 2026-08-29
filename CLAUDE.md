@@ -83,6 +83,20 @@ real layout engine. It is the only script we inject that *changes* the page, and
 every way it can be wrong reaches us from a TV as "the video is black now", which is
 indistinguishable from the engine's own failures.
 
+### The video-geometry harness
+
+Any change to `NuiVideoRect` — the probe that reports where the page thinks the
+playing video is — is exercised against desktop chromium first:
+
+```sh
+tools/videorect/run.sh           # CHROME=/path/to/chrome if it is not on PATH
+```
+
+Same extraction trick as the decoder cap, but it asserts the opposite property: that
+the probe **reads and does nothing else**. The page marks every call it must not make
+— `pause`, `load`, `play`, a changed `src`, a changed DOM — and fails the run if one
+happens. A probe sent to explain a black screen must not be able to cause one.
+
 ### The native probe library
 
 `Overscan5/res/libovprobe.so` is the only native binary this repo ships: a tiny ARM
