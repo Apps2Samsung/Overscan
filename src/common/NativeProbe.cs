@@ -77,6 +77,20 @@ namespace Overscan
         /// <summary>`rwxr-xr-x`, for the copy in the writable directory.</summary>
         private const uint ExecutableMode = 0x1ED;
 
+        /// <summary>Where the ledger lives, in the one directory that survives a launch.</summary>
+        private const string LedgerFile = "probe-ledger.txt";
+
+        /// <summary>
+        /// Bumped whenever the steps change their names or their meaning. A ledger
+        /// stamped with anything else is thrown away rather than half-believed —
+        /// otherwise the first run of a new build would report the previous build's
+        /// ladder as already answered.
+        /// </summary>
+        private const string LedgerVersion = "ledger 1";
+
+        /// <summary>What a step's result reads as when the launch that ran it never came back.</summary>
+        private const string Killed = "KILLED THE PROCESS";
+
         [DllImport("libc.so.6", SetLastError = true)]
         private static extern int open(string path, int flags);
 
@@ -133,6 +147,194 @@ namespace Overscan
 
             /// <summary>True once the dynamic loader has taken it.</summary>
             public bool Loads;
+
+            /// <summary>True if asking about this one is what ended a launch.</summary>
+            public bool KilledUs;
+        }
+
+        /// <summary>
+        /// What has already been asked, kept on disk so the ladder survives its own
+        /// questions.
+        ///
+        /// The Q80 answered `build-85d0e4e` by dying on the first rung — the trail
+        /// ends on `probe: mmap PROT_READ|PROT_EXEC via /proc/self/fd res/` and the
+        /// four locations behind it were never asked at all. That is not a surprising
+        /// way for a kernel with an executable-mapping policy to behave, and the
+        /// comment on <see cref="Run"/> predicted it; what it did not do is survive
+        /// it, so a build shipped to compare five locations came back having compared
+        /// one.
+        ///
+        /// So each risky call now writes its own name to a file before it is made and
+        /// its answer to the same file after. A launch that does not come back leaves
+        /// a name with no answer, and the next launch reads that as
+        /// <see cref="Killed"/>, skips it, and carries on to the next rung. Every
+        /// launch therefore makes at least one step of progress even if every step is
+        /// fatal, and the reporter's instruction is the simplest one there is: open it
+        /// again until the report stops saying it is unfinished.
+        ///
+        /// This is the same idea as <c>Breadcrumbs</c> — write before the call, not
+        /// after — carried one step further: the trail says which call died, and the
+        /// ledger makes the *next* launch act on that.
+        /// </summary>
+        private static class Ledger
+        {
+            /// <summary>Steps that have an answer, from this launch or an earlier one.</summary>
+            private static readonly Dictionary<string, string> Answered =
+                new Dictionary<string, string>(StringComparer.Ordinal);
+
+            /// <summary>Steps a previous launch began and never finished.</summary>
+            private static readonly HashSet<string> Abandoned = new HashSet<string>(StringComparer.Ordinal);
+
+            private static string _path;
+
+            /// <summary>True when there is nowhere to keep one, so nothing resumes.</summary>
+            public static bool Unavailable
+            {
+                get { return _path == null; }
+            }
+
+            /// <summary>
+            /// Reads whatever previous launches left. A file stamped for a different
+            /// build is deleted rather than parsed.
+            /// </summary>
+            public static void Open(string directory)
+            {
+                Answered.Clear();
+                Abandoned.Clear();
+                _path = null;
+
+                try
+                {
+                    if (string.IsNullOrEmpty(directory))
+                    {
+                        return;
+                    }
+
+                    string path = Path.Combine(directory, LedgerFile);
+                    string[] lines = File.Exists(path) ? File.ReadAllLines(path) : new string[0];
+
+                    if (lines.Length == 0 || !string.Equals(lines[0], LedgerVersion, StringComparison.Ordinal))
+                    {
+                        if (lines.Length > 0)
+                        {
+                            Trace("  probe ledger: from another build, starting over");
+                            File.Delete(path);
+                        }
+
+                        _path = path;
+                        Append(LedgerVersion);
+                        return;
+                    }
+
+                    // A name on its own is a call that was started; the same name with
+                    // an answer after it retires that. Later lines win, which is what
+                    // makes the file append-only.
+                    for (int i = 1; i < lines.Length; i++)
+                    {
+                        string line = lines[i];
+                        int split = line.IndexOf('\t');
+                        if (split < 0)
+                        {
+                            Abandoned.Add(line);
+                        }
+                        else
+                        {
+                            string step = line.Substring(0, split);
+                            Abandoned.Remove(step);
+                            Answered[step] = line.Substring(split + 1);
+                        }
+                    }
+
+                    // Every step that ended a launch is one extra launch this ladder
+                    // has cost, whether it has been retired into an answer already or
+                    // is still sitting there unanswered.
+                    Launches = 1 + Abandoned.Count;
+                    foreach (string answer in Answered.Values)
+                    {
+                        if (string.Equals(answer, Killed, StringComparison.Ordinal))
+                        {
+                            Launches++;
+                        }
+                    }
+
+                    _path = path;
+                }
+                catch (Exception ex)
+                {
+                    // Without a ledger the probe still works, it just cannot resume.
+                    Trace("  probe ledger unavailable: " + ex.GetType().Name + ": " + ex.Message);
+                    _path = null;
+                }
+            }
+
+            /// <summary>
+            /// Makes one call that might not return, or reports what happened last
+            /// time it was tried. <paramref name="call"/> runs only when this step has
+            /// never been reached before.
+            /// </summary>
+            public static string Ask(string step, string announcement, Func<string> call)
+            {
+                // The bare answer is what comes back, never a decorated one: callers
+                // test it with Succeeded, which reads the end of the string.
+                string answer;
+                if (Answered.TryGetValue(step, out answer))
+                {
+                    Trace("  " + step + ": answered on an earlier launch");
+                    return answer;
+                }
+
+                if (Abandoned.Contains(step))
+                {
+                    // The strongest refusal there is: not an errno, but the end of the
+                    // launch that asked. Recorded so it is never asked again.
+                    Answered[step] = Killed;
+                    Append(step + "\t" + Killed);
+                    return Killed;
+                }
+
+                Append(step);
+                Trace(announcement);
+
+                answer = call();
+                Answered[step] = answer;
+                Append(step + "\t" + answer);
+                return answer;
+            }
+
+            /// <summary>
+            /// How many launches this ladder has taken so far, counting this one. It
+            /// goes in the verdict because a number above one means the set killed the
+            /// app to avoid answering, and that is a finding rather than an accident.
+            /// </summary>
+            public static int Launches = 1;
+
+            /// <summary>
+            /// One line, flushed to disk on its own. The whole point is that it is on
+            /// the disk before the call it describes, so it is opened and closed each
+            /// time rather than held — the same trade <c>Breadcrumbs</c> makes.
+            /// </summary>
+            private static void Append(string line)
+            {
+                if (_path == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    using (var file = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                    using (var writer = new StreamWriter(file))
+                    {
+                        writer.WriteLine(line);
+                        writer.Flush();
+                        file.Flush(true);
+                    }
+                }
+                catch (Exception)
+                {
+                    // Best-effort, like everything else that reaches past managed code.
+                }
+            }
         }
 
         /// <summary>
@@ -144,7 +346,9 @@ namespace Overscan
         /// to name which. That risk is real here — asking a kernel with an
         /// executable-mapping policy to map a page executable is precisely what such
         /// a policy exists to refuse, and refusing it with a signal is a legal way to
-        /// do that.
+        /// do that. On `build-85d0e4e` the Q80 did exactly that on the first rung, so
+        /// the three calls that can do it now go through <see cref="Ledger"/> and a
+        /// launch that dies is resumed by the next one rather than repeated by it.
         ///
         /// Labels and mounts are read for every location at the very end rather than
         /// beside each one. They only ever explain <i>why</i>, and `getxattr` is the
@@ -155,6 +359,12 @@ namespace Overscan
         {
             try
             {
+                Ledger.Open(DataDirectory());
+                if (Ledger.Unavailable)
+                {
+                    Trace("  probe ledger: none — a fatal step will not be skipped next launch");
+                }
+
                 Trace("native probe: anonymous PROT_EXEC control");
                 string anonymous = MapAnonymousExecutable();
                 Trace("  anonymous exec memory: " + anonymous);
@@ -241,23 +451,35 @@ namespace Overscan
                 Trace("  probe: mmap PROT_READ " + location.Name);
                 Trace("  " + location.Name + " mmap " + Map(fd, ProtRead, "PROT_READ"));
 
-                Trace("  probe: mmap PROT_READ|PROT_EXEC " + location.Name);
-                string executable = Map(fd, ProtRead | ProtExec, "PROT_READ|PROT_EXEC");
-                Trace("  " + location.Name + " mmap " + executable);
+                // The three below are the ones that can end the launch, so each goes
+                // through the ledger: asked once ever, and skipped by name afterwards.
+                int held = fd;
+                string executable = Ledger.Ask(
+                    location.Name + ":exec",
+                    "  probe: mmap PROT_READ|PROT_EXEC " + location.Name,
+                    delegate { return Map(held, ProtRead | ProtExec, "PROT_READ|PROT_EXEC"); });
+                Trace("  " + location.Name + " mmap PROT_READ|PROT_EXEC: " + executable);
                 location.MapsExecutable = Succeeded(executable);
+                location.KilledUs |= WasFatal(executable);
 
                 if (!location.MapsExecutable)
                 {
-                    Trace("  probe: mmap PROT_READ|PROT_EXEC via /proc/self/fd " + location.Name);
-                    string reopened = MapThroughProcFd(fd);
+                    string reopened = Ledger.Ask(
+                        location.Name + ":exec-procfd",
+                        "  probe: mmap PROT_READ|PROT_EXEC via /proc/self/fd " + location.Name,
+                        delegate { return MapThroughProcFd(held); });
                     Trace("  " + location.Name + " mmap via /proc/self/fd: " + reopened);
                     location.MapsExecutable = Succeeded(reopened);
+                    location.KilledUs |= WasFatal(reopened);
                 }
 
-                Trace("  probe: dlopen " + location.Name);
-                string loaded = Load(location.Path);
+                string loaded = Ledger.Ask(
+                    location.Name + ":dlopen",
+                    "  probe: dlopen " + location.Name,
+                    delegate { return Load(location.Path); });
                 Trace("  " + location.Name + " dlopen: " + loaded);
                 location.Loads = loaded.IndexOf("resolved", StringComparison.Ordinal) >= 0;
+                location.KilledUs |= WasFatal(loaded);
             }
             catch (Exception ex)
             {
@@ -286,6 +508,7 @@ namespace Overscan
         private static string Verdict(IList<Location> locations, string anonymous)
         {
             var refused = new List<string>();
+            var fatal = new List<string>();
             foreach (Location location in locations)
             {
                 if (location.Loads)
@@ -299,11 +522,21 @@ namespace Overscan
                 }
 
                 refused.Add(location.Name);
+                if (location.KilledUs)
+                {
+                    fatal.Add(location.Name);
+                }
             }
 
             return "REFUSED in " + string.Join(", ", refused.ToArray()) +
+                   (fatal.Count == 0
+                       ? ""
+                       : " — and asking " + string.Join(", ", fatal.ToArray()) + " ended the launch") +
                    " — anonymous exec memory " +
-                   (Succeeded(anonymous) ? "is allowed, so this is about files we ship" : anonymous);
+                   (Succeeded(anonymous) ? "is allowed, so this is about files we ship" : anonymous) +
+                   (Ledger.Launches > 1
+                       ? " — took " + Ledger.Launches.ToString(CultureInfo.InvariantCulture) + " launches"
+                       : "");
         }
 
         /// <summary>
@@ -673,6 +906,17 @@ namespace Overscan
         private static bool Succeeded(string reading)
         {
             return reading != null && reading.EndsWith("ok", StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Whether that reading is the ledger saying the launch which asked never came
+        /// back. It is a refusal like any other for the purposes of the verdict, and a
+        /// harder one than <c>EPERM</c>: worth naming separately because a set that
+        /// kills the asker is a set no stub is going to load on either.
+        /// </summary>
+        private static bool WasFatal(string reading)
+        {
+            return string.Equals(reading, Killed, StringComparison.Ordinal);
         }
 
         /// <summary>

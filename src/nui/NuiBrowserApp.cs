@@ -433,6 +433,7 @@ namespace Overscan
                     NuiInspectorInput.Reset();
                     NuiInspector.Stop(_web);
                     NuiMediaWatch.Reset();
+                    NuiVideoCap.Reset();
                 };
 
                 _web.PageLoadFinished += (s, e) =>
@@ -513,9 +514,12 @@ namespace Overscan
         }
 
         /// <summary>
-        /// Puts the media census into the page. Alongside the cursor's own script and
-        /// for the same reason it is re-run on every load: a navigation takes the
-        /// previous page's copy with it.
+        /// Puts the media census and the decoder cap into the page. Alongside the
+        /// cursor's own script and for the same reason it is re-run on every load: a
+        /// navigation takes the previous page's copy with it.
+        ///
+        /// Two evaluations rather than one, so that a page which somehow breaks the
+        /// cap still gets the census that would explain it.
         /// </summary>
         private void InstallMediaWatch()
         {
@@ -526,6 +530,15 @@ namespace Overscan
             catch (Exception ex)
             {
                 DiagLog.Add("media watch failed: " + ex.Message);
+            }
+
+            try
+            {
+                _web.EvaluateJavaScript(NuiVideoCap.Script());
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("video cap failed: " + ex.Message);
             }
         }
 
@@ -1974,6 +1987,7 @@ namespace Overscan
                   "cookies   : " + _cookieState + "\n" +
                   "video     : " + VideoPathLine() + "\n" +
                   "media     : " + NuiMediaWatch.LastCensus + "\n" +
+                  "video cap : " + NuiVideoCap.LastAction + "\n" +
                   "blank view: " + _blankState + "\n" +
                   "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
                   "last words: " + NuiDeathWatch.LastWord + "\n" +
