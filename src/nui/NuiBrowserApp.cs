@@ -404,7 +404,18 @@ namespace Overscan
                 // the preference waits for a page to have gone through.
                 _videoOverlay = Store.GetBool("videoOverlay", true);
                 _videoPathChosen = Store.Get("videoOverlay", null) != null;
-                _videoPathPending = _videoPathChosen;
+
+                // Applied whether or not anybody chose it, which is the change
+                // `build-e78c0bc`'s trail argues for. Leaving the property alone was
+                // meant to be the modest option — the engine's own default rather
+                // than an opinion about every set — but that trail is the first one
+                // showing what the engine's own default actually does here, and it
+                // is not a third opinion, it is a broken path: video decodes into a
+                // `fakesink` and the render thread segfaults on the fourth decoder,
+                // while the two paths we can name both survive. An untouched engine
+                // is the only configuration on this set that crashes, so it stops
+                // being the one a fresh install lands in.
+                _videoPathPending = true;
 
                 _web.PageLoadStarted += (s, e) =>
                 {
@@ -434,6 +445,7 @@ namespace Overscan
                     NuiInspector.Stop(_web);
                     NuiMediaWatch.Reset();
                     NuiVideoCap.Reset();
+                    NuiVideoRect.Reset();
                 };
 
                 _web.PageLoadFinished += (s, e) =>
@@ -514,12 +526,13 @@ namespace Overscan
         }
 
         /// <summary>
-        /// Puts the media census and the decoder cap into the page. Alongside the
-        /// cursor's own script and for the same reason it is re-run on every load: a
-        /// navigation takes the previous page's copy with it.
+        /// Puts the media census, the decoder cap and the geometry probe into the
+        /// page. Alongside the cursor's own script and for the same reason it is
+        /// re-run on every load: a navigation takes the previous page's copy with it.
         ///
-        /// Two evaluations rather than one, so that a page which somehow breaks the
-        /// cap still gets the census that would explain it.
+        /// Three evaluations rather than one, so that a page which somehow breaks one
+        /// of them still gets the others — the census in particular, which is what
+        /// would explain the breakage.
         /// </summary>
         private void InstallMediaWatch()
         {
@@ -539,6 +552,15 @@ namespace Overscan
             catch (Exception ex)
             {
                 DiagLog.Add("video cap failed: " + ex.Message);
+            }
+
+            try
+            {
+                _web.EvaluateJavaScript(NuiVideoRect.Script());
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("video rect failed: " + ex.Message);
             }
         }
 
@@ -770,7 +792,11 @@ namespace Overscan
 
             CheckSomethingLoaded();
 
-            bool busy = _loading || _keyboard.IsVisible || _overlayVisible;
+            // The menu joins the list now that the pointer no longer keeps the bar
+            // alive: arrowing through the menu is pointer keys, and without this the
+            // chrome would time out underneath an open menu.
+            bool busy = _loading || _keyboard.IsVisible || _overlayVisible ||
+                        (_menu != null && _menu.Visible);
             if (_chromeVisible && !busy && DateTime.UtcNow - _lastActivity > TimeSpan.FromSeconds(4))
             {
                 HideChrome();
@@ -1402,7 +1428,18 @@ namespace Overscan
             }
 
             string key = e.Key.KeyPressedName;
-            ShowChrome();
+
+            // Every key except the pointer's. The bar earns its four seconds when
+            // somebody navigates, opens the menu or presses a numbered shortcut —
+            // but moving the cursor is what people do continuously, and calling
+            // ShowChrome on it meant the address bar was on screen the entire time
+            // anyone was using the browser, re-arming its own idle timer with every
+            // repeat so it could never time out. Issue #20's reporter asked for it
+            // to stop; it was never meant to behave that way.
+            if (!RemoteKeys.IsPointerKey(key))
+            {
+                ShowChrome();
+            }
 
             if (_keyboard != null && _keyboard.IsVisible && _keyboard.HandleKey(key))
             {
@@ -1988,6 +2025,7 @@ namespace Overscan
                   "video     : " + VideoPathLine() + "\n" +
                   "media     : " + NuiMediaWatch.LastCensus + "\n" +
                   "video cap : " + NuiVideoCap.LastAction + "\n" +
+                  "video rect: " + NuiVideoRect.LastBox + "\n" +
                   "blank view: " + _blankState + "\n" +
                   "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
                   "last words: " + NuiDeathWatch.LastWord + "\n" +
@@ -2016,14 +2054,18 @@ namespace Overscan
         {
             string path = _videoOverlay ? "hardware overlay" : "in page";
 
-            if (!_videoPathChosen)
+            // Still worth three states rather than two. "Not applied yet" and
+            // "applied" are the difference between a report that says what the
+            // engine was told and one that says what we intend to tell it, and the
+            // gap between them is a whole page load wide.
+            if (_videoPathPending)
             {
-                return "engine default, untouched  (key 5)";
+                return path + "  (key 5 — applies after the first page)";
             }
 
-            return _videoPathPending
-                ? path + "  (key 5 — chosen, applies after the first page)"
-                : path + "  (key 5)";
+            return _videoPathChosen
+                ? path + "  (key 5)"
+                : path + "  (key 5 — our default, nobody chose it)";
         }
 
         private static string ShortPreset(string label)

@@ -116,6 +116,18 @@ namespace Overscan
             return Contains(MediaKeys, key);
         }
 
+        /// <summary>
+        /// True for the buttons that only move or press the pointer. These are the
+        /// ones somebody holds down for a minute at a time to get across a page, so
+        /// they are the ones that must not be treated as "the viewer wants to see
+        /// the address bar" — see NuiBrowserApp.OnWindowKey.
+        /// </summary>
+        public static bool IsPointerKey(string key)
+        {
+            return key == Left || key == Right || key == Up || key == Down ||
+                   key == Ok || key == OkKeypad;
+        }
+
         private static bool Contains(string[] keys, string key)
         {
             for (int i = 0; i < keys.Length; i++)
