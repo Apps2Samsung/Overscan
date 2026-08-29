@@ -27,20 +27,8 @@ PAGE_PORT=8801
 FRAME_PORT=8802
 DEBUG_PORT=9333
 
-CHROME="${CHROME:-}"
-if [ -z "$CHROME" ]; then
-  for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      CHROME="$(command -v "$candidate")"
-      break
-    fi
-  done
-fi
-
-if [ -z "$CHROME" ]; then
-  echo "no chrome found — set CHROME=/path/to/chrome" >&2
-  exit 2
-fi
+# CWD is this script's own directory by now — see the cd above.
+. ../find-chrome.sh
 
 DOTNET="${DOTNET:-$HOME/.dotnet-local/dotnet}"
 work="$(mktemp -d)"
@@ -50,7 +38,16 @@ cleanup() {
   for pid in "${pids[@]:-}"; do
     kill "$pid" 2>/dev/null || true
   done
-  rm -rf "$work"
+
+  # Chrome's renderer children outlive the kill by a moment and are still writing
+  # the profile, so removing it in the same breath raced them and printed
+  # "Directory not empty" after an otherwise clean PASS — which reads like a
+  # failed run and is not one. Give them a second, and never say anything either
+  # way: a temp directory is not what this harness is reporting on.
+  rm -rf "$work" 2>/dev/null || {
+    sleep 1
+    rm -rf "$work" 2>/dev/null || true
+  }
 }
 trap cleanup EXIT
 
