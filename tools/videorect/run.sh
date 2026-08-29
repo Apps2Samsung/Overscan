@@ -25,22 +25,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-CHROME="${CHROME:-}"
-if [ -z "$CHROME" ]; then
-  for candidate in google-chrome google-chrome-stable chromium chromium-browser \
-                   "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" \
-                   "/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe"; do
-    if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
-      CHROME="$candidate"
-      break
-    fi
-  done
-fi
-
-if [ -z "$CHROME" ]; then
-  echo "no chrome found — set CHROME=/path/to/chrome" >&2
-  exit 2
-fi
+# CWD is this script's own directory by now — see the cd above.
+. ../find-chrome.sh
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

@@ -54,6 +54,18 @@ DOTNET_ROOT="$HOME/.dotnet-31" DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
   "$HOME/.dotnet-31/dotnet" build OverscanProbe/OverscanProbe.csproj -c Debug
 ```
 
+### Finding a chrome for the three harnesses
+
+All three source `tools/find-chrome.sh`, so none of them needs `CHROME` set. Its
+header has the install recipe, and the one thing to know before trusting a green
+run: **a Windows chrome over `/mnt/c` cannot run the frame-click harness.** That
+one needs the debug port, chrome binds it to Windows' own loopback, and WSL cannot
+reach it — `--remote-debugging-address=0.0.0.0` is accepted and ignored. The other
+two only need `--dump-dom` on a `file://` page, so they found the Windows one and
+worked, and cdpharness quietly stopped being run at all. A Linux Chrome for Testing
+under `~/.local/chrome` fixes it, no root needed, same shape as the openssl11
+prefix. If that is missing, install it rather than skipping the harness.
+
 ### The frame-click harness
 
 Any change to the NUI cross-origin frame click — `NuiInspectorInput`,
@@ -61,7 +73,7 @@ Any change to the NUI cross-origin frame click — `NuiInspectorInput`,
 desktop chromium first:
 
 ```sh
-tools/cdpharness/run.sh          # CHROME=/path/to/chrome if it is not on PATH
+tools/cdpharness/run.sh
 ```
 
 It compiles the shipping file itself and clicks into a genuinely cross-site
@@ -75,7 +87,7 @@ Any change to `NuiVideoCap` — the sweep that gives a reel's hardware decoder b
 is exercised against desktop chromium first:
 
 ```sh
-tools/videocap/run.sh            # CHROME=/path/to/chrome if it is not on PATH
+tools/videocap/run.sh
 ```
 
 It lifts the script out of the shipping `.cs` and runs it over a real `<video>` in a
@@ -89,7 +101,7 @@ Any change to `NuiVideoRect` — the probe that reports where the page thinks th
 playing video is — is exercised against desktop chromium first:
 
 ```sh
-tools/videorect/run.sh           # CHROME=/path/to/chrome if it is not on PATH
+tools/videorect/run.sh
 ```
 
 Same extraction trick as the decoder cap, but it asserts the opposite property: that
