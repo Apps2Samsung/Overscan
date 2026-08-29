@@ -32,17 +32,23 @@ namespace Overscan
     /// re-source itself if they swipe back to it. Anything on screen or next to it is
     /// never touched.
     ///
-    /// **A released source is put back when it scrolls near again, but only when we
-    /// can put it back honestly.** An ordinary URL is remembered on the element and
-    /// restored. A `blob:` source belongs to a <c>MediaSource</c> the page built and
-    /// may have revoked; re-assigning it would be a guess. Those are released anyway
-    /// — the crash is worth more than the guess — and counted separately on the
-    /// trail, so the next report says which kind this feed actually uses instead of
-    /// leaving it to be argued about.
+    /// **Nothing is released that cannot be put back, and that limit was learned the
+    /// expensive way.** An ordinary URL is remembered on the element and restored when
+    /// it scrolls near again. A `blob:` or <c>srcObject</c> source belongs to a
+    /// <c>MediaSource</c> the page built and may have revoked, so taking it away is
+    /// permanent — `build-3368aea` released a whole reel feed of them and the report
+    /// came back `released 9 (9 blob), restored 0` with the visible video sitting at
+    /// `0x0 rs0`. That turned the reporter's one working configuration into a blank
+    /// screen. Those are now counted as `held` and left alone; the count is worth
+    /// keeping, because it is what says this feed is one we cannot help.
     ///
-    /// This cannot fix the segfault, which is inside the engine's own GStreamer path
-    /// and beyond anything managed code may do. It can keep the app from reaching the
-    /// allocation that trips it, which is the only lever on this side of the wall.
+    /// So on an MSE feed — Instagram reels included — **this does nothing at all**,
+    /// and the crash below is untouched. That is the honest state of it.
+    ///
+    /// It cannot fix the segfault in any case, which is inside the engine's own
+    /// GStreamer path and beyond anything managed code may do. Where a feed serves
+    /// ordinary URLs it can keep the app from reaching the allocation that trips it,
+    /// which is the only lever on this side of the wall.
     ///
     /// NUI-only, like the census: the four `Tizen.WebView` packages have no console
     /// channel to report on and are not the sets with the problem.
@@ -91,7 +97,7 @@ namespace Overscan
 
   var SCREENS = " + ScreensAway + @";
   var KEPT = '__ovsSrc';
-  var released = 0, restored = 0, blobs = 0, lastReport = '';
+  var released = 0, restored = 0, held = 0, lastReport = '';
 
   function report(line) { try { console.log('" + Prefix + @"' + line); } catch (e) {} }
 
@@ -124,14 +130,20 @@ namespace Overscan
       var src = v.currentSrc || v.getAttribute('src') || '';
       if (!src && !object) { return false; }
 
+      /* Nothing is released that cannot be put back. A blob: or srcObject source
+         belongs to a MediaSource the page built and may have revoked, so taking it
+         away is permanent: build-3368aea did exactly that to a whole reel feed and
+         the report came back `released 9 (9 blob), restored 0` with the visible
+         video at `0x0 rs0`. Counted, because the count is what says this feed is
+         one we cannot help. */
       if (object || src.lastIndexOf('blob:', 0) === 0) {
-        blobs++;
-      } else {
-        try { v[KEPT] = src; } catch (_) {}
+        held++;
+        return false;
       }
 
+      try { v[KEPT] = src; } catch (_) {}
+
       v.pause();
-      try { if (object) { v.srcObject = null; } } catch (_) {}
 
       /* removeAttribute and then load(), never src=''. An empty string resolves
          against the document and sends the element off to fetch the page itself. */
@@ -172,7 +184,8 @@ namespace Overscan
         }
       }
 
-      var line = 'released ' + released + ' (' + blobs + ' blob), restored ' + restored;
+      var line = 'released ' + released + ', restored ' + restored +
+                 ', held ' + held + ' (no restorable source)';
       if (line !== lastReport) { lastReport = line; report(line); }
     } catch (e) {}
   }
