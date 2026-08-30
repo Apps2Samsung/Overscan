@@ -665,6 +665,15 @@ namespace Overscan
 
             try
             {
+                // This one bool is the whole video-path API, which is worth knowing
+                // before anyone goes looking for a second knob to fix the in-page
+                // black screen with. Reflecting over WebView, WebSettings and the
+                // Interop layer of Samsung.Tizen.Ref 9.0.104 turns up no
+                // render-rectangle setter and no way to hand the view a native
+                // window; WebSettings.EnableExtraFeature is a fixed table of browser
+                // UI toggles with nothing about video in it. See *There is no second
+                // lever* in docs/INTERNALS.md — in-page is a dead path on the 2025
+                // sets and `overlay` is the only branch that puts a picture on screen.
                 _web.VideoHoleEnabled = overlay;
                 Breadcrumbs.Drop("video path: " + (overlay ? "hardware overlay" : "in page"));
             }

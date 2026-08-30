@@ -1610,6 +1610,44 @@ Two things follow that are worth as much as the answer:
 read-only, it costs a line every few seconds, and it is what a second 2025 set would
 have to report before any of the above is claimed of anything but this one TV.
 
+#### There is no second lever, and this is the check that says so
+
+"Finished" is a strong word for a conclusion drawn from a mechanism rather than a
+measurement, so before it went out on the issue the managed surface was enumerated
+rather than remembered. `Samsung.Tizen.Ref` 9.0.104, reflected over
+`Tizen.NUI.BaseComponents.WebView`, `Tizen.NUI.WebSettings` and the `Tizen.NUI.Interop`
+layer under both:
+
+- **`VideoHoleEnabled` (bool) is the entire video-path API.** There is no
+  render-rectangle setter, no surface or window handle to hand the view, and nothing
+  geometry-related beyond `ScrollPosition`, `ScrollSize` and `ContentSize`. The interop
+  layer exposes nothing the public class hides — no `Window`, `Surface`, `Geometry` or
+  `Rect` entry point exists to P/Invoke at, so the trick used for DALi's binder and the
+  engine's loader has nothing to reach for here.
+- **The engine's own escape hatch exists, and it is the wrong kind of switch.**
+  `WebSettings.EnableExtraFeature(string, bool)` is chromium-efl's
+  `ewk_settings_extra_feature_set`, it is public (if `EditorBrowsable(Never)`), and this
+  app has never called it. It looked like the one unexplored door. It is not one:
+  the implementation is a fixed table matched by `strcasecmp`, and the table is browser
+  *UI* toggles — `longpress,enable`, `link,magnifier`, `detect,contents`, `web,login`,
+  `doubletap,enable`, `zoom,enable`, `openpanel,enable`, `allow,restrictedurl`,
+  `urlbar,hide`. Nothing about video, graphics, compositing or geometry, and an unknown
+  name is silently dropped by `EINA_SAFETY_ON_NULL_RETURN`. The video path is not
+  configured through that door at all — it has its own dedicated API, which is the one
+  we already set.
+
+That table is read from the Chromium 40 tree (`crosswalk-project/chromium-efl`), and
+the set runs Chromium 130, so Samsung will have added rows to it. What does not change
+is the *shape*: booleans on `Ewk_Settings`, in a family that has never held a video
+concern, next to a video-hole API that has its own function. Probing the current
+firmware's table is a legitimate thing to do one day — write a name, read it back, and
+the ones that stick are the ones that build knows — but it is a capability inventory,
+not a route to the render rectangle, and it does not justify an install of its own.
+
+So the answer to *is there anything left to try* is no, and it is no on an enumeration
+rather than on a feeling. If that is ever revisited, revisit it with a second 2025 set
+reporting the same `video rect :` line, not with another switch.
+
 #### `holding` counted sweeps, not videos
 
 The same trail carries a smaller thing that had been quietly spoiling every report
