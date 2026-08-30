@@ -91,8 +91,13 @@ setTimeout(function(){
   check('<source> children left alone',    farKids.__ovsReleased!==true);
   check('still playing left alone',        farPlay.getAttribute('src')==='http://a/4.mp4');
   check('reported to the console',         log.length>0);
-  check('counted 1 released, 2 held',      /released 1, restored 0, held 2 \\(no restorable source\\)/.test(log[log.length-1]||''));
-
+  check('counted 1 released, 2 holding',  /released 1, restored 0, holding 2 \\(no restorable source\\)/.test(log[log.length-1]||''));
+  /* The bug this guards: `holding` counted the same untouchable elements again on
+     every sweep, so it climbed forever and the line could never match the previous
+     one — which meant the deduplication below it never fired and a reel session
+     buried its own trail under two hundred identical breadcrumbs. Nothing about the
+     page changes between these two checks, so the sweep in between must say nothing
+     at all. */
   farUrl.style.top = (window.scrollY + 10) + 'px';
 
   setTimeout(function(){
@@ -100,7 +105,15 @@ setTimeout(function(){
     check('restore clears the flag',       farUrl.__ovsReleased===false);
     check('restore clears the memo',       !farUrl.__ovsSrc);
     check('counted the restore',           /restored 1/.test(log[log.length-1]||''));
-    document.getElementById('out').textContent = 'RESULTS\\n' + results.join('\\n');
+    check('holding did not accumulate',    /holding 2 \\(/.test(log[log.length-1]||''));
+
+    /* Now nothing moves for two more sweeps. Both must be silent: that is the half
+       of the fix the count alone does not prove, and the half a reel session feels. */
+    var quiet = log.length;
+    setTimeout(function(){
+      check('idle sweeps say nothing',     log.length === quiet);
+      document.getElementById('out').textContent = 'RESULTS\\n' + results.join('\\n');
+    }, 4500);
   }, 2500);
 }, 2500);
 </script></body></html>"""

@@ -290,7 +290,18 @@ namespace Overscan
        clicking into a cross-origin frame focuses the frame element, and only a real
        click does. So: neither set means the touch never reached the engine; trusted
        but no frame means it arrived and was routed elsewhere; both means it went in
-       and the frame's own content is what did not react. */
+       and the frame's own content is what did not react.
+
+       Those readings are for the native touch feed. **For the CDP path they do not
+       hold, and `none/none` there proves nothing.** A CDP click that lands inside an
+       out-of-process frame is delivered to that frame's own process: this document
+       is not on the path and never sees the event, trusted or otherwise, and site
+       isolation need not fire `focusin` on the frame element in the parent either.
+       So `none/none` after an inspector click covers ""it never arrived"" and ""it
+       arrived and went exactly where it was aimed"" equally well. Issue #20's
+       `build-5490157` trail reads `none/none` on ten clicks that walked a reCAPTCHA
+       grid and were followed by Instagram's post-login page. Only the site's own
+       behaviour settles that one. */
     native: function () {
       return 'trusted=' + (st.trusted || 'none') + ' frame=' + (st.frameFocus || 'none');
     },

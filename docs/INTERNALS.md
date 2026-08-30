@@ -1567,13 +1567,82 @@ has already had one build that changed a page on a guess and cost the reporter h
 one working configuration; a probe sent to explain a black screen must not be able to
 cause one.
 
+#### The box is fine, so in-page video is finished on that set
+
+`build-5490157`'s in-page report is the answer, and it is the first of the two
+readings above:
+
+```
+video rect: box 666,16 588x1048 | off 588x1048 | client 588x1048
+            | intrinsic 540x960 | vis ok
+            | tf 0 clip 0 ovf 3 zeroparents 0 | dpr 1 vv 0,0 1920x1080 scale 1
+```
+
+A 588×1048 box at 666,16 — a sensible portrait reel, centred on a 1920×1080 screen.
+`getBoundingClientRect`, `offsetWidth/Height` and `clientWidth/Height` all agree, so
+it is not a fractional rectangle rounding to nothing. Nothing is transformed, nothing
+is clipped, no ancestor is itself zero-sized, the device pixel ratio is 1 and the
+visual viewport maps 1:1. Six samples across the run, at four different intrinsic
+sizes — 540×960, 720×720, 1080×1080, 1080×1920 — and every one of them is healthy.
+The `ovf 3` is Instagram's own scroll containers and is the only thing the page does
+that the flattening theory would have reached for; it does not collapse anything.
+
+**So the page hands the engine a good rectangle and the sink is still refused.** The
+geometry is lost between the two, inside NUI's own hosting of the web view — which is
+exactly the shape predicted above, and for the reason predicted: NUI composites the
+engine as a texture, with no native window for it to place an overlay against, so
+every *per-element* rectangle collapses while the *whole-window* one keeps working.
+Nothing in managed code sits on that path. **In-page video is finished on the 2025
+sets, and hardware overlay is what Overscan has to offer them.**
+
+Two things follow that are worth as much as the answer:
+
+- **The flattening build was right not to ship.** It would have rewritten Instagram's
+  layout to fix a rectangle that was never wrong, on a set whose one working
+  configuration a page-changing build had already broken once.
+- **The key `5` menu keeps in-page anyway.** One set is one set: the reasoning says
+  every NUI host does this, but the measurement covers a single Tizen 10 TV, and the
+  cost of leaving a broken option in a menu that already defaults to overlay is a
+  reporter pressing `5` twice. Removing it would spend the finding on a set we have
+  not heard from.
+
+`NuiVideoRect` stays in the build. Its question is answered for this set, but it is
+read-only, it costs a line every few seconds, and it is what a second 2025 set would
+have to report before any of the above is claimed of anything but this one TV.
+
+#### `holding` counted sweeps, not videos
+
+The same trail carries a smaller thing that had been quietly spoiling every report
+before it. `NuiVideoCap`'s line read `held 342` on a page with eight `<video>`
+elements, climbing by four every two seconds, and that number went out on issue #20
+twice as though it meant elements — `it should now say held 9 or similar` was written
+about a count of three blob reels seen three times.
+
+`released` and `restored` are running totals, correctly: each is a thing that happens
+once to one element. `held` was incremented in the same place while counting a
+*condition* — this element has no restorable source — which is true of the same
+element on every single sweep forever. Worse than the wrong number: a total that
+climbs on every sweep can never equal the previous line, so the
+
+```js
+if (line !== lastReport) { lastReport = line; report(line); }
+```
+
+deduplication under it never once fired on a reel feed. Better than two hundred
+identical `video cap:` breadcrumbs in a seven-minute trail, on the one file the whole
+diagnostic design depends on being readable when a process dies without saying why.
+
+It is reset at the top of each sweep and the line now reads `holding N`. Two checks
+in `tools/videocap/run.sh` hold it there — that the count does not grow while the
+page does not change, and that a sweep over an unchanged page writes nothing at all —
+and both fail against the old code.
+
 ### What is left on the 2025 sets
 
 Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the one
-person testing that half of this app in anger. As of 2026-08-29, after his eighth
-report — three diagnostics pages from `build-e78c0bc`, one per video setting, and
-the first set carrying the engine's own native output from two paths at once — the
-state is:
+person testing that half of this app in anger. As of 2026-08-30, after his ninth
+report — two diagnostics pages from `build-5490157`, the in-page one carrying the
+`video rect :` reading the previous build was shipped to ask for — the state is:
 
 - **The session not surviving a restart — fixed.** Shipped in `build-9d856d1`.
   Nothing pending.
@@ -1589,18 +1658,19 @@ state is:
   and capping the count would not have helped. See *It is not the count — it is
   which sink the path uses* above. **Fixed as far as a fresh install is concerned:**
   `VideoHoleEnabled` is now always set, defaulting to overlay, so nobody lands in
-  the crashing configuration by default. Shipped in `build-<next>`.
+  the crashing configuration by default. Shipped in `build-5490157`.
   **`NuiVideoCap` remains a no-op on this feed** and `build-3368aea` proved twice
   over why it must stay one — see *Releasing a source we cannot restore* above.
-- **Reels playing black in the in-page path — cause found, and the next report
-  decides whether it is ours.** The engine hands its sink a render rectangle with a
-  zero width or height, 88 times out of 88, and draws a perfectly decoded video into
-  it. `NuiVideoRect` now reports what box the page thinks the video has.
-  **Waiting on:** the `video rect :` line from `build-<next>` in the in-page setting.
-  A good box means the rectangle is lost inside the engine's hosting and in-page
-  video is finished on that set; a zero or collapsed box means flattening it is the
-  next build. Either answer closes the question, and the reply on the issue says so
-  in advance.
+- **Reels playing black in the in-page path — answered, and the answer is that it
+  is not reachable from here. Closed; nothing pending.** `build-5490157` reported
+  `box 666,16 588x1048 | off 588x1048 | client 588x1048 | vis ok | tf 0 clip 0
+  zeroparents 0`, six times, across four different intrinsic sizes. The page hands
+  the engine a healthy rectangle and the sink is refused anyway, so the geometry is
+  lost inside NUI's hosting of the web view, where no managed code reaches. **In-page
+  video is finished on the 2025 sets and hardware overlay is what Overscan offers
+  them.** The flattening build that was held back would have rewritten a page to fix
+  a box that was never wrong. `5` keeps the in-page option regardless — one set is
+  one set. See *The box is fine, so in-page video is finished on that set* above.
 - **The settings being wiped was reinstalls, not a bug.** Every build had to be
   reinstalled because TizenBrew's installer rejected the author certificate; he is
   on the Apps2Samsung installer now. So a `0 settings` header is not evidence of
@@ -1609,7 +1679,22 @@ state is:
   is settled below — the overlay path is the only one that gives him a picture — and
   now explained rather than merely observed. `build-3368aea`'s regression, which had
   turned overlay itself into a blank screen after one or two reels, is confirmed
-  fixed by his report on `build-e78c0bc`: `released 0, restored 0, held 249`.
+  fixed by his report on `build-e78c0bc`: `released 0, restored 0`. (The `held 249`
+  on that same line meant nothing — see *`holding` counted sweeps, not videos*
+  above. `released 0` was always the half that carried the confirmation.)
+- **Reels no longer end the app at all, on the setting he uses.** `build-5490157`'s
+  overlay run scrolled reels for seven minutes and ended `OnPause` then `OnTerminate
+  — closing normally`: he closed it. No `SIGTERM`, no unhandled exception, no trail
+  that simply stops. The one thing the run does show is
+  `PLATFORM SAYS MEMORY IS LOW: HardWarning` four times, each recovering to `None`
+  within a second while resident memory sat at 60–76 MB — so the set is under
+  pressure from something that is not us, and it did not act on it. Worth knowing
+  the next time an eviction is suspected; not worth a build on its own.
+- **The trail was drowning itself.** That same run wrote better than two hundred
+  `video cap:` breadcrumbs, one every two seconds, because a miscounted total could
+  never match the previous line and so was never deduplicated. Fixed; the count now
+  means elements. This mattered more than a cosmetic tidy: the trail is the only
+  evidence a death leaves, and it was two-thirds noise on the runs it exists for.
 - **A black screen at every launch — did not recur, and is not confirmed fixed.**
   Both runs in this report opened the start screen normally and `blank view:` reads
   `(never blank)`, so the recovery ladder never had to run. That is one clean
@@ -1621,12 +1706,32 @@ state is:
   re-arming its own four-second idle timer, so it was on screen the whole time
   anyone was using the browser. Pointer keys no longer show it; an open menu now
   counts as busy so the bar cannot time out underneath one. Shipped in
-  `build-<next>`.
+  `build-5490157`.
 - **The pointer skipping small targets — fixed.** The smallest step was 2% of the
   viewport, 38px across on a 1080p set, which can straddle Instagram's mute button
   or the ✕ on a reel whatever it starts from. It is 0.7% now, about 13px, with
   faster acceleration so crossing the screen still takes about eight repeats.
-  Shipped in `build-<next>`.
+  Shipped in `build-5490157`.
+- **The captcha itself — the thing the issue is named for — may already be
+  solved, and nobody has said so either way.** `build-5490157`'s in-page trail has
+  him on `instagram.com/auth_platform/recaptcha/`, clicking ten times into a
+  cross-origin `IFRAME` at coordinates that walk a grid and finish at 973,605, and
+  then loading `instagram.com/accounts/onetap/` seven seconds later — the page
+  Instagram shows *after* a successful login. That is what solving an image
+  challenge looks like from out here. **Waiting on:** him saying plainly whether the
+  captcha passed. It has never been asked directly, because until now there was
+  always a crash in front of it.
+  The `frame saw : trusted=none frame=none` on the same report is **not** evidence
+  against it, and the witness's own docstring is what says so: a click that lands
+  inside an out-of-process frame is invisible to the parent document by design, and
+  Chromium's site isolation need not fire `focusin` on the frame element either. So
+  `none/none` covers both "it never arrived" and "it arrived and went where it was
+  meant to". The witness discriminates for the *native touch* feed it was written
+  for; for the CDP path it is inconclusive, and it should not be read as a failure
+  again. `tools/cdpharness/run.sh` is the direct demonstration: it clicks into a
+  genuinely cross-site frame and the **frame itself** reports back
+  `trusted=true&x=130&y=50` — a real click, delivered — on a run where the parent
+  page has no way to know it. That is the same shape as the TV's `none/none`.
 - **Scrolling with the channel rocker — asked for, and it already existed.**
   Documented; the general problem is #38.
 - **Ad blocking — accepted in principle, not started. Proposal in #37.** The NUI
