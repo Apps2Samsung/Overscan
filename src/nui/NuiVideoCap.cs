@@ -39,8 +39,9 @@ namespace Overscan
     /// permanent — `build-3368aea` released a whole reel feed of them and the report
     /// came back `released 9 (9 blob), restored 0` with the visible video sitting at
     /// `0x0 rs0`. That turned the reporter's one working configuration into a blank
-    /// screen. Those are now counted as `held` and left alone; the count is worth
-    /// keeping, because it is what says this feed is one we cannot help.
+    /// screen. Those are now counted as `holding` and left alone; the count is worth
+    /// keeping, because it is what says this feed is one we cannot help. It counts
+    /// elements in the sweep that reported it, not sweeps — see the note beside it.
     ///
     /// So on an MSE feed — Instagram reels included — **this does nothing at all**,
     /// and the crash below is untouched. That is the honest state of it.
@@ -98,6 +99,17 @@ namespace Overscan
   var SCREENS = " + ScreensAway + @";
   var KEPT = '__ovsSrc';
   var released = 0, restored = 0, held = 0, lastReport = '';
+
+  /* released and restored are running totals — each is a thing that happened once
+     to one element. `held` is not: it is a count of what this sweep walked past and
+     could not touch, reset before each one. It used to accumulate alongside the
+     other two, which meant it counted the same three blob reels again every two
+     seconds and read `held 342` for a page that had eight videos on it. That number
+     went out on issue #20 twice as though it meant elements. Worse, a total that
+     climbs on every sweep can never equal the last one, so the line below was never
+     deduplicated and a reel session wrote a fresh `video cap:` breadcrumb every two
+     seconds — better than two hundred of them in one seven-minute trail, crowding
+     out the lines a death is read from. */
 
   function report(line) { try { console.log('" + Prefix + @"' + line); } catch (e) {} }
 
@@ -171,6 +183,7 @@ namespace Overscan
   function sweep() {
     try {
       var vs = document.getElementsByTagName('video');
+      held = 0;
       for (var i = 0; i < (vs ? vs.length : 0); i++) {
         var v = vs[i], away = screensAway(v);
 
@@ -185,7 +198,7 @@ namespace Overscan
       }
 
       var line = 'released ' + released + ', restored ' + restored +
-                 ', held ' + held + ' (no restorable source)';
+                 ', holding ' + held + ' (no restorable source)';
       if (line !== lastReport) { lastReport = line; report(line); }
     } catch (e) {}
   }
