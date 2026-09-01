@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Tizen.Applications;
 
 namespace Overscan
@@ -86,10 +87,32 @@ namespace Overscan
         /// otherwise the first run of a new build would report the previous build's
         /// ladder as already answered.
         /// </summary>
-        private const string LedgerVersion = "ledger 1";
+        private const string LedgerVersion = "ledger 2";
 
         /// <summary>What a step's result reads as when the launch that ran it never came back.</summary>
         private const string Killed = "KILLED THE PROCESS";
+
+        /// <summary>
+        /// What a step's result reads as when the call was still inside the kernel when
+        /// the watchdog gave up waiting for it.
+        ///
+        /// A separate answer from <see cref="Killed"/>, and the distinction is the
+        /// point: a launch that ends is visible from the next launch, and a call that
+        /// never returns is visible from nowhere at all. On issue #17's set the second
+        /// is the ordinary case — `getxattr` has hung it twice — and a walk parked on
+        /// one of those is indistinguishable, in the report, from a walk that was never
+        /// asked to start.
+        /// </summary>
+        private const string Stalled = "DID NOT RETURN";
+
+        /// <summary>
+        /// How long any one call gets before it is written off as <see cref="Stalled"/>.
+        /// Every rung here is a syscall against a 2 KB file: if one has not come back in
+        /// five seconds it is not coming back, and the worst case — every rung of every
+        /// location hanging — still finishes the walk inside three minutes, on a thread
+        /// nobody is waiting on.
+        /// </summary>
+        private const int CallTimeoutMs = 5000;
 
         [DllImport("libc.so.6", SetLastError = true)]
         private static extern int open(string path, int flags);
@@ -150,6 +173,9 @@ namespace Overscan
 
             /// <summary>True if asking about this one is what ended a launch.</summary>
             public bool KilledUs;
+
+            /// <summary>True if a call about this one never came back at all.</summary>
+            public bool Hung;
         }
 
         /// <summary>
@@ -158,19 +184,32 @@ namespace Overscan
         ///
         /// The Q80 answered `build-85d0e4e` by dying on the first rung — the trail
         /// ends on `probe: mmap PROT_READ|PROT_EXEC via /proc/self/fd res/` and the
-        /// four locations behind it were never asked at all. That is not a surprising
-        /// way for a kernel with an executable-mapping policy to behave, and the
-        /// comment on <see cref="Run"/> predicted it; what it did not do is survive
-        /// it, so a build shipped to compare five locations came back having compared
-        /// one.
+        /// four locations behind it were never asked at all. So each call now writes
+        /// its own name to a file before it is made and its answer to the same file
+        /// after: a launch that does not come back leaves a name with no answer, and
+        /// the next launch reads that as <see cref="Killed"/>, skips it, and carries
+        /// on to the next rung.
         ///
-        /// So each risky call now writes its own name to a file before it is made and
-        /// its answer to the same file after. A launch that does not come back leaves
-        /// a name with no answer, and the next launch reads that as
-        /// <see cref="Killed"/>, skips it, and carries on to the next rung. Every
-        /// launch therefore makes at least one step of progress even if every step is
-        /// fatal, and the reporter's instruction is the simplest one there is: open it
-        /// again until the report stops saying it is unfinished.
+        /// `build-3368aea` shipped exactly that and the same set stopped the ladder
+        /// again, in the one window this did not cover. Its trail ends on
+        /// `probe: open res/`, between the open and the header read — three calls that
+        /// were left unledgered because nothing had ever refused them, and therefore
+        /// the three with nothing written down about them. The next launch walked into
+        /// the same one, and would have done so forever. Two things follow, and both
+        /// are in here now:
+        ///
+        /// * <b>Every rung is ledgered, not the ones predicted to be dangerous.</b>
+        ///   That prediction has been wrong twice and in both directions: the rung
+        ///   expected to be fatal answered `EPERM` politely, and one of the three
+        ///   nobody instrumented is what stopped the walk.
+        /// * <b>A call that never returns is not a call that killed the launch.</b>
+        ///   This file could only ever learn from a dead process, and the probe runs
+        ///   on a background thread — so a call stuck in the kernel leaves the app
+        ///   alive, the walk parked, and the report reading `(not asked)` with nothing
+        ///   to separate the two. Every call therefore goes out under a watchdog and a
+        ///   hang is recorded as <see cref="Stalled"/> in the *same* launch, so a set
+        ///   that hangs on every rung still finishes the ladder without anybody
+        ///   opening the app again.
         ///
         /// This is the same idea as <c>Breadcrumbs</c> — write before the call, not
         /// after — carried one step further: the trail says which call died, and the
@@ -184,6 +223,20 @@ namespace Overscan
 
             /// <summary>Steps a previous launch began and never finished.</summary>
             private static readonly HashSet<string> Abandoned = new HashSet<string>(StringComparer.Ordinal);
+
+            /// <summary>
+            /// The order steps were first heard of, so the report reads in the order
+            /// the walk ran rather than in whatever order a hash table offers them.
+            /// </summary>
+            private static readonly List<string> Order = new List<string>();
+
+            /// <summary>
+            /// Guards the three above. The report is served from the socket thread
+            /// while the walk is still writing — and nothing here may be held across
+            /// <see cref="Trace"/> or a probe call, because <see cref="Dump"/> takes
+            /// the trail's lock first and this one second.
+            /// </summary>
+            private static readonly object Book = new object();
 
             private static string _path;
 
@@ -199,8 +252,13 @@ namespace Overscan
             /// </summary>
             public static void Open(string directory)
             {
-                Answered.Clear();
-                Abandoned.Clear();
+                lock (Book)
+                {
+                    Answered.Clear();
+                    Abandoned.Clear();
+                    Order.Clear();
+                }
+
                 _path = null;
 
                 try
@@ -226,34 +284,39 @@ namespace Overscan
                         return;
                     }
 
-                    // A name on its own is a call that was started; the same name with
-                    // an answer after it retires that. Later lines win, which is what
-                    // makes the file append-only.
-                    for (int i = 1; i < lines.Length; i++)
+                    lock (Book)
                     {
-                        string line = lines[i];
-                        int split = line.IndexOf('\t');
-                        if (split < 0)
+                        // A name on its own is a call that was started; the same name
+                        // with an answer after it retires that. Later lines win, which
+                        // is what makes the file append-only.
+                        for (int i = 1; i < lines.Length; i++)
                         {
-                            Abandoned.Add(line);
+                            string line = lines[i];
+                            int split = line.IndexOf('\t');
+                            if (split < 0)
+                            {
+                                Abandoned.Add(line);
+                                Remember(line);
+                            }
+                            else
+                            {
+                                string step = line.Substring(0, split);
+                                Abandoned.Remove(step);
+                                Answered[step] = line.Substring(split + 1);
+                                Remember(step);
+                            }
                         }
-                        else
-                        {
-                            string step = line.Substring(0, split);
-                            Abandoned.Remove(step);
-                            Answered[step] = line.Substring(split + 1);
-                        }
-                    }
 
-                    // Every step that ended a launch is one extra launch this ladder
-                    // has cost, whether it has been retired into an answer already or
-                    // is still sitting there unanswered.
-                    Launches = 1 + Abandoned.Count;
-                    foreach (string answer in Answered.Values)
-                    {
-                        if (string.Equals(answer, Killed, StringComparison.Ordinal))
+                        // Every step that ended a launch is one extra launch this ladder
+                        // has cost, whether it has been retired into an answer already or
+                        // is still sitting there unanswered.
+                        Launches = 1 + Abandoned.Count;
+                        foreach (string answer in Answered.Values)
                         {
-                            Launches++;
+                            if (string.Equals(answer, Killed, StringComparison.Ordinal))
+                            {
+                                Launches++;
+                            }
                         }
                     }
 
@@ -268,37 +331,193 @@ namespace Overscan
             }
 
             /// <summary>
-            /// Makes one call that might not return, or reports what happened last
-            /// time it was tried. <paramref name="call"/> runs only when this step has
-            /// never been reached before.
+            /// Makes one call that might not come back, or reports what happened the
+            /// last time it was tried.
             /// </summary>
             public static string Ask(string step, string announcement, Func<string> call)
             {
+                return Ask(step, announcement, call, false);
+            }
+
+            /// <summary>
+            /// The same, for a call whose <i>effect</i> the rungs behind it need rather
+            /// than its answer: the `open` whose descriptor the next four read from,
+            /// the copy into `data/` that has to be on disk before anything can be
+            /// asked about it. A remembered "ok" is neither of those, so a
+            /// <paramref name="repeatable"/> step is made again on every launch — but a
+            /// remembered answer that ended or hung a launch still retires it, which is
+            /// the half that has to be remembered.
+            /// </summary>
+            public static string Ask(string step, string announcement, Func<string> call, bool repeatable)
+            {
                 // The bare answer is what comes back, never a decorated one: callers
                 // test it with Succeeded, which reads the end of the string.
-                string answer;
-                if (Answered.TryGetValue(step, out answer))
+                string remembered = Remembered(step);
+                if (remembered != null && (!repeatable || IsFatal(remembered)))
                 {
-                    Trace("  " + step + ": answered on an earlier launch");
-                    return answer;
+                    Trace("  " + step + ": answered on an earlier launch — " + remembered);
+                    return remembered;
                 }
 
-                if (Abandoned.Contains(step))
+                if (remembered == null && WasAbandoned(step))
                 {
                     // The strongest refusal there is: not an errno, but the end of the
                     // launch that asked. Recorded so it is never asked again.
-                    Answered[step] = Killed;
-                    Append(step + "\t" + Killed);
+                    Record(step, Killed);
                     return Killed;
                 }
 
                 Append(step);
                 Trace(announcement);
 
-                answer = call();
-                Answered[step] = answer;
-                Append(step + "\t" + answer);
+                string answer = Watched(step, call);
+                Record(step, answer);
                 return answer;
+            }
+
+            /// <summary>
+            /// One call, on a thread of its own, with a deadline.
+            ///
+            /// A call that misses it is left running and written off. Nothing else is
+            /// possible: .NET Core has no <c>Thread.Abort</c>, and a thread stopped
+            /// inside a syscall would not honour one anyway. The thread is a background
+            /// thread so a probe still stuck in there cannot hold the process open
+            /// after the user has walked away from the failure screen, and the event it
+            /// signals is deliberately never disposed — disposing it under a thread
+            /// that is still holding it would raise on a thread with nobody to catch
+            /// it, which on this app means the crash this class exists to avoid.
+            /// </summary>
+            private static string Watched(string step, Func<string> call)
+            {
+                string answer = null;
+                Exception failure = null;
+                var finished = new ManualResetEvent(false);
+
+                try
+                {
+                    var thread = new Thread(delegate ()
+                    {
+                        try
+                        {
+                            answer = call();
+                        }
+                        catch (Exception ex)
+                        {
+                            failure = ex;
+                        }
+
+                        try
+                        {
+                            finished.Set();
+                        }
+                        catch (Exception)
+                        {
+                            // Nobody to report it to: the waiter has already given up.
+                        }
+                    });
+
+                    thread.IsBackground = true;
+                    thread.Name = "probe-rung";
+                    thread.Start();
+
+                    if (!finished.WaitOne(CallTimeoutMs))
+                    {
+                        Trace("  " + step + ": nothing back in " +
+                              (CallTimeoutMs / 1000).ToString(CultureInfo.InvariantCulture) +
+                              "s — written off, carrying on");
+                        return Stalled;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // A set that will not give us a thread still gets asked, it just
+                    // gets asked the dangerous way — which is what every build before
+                    // this one did on every rung.
+                    Trace("  " + step + ": no thread (" + ex.GetType().Name + "), asking inline");
+                    try
+                    {
+                        return call();
+                    }
+                    catch (Exception inner)
+                    {
+                        return "threw " + inner.GetType().Name + ": " + inner.Message;
+                    }
+                }
+
+                if (failure != null)
+                {
+                    return "threw " + failure.GetType().Name + ": " + failure.Message;
+                }
+
+                return answer ?? "(the call returned nothing)";
+            }
+
+            /// <summary>
+            /// The header line while the walk is still going — and on a set that hangs
+            /// a rung, that is most of a minute per location.
+            ///
+            /// Both reports on `build-3368aea` came back reading
+            /// `own native : (not asked)` from a launch whose trail plainly showed the
+            /// probe running, because the verdict was only written once the whole walk
+            /// returned. The page was loaded a second after launch, which is a
+            /// reasonable thing to do and has now cost two rounds of somebody's evening.
+            /// </summary>
+            public static string Progress()
+            {
+                lock (Book)
+                {
+                    if (Order.Count == 0)
+                    {
+                        return "(not asked yet)";
+                    }
+
+                    var refused = new List<string>();
+                    foreach (string step in Order)
+                    {
+                        string answer;
+                        if (Answered.TryGetValue(step, out answer) && IsFatal(answer))
+                        {
+                            refused.Add(step + " " + answer);
+                        }
+                    }
+
+                    return "still asking — " +
+                           Answered.Count.ToString(CultureInfo.InvariantCulture) + " answered" +
+                           (refused.Count == 0 ? "" : ", " + string.Join(", ", refused.ToArray())) +
+                           " (see the block below; open the app again if it stops here)";
+                }
+            }
+
+            /// <summary>
+            /// Every answer on the books, for the report. This is the half of the probe
+            /// that outlives a launch, and on a set that stops the walk it is the only
+            /// half a page has to show.
+            /// </summary>
+            public static string Recorded()
+            {
+                lock (Book)
+                {
+                    if (Order.Count == 0)
+                    {
+                        return "";
+                    }
+
+                    var text = new List<string>();
+                    text.Add("  kept across launches (" + LedgerVersion + ", launch " +
+                             Launches.ToString(CultureInfo.InvariantCulture) + ")");
+
+                    foreach (string step in Order)
+                    {
+                        string answer;
+                        text.Add("    " + step.PadRight(22) + " = " +
+                                 (Answered.TryGetValue(step, out answer)
+                                      ? answer
+                                      : "(began, never answered — the next launch reads this as " +
+                                        Killed + ")"));
+                    }
+
+                    return string.Join("\n", text.ToArray()) + "\n";
+                }
             }
 
             /// <summary>
@@ -307,6 +526,56 @@ namespace Overscan
             /// app to avoid answering, and that is a finding rather than an accident.
             /// </summary>
             public static int Launches = 1;
+
+            /// <summary>What one launch of the walk has already been told. Under <see cref="Book"/>.</summary>
+            private static string Remembered(string step)
+            {
+                lock (Book)
+                {
+                    string answer;
+                    return Answered.TryGetValue(step, out answer) ? answer : null;
+                }
+            }
+
+            private static bool WasAbandoned(string step)
+            {
+                lock (Book)
+                {
+                    return Abandoned.Contains(step);
+                }
+            }
+
+            private static void Record(string step, string answer)
+            {
+                lock (Book)
+                {
+                    Answered[step] = answer;
+                    Abandoned.Remove(step);
+                    Remember(step);
+                }
+
+                Append(step + "\t" + answer);
+            }
+
+            /// <summary>Adds a step to the report's order. Called under <see cref="Book"/>.</summary>
+            private static void Remember(string step)
+            {
+                if (!Order.Contains(step))
+                {
+                    Order.Add(step);
+                }
+            }
+
+            /// <summary>
+            /// Whether an answer is one never to ask for again: the launch that asked
+            /// it ended, or the call never came back. Both are refusals harder than
+            /// <c>EPERM</c>, and both are permanent as far as this ladder is concerned.
+            /// </summary>
+            private static bool IsFatal(string answer)
+            {
+                return string.Equals(answer, Killed, StringComparison.Ordinal) ||
+                       string.Equals(answer, Stalled, StringComparison.Ordinal);
+            }
 
             /// <summary>
             /// One line, flushed to disk on its own. The whole point is that it is on
@@ -346,14 +615,21 @@ namespace Overscan
         /// to name which. That risk is real here — asking a kernel with an
         /// executable-mapping policy to map a page executable is precisely what such
         /// a policy exists to refuse, and refusing it with a signal is a legal way to
-        /// do that. On `build-85d0e4e` the Q80 did exactly that on the first rung, so
-        /// the three calls that can do it now go through <see cref="Ledger"/> and a
-        /// launch that dies is resumed by the next one rather than repeated by it.
+        /// do that.
         ///
-        /// Labels and mounts are read for every location at the very end rather than
+        /// <b>Every call in the walk goes through <see cref="Ledger"/>, including the
+        /// ones nothing has ever refused.</b> Two builds have been spent on the other
+        /// arrangement: `build-85d0e4e` ledgered nothing and came back having answered
+        /// one location of five, `build-3368aea` ledgered the three rungs that looked
+        /// dangerous and the set stopped on one of the three that did not. There is no
+        /// rung left worth calling safe, and a ledger entry costs one line on a disk.
+        ///
+        /// Labels and mounts are read for every location after the verdict rather than
         /// beside each one. They only ever explain <i>why</i>, and `getxattr` is the
         /// call this set has not come back from twice — so nothing that decides the
-        /// question is queued behind it.
+        /// question is queued behind it. They are ledgered too, which is what makes
+        /// them collectable at all: a hang on the first location used to eat every
+        /// reading behind it, on every launch, forever.
         /// </summary>
         public static void Run()
         {
@@ -365,8 +641,17 @@ namespace Overscan
                     Trace("  probe ledger: none — a fatal step will not be skipped next launch");
                 }
 
-                Trace("native probe: anonymous PROT_EXEC control");
-                string anonymous = MapAnonymousExecutable();
+                // Before the first question, and again after every location: both
+                // reports on build-3368aea were pages loaded a second after launch, and
+                // they read `own native : (not asked)` on a set whose trail plainly
+                // showed the probe running. The header now says how far the ladder has
+                // got instead of nothing at all.
+                Summary = Ledger.Progress();
+
+                string anonymous = Ledger.Ask(
+                    "control:anon-exec",
+                    "native probe: anonymous PROT_EXEC control",
+                    delegate { return MapAnonymousExecutable(); });
                 Trace("  anonymous exec memory: " + anonymous);
 
                 var locations = Locate();
@@ -377,11 +662,15 @@ namespace Overscan
                     return;
                 }
 
-                Trace("  engine : " + HeaderOf(EngineLibrary));
+                Trace("  engine : " + Ledger.Ask(
+                    "control:engine-header",
+                    "  probe: read the engine's own ELF header",
+                    delegate { return HeaderOf(EngineLibrary); }));
 
                 foreach (Location location in locations)
                 {
                     Ask(location);
+                    Summary = Ledger.Progress();
                 }
 
                 Summary = Verdict(locations, anonymous);
@@ -391,11 +680,15 @@ namespace Overscan
                 // what Smack wrote on it. See the note above about ordering.
                 foreach (Location location in locations)
                 {
-                    Trace("  probe: mount of " + location.Name);
-                    Trace("  " + location.Name + " mount: " + SmackWall.MountOf(location.Path));
+                    Trace("  " + location.Name + " mount: " + Ledger.Ask(
+                        location.Name + ":mount",
+                        "  probe: mount of " + location.Name,
+                        delegate { return SmackWall.MountOf(location.Path); }));
 
-                    Trace("  probe: getxattr on " + location.Name);
-                    Trace("  " + location.Name + " labels: " + LabelsOf(location.Path));
+                    Trace("  " + location.Name + " labels: " + Ledger.Ask(
+                        location.Name + ":labels",
+                        "  probe: getxattr on " + location.Name,
+                        delegate { return LabelsOf(location.Path); }));
                 }
             }
             catch (Exception ex)
@@ -405,21 +698,35 @@ namespace Overscan
             }
         }
 
-        /// <summary>Every line produced so far, for the diagnostics report.</summary>
+        /// <summary>
+        /// Everything the report has to show: what earlier launches wrote down, then
+        /// this launch's trail. The ledger goes first because it is the half that
+        /// survives, and on a set that stops the walk it is the only half there is.
+        /// </summary>
         public static string Dump()
         {
+            // Read before the trail's lock is taken, never under it: Ledger has a lock
+            // of its own, and Ask holds that one while it Traces into this one.
+            string kept = Ledger.Recorded();
+
             lock (Gate)
             {
-                return Lines.Count == 0
-                    ? "  (not probed)\n"
-                    : string.Join("\n", Lines.ToArray()) + "\n";
+                if (Lines.Count == 0)
+                {
+                    return kept.Length == 0 ? "  (not probed)\n" : kept;
+                }
+
+                return kept + string.Join("\n", Lines.ToArray()) + "\n";
             }
         }
 
         /// <summary>
-        /// The three readings, for one copy of the library: it can be read, a page of
-        /// it can be mapped executable, and the dynamic loader will take it. They fail
-        /// for unrelated reasons, so they are asked separately.
+        /// The readings, for one copy of the library: it can be opened, its header
+        /// says what it was built for, a page of it maps readable, a page of it maps
+        /// executable, and the dynamic loader will take it. They fail for unrelated
+        /// reasons, so they are asked separately — and separately is now also how they
+        /// are ledgered, because the walk has been stopped once by each half of this
+        /// list and the half that stopped it was the half nobody instrumented.
         ///
         /// The executable mapping is asked twice when it is refused — once by the
         /// file's ordinary path and once through <c>/proc/self/fd</c>. That second
@@ -432,27 +739,54 @@ namespace Overscan
             int fd = -1;
             try
             {
-                Trace("  probe: open " + location.Name + " " + location.Path);
-                fd = open(location.Path, ORdonly);
-                if (fd < 0)
+                // The open is made again on every launch even once it has answered:
+                // the four rungs behind it read from its descriptor, and a remembered
+                // "ok" is not a descriptor. What is remembered is the only part that
+                // matters — that asking it once ended or hung a launch.
+                int opened = -1;
+                string readable = Ledger.Ask(
+                    location.Name + ":open",
+                    "  probe: open " + location.Name + " " + location.Path,
+                    delegate
+                    {
+                        opened = open(location.Path, ORdonly);
+                        return opened < 0
+                            ? "cannot even read it — " + Errno(Marshal.GetLastWin32Error())
+                            : "ok";
+                    },
+                    true);
+
+                if (!Succeeded(readable))
                 {
-                    Trace("  " + location.Name + ": cannot even read it — " +
-                          Errno(Marshal.GetLastWin32Error()));
+                    // Nothing behind this can be asked without a descriptor, so the
+                    // location stands as a refusal and the walk goes to the next one.
+                    Trace("  " + location.Name + ": " + readable);
+                    Note(location, readable);
                     return;
                 }
+
+                fd = opened;
 
                 // e_flags carries ARM's float-ABI bits, and the engine's own library
                 // is the only statement of what this firmware expects. A dlopen
                 // refused for an ABI mismatch and one refused by policy read the
                 // same from here unless those two numbers are side by side.
-                Trace("  probe: read header of " + location.Name);
-                Trace("  " + location.Name + " ours  : " + Header(fd));
+                string header = Ledger.Ask(
+                    location.Name + ":header",
+                    "  probe: read header of " + location.Name,
+                    delegate { return Header(fd); },
+                    true);
+                Trace("  " + location.Name + " ours  : " + header);
+                Note(location, header);
 
-                Trace("  probe: mmap PROT_READ " + location.Name);
-                Trace("  " + location.Name + " mmap " + Map(fd, ProtRead, "PROT_READ"));
+                string readOnly = Ledger.Ask(
+                    location.Name + ":read",
+                    "  probe: mmap PROT_READ " + location.Name,
+                    delegate { return Map(fd, ProtRead, "PROT_READ"); },
+                    true);
+                Trace("  " + location.Name + " mmap " + readOnly);
+                Note(location, readOnly);
 
-                // The three below are the ones that can end the launch, so each goes
-                // through the ledger: asked once ever, and skipped by name afterwards.
                 int held = fd;
                 string executable = Ledger.Ask(
                     location.Name + ":exec",
@@ -460,7 +794,7 @@ namespace Overscan
                     delegate { return Map(held, ProtRead | ProtExec, "PROT_READ|PROT_EXEC"); });
                 Trace("  " + location.Name + " mmap PROT_READ|PROT_EXEC: " + executable);
                 location.MapsExecutable = Succeeded(executable);
-                location.KilledUs |= WasFatal(executable);
+                Note(location, executable);
 
                 if (!location.MapsExecutable)
                 {
@@ -470,7 +804,7 @@ namespace Overscan
                         delegate { return MapThroughProcFd(held); });
                     Trace("  " + location.Name + " mmap via /proc/self/fd: " + reopened);
                     location.MapsExecutable = Succeeded(reopened);
-                    location.KilledUs |= WasFatal(reopened);
+                    Note(location, reopened);
                 }
 
                 string loaded = Ledger.Ask(
@@ -479,7 +813,7 @@ namespace Overscan
                     delegate { return Load(location.Path); });
                 Trace("  " + location.Name + " dlopen: " + loaded);
                 location.Loads = loaded.IndexOf("resolved", StringComparison.Ordinal) >= 0;
-                location.KilledUs |= WasFatal(loaded);
+                Note(location, loaded);
             }
             catch (Exception ex)
             {
@@ -502,6 +836,16 @@ namespace Overscan
         }
 
         /// <summary>
+        /// Records that a reading was one of the two refusals the verdict names
+        /// separately: the launch that asked ended, or the call never came back.
+        /// </summary>
+        private static void Note(Location location, string reading)
+        {
+            location.KilledUs |= WasKilled(reading);
+            location.Hung |= WasStalled(reading);
+        }
+
+        /// <summary>
         /// The verdict line, which is the whole point of the build: whether there is
         /// any location left with a shim behind it.
         /// </summary>
@@ -509,6 +853,7 @@ namespace Overscan
         {
             var refused = new List<string>();
             var fatal = new List<string>();
+            var hung = new List<string>();
             foreach (Location location in locations)
             {
                 if (location.Loads)
@@ -526,12 +871,20 @@ namespace Overscan
                 {
                     fatal.Add(location.Name);
                 }
+
+                if (location.Hung)
+                {
+                    hung.Add(location.Name);
+                }
             }
 
             return "REFUSED in " + string.Join(", ", refused.ToArray()) +
                    (fatal.Count == 0
                        ? ""
                        : " — and asking " + string.Join(", ", fatal.ToArray()) + " ended the launch") +
+                   (hung.Count == 0
+                       ? ""
+                       : " — and asking " + string.Join(", ", hung.ToArray()) + " never came back") +
                    " — anonymous exec memory " +
                    (Succeeded(anonymous) ? "is allowed, so this is about files we ship" : anonymous) +
                    (Ledger.Launches > 1
@@ -646,18 +999,40 @@ namespace Overscan
                 }
 
                 string target = Path.Combine(data, ProbeLibrary);
-                Trace("  probe: copy " + ProbeLibrary + " to data/");
-                File.Copy(source, target, true);
 
-                // Not needed to map a file executable, but a mode a real library
-                // would carry, so a refusal cannot be read as being about the bits.
-                chmod(target, ExecutableMode);
-                return target;
+                // Through the ledger like every other call that touches the file. This
+                // one is asked again on every launch — the copy has to be there before
+                // anything can be asked about it, and a remembered "ok" is not a file —
+                // but a launch it ended or hung is remembered and never repeated.
+                string copied = Ledger.Ask(
+                    "control:copy-data",
+                    "  probe: copy " + ProbeLibrary + " to data/",
+                    delegate { return CopyFile(source, target); },
+                    true);
+
+                return Succeeded(copied) ? target : null;
             }
             catch (Exception ex)
             {
                 Trace("  probe: cannot copy to data/ — " + ex.GetType().Name + ": " + ex.Message);
                 return null;
+            }
+        }
+
+        private static string CopyFile(string source, string target)
+        {
+            try
+            {
+                File.Copy(source, target, true);
+
+                // Not needed to map a file executable, but a mode a real library
+                // would carry, so a refusal cannot be read as being about the bits.
+                chmod(target, ExecutableMode);
+                return "ok";
+            }
+            catch (Exception ex)
+            {
+                return "cannot copy — " + ex.GetType().Name + ": " + ex.Message;
             }
         }
 
@@ -914,9 +1289,21 @@ namespace Overscan
         /// harder one than <c>EPERM</c>: worth naming separately because a set that
         /// kills the asker is a set no stub is going to load on either.
         /// </summary>
-        private static bool WasFatal(string reading)
+        private static bool WasKilled(string reading)
         {
             return string.Equals(reading, Killed, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Whether the call never came back at all — the watchdog's answer rather than
+        /// the kernel's. Worth naming separately for the opposite reason: nothing about
+        /// it says the request was refused, only that this firmware will not finish
+        /// answering it, which is just as fatal to a stub that would have to be mapped
+        /// during every start-up.
+        /// </summary>
+        private static bool WasStalled(string reading)
+        {
+            return string.Equals(reading, Stalled, StringComparison.Ordinal);
         }
 
         /// <summary>

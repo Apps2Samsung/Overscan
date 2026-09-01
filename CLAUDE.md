@@ -109,6 +109,27 @@ the probe **reads and does nothing else**. The page marks every call it must not
 — `pause`, `load`, `play`, a changed `src`, a changed DOM — and fails the run if one
 happens. A probe sent to explain a black screen must not be able to cause one.
 
+### The probe-ladder harness
+
+Any change to `NativeProbe` — the walk that asks issue #17's set whether it will map
+native code of ours — is exercised off-device first:
+
+```sh
+tools/probeladder/run.sh
+```
+
+It compiles the shipping `src/common/NativeProbe.cs` against stand-ins for the three
+platform types it touches, and walks it over the shapes that set has actually
+produced: a rung that hangs, a rung a previous launch never came back from, a ledger
+left by another build, and a clean run twice over. It needs a C compiler for the
+stand-in library and nothing else.
+
+The ladder's only real property is that it converges — whatever one rung does, the
+rungs and locations behind it still get asked. Two builds have been spent finding out
+from a TV that it did not, which is a reporter's evening each. The `hang` scenario is
+the one that holds it: against the previous `NativeProbe.cs` it does not fail, it
+never returns.
+
 ### The native probe library
 
 `Overscan5/res/libovprobe.so` is the only native binary this repo ships: a tiny ARM
@@ -173,6 +194,13 @@ around spending it well.
   front of the thing it is explaining has cost this project a build three times
   now — issues #13, #17 and #17 again. If a diagnostic can kill the process, it
   runs after the failure it is investigating, never before it.
+- **A diagnostic call gets a deadline, not just a breadcrumb.** The trail names the
+  call that killed a launch, and that is the whole design — but on issue #17's set
+  the ordinary failure is a call that never returns, and the probe runs on a
+  background thread, so a hang leaves the app alive with the report saying nothing.
+  A breadcrumb cannot tell that apart from a walk that never started. Every call
+  that reaches past managed code goes out under a watchdog, and a miss is a recorded
+  answer rather than a silence.
 - **One question per build**, and say plainly which answer means "this TV cannot
   run Overscan". Guessing costs somebody else an install.
 - **Anything left open is written down in `docs/INTERNALS.md`, not carried in a

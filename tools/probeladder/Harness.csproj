@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Compiles the shipping src/common/NativeProbe.cs, unchanged, against stand-ins
+    for the three platform types it touches. A harness with its own copy of the
+    code under test tests nothing — the same reason tools/cdpharness compiles the
+    file it ships.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>probeladder</AssemblyName>
+    <RootNamespace>Overscan.Harness</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyVersion>0.1.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Stubs.cs" />
+    <Compile Include="../../src/common/NativeProbe.cs" />
+  </ItemGroup>
+
+</Project>
