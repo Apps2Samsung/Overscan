@@ -550,7 +550,21 @@ rung, and `build-3368aea` stopped between the `open` and the header read on
 So the "if every location refuses, close issue 17" branch is **not** reached, and
 saying it is would be a guess: only `res/` has ever answered. Every rung is now
 ledgered and every call has a watchdog, `tools/probeladder/run.sh` holds the walk to
-converging off-device, and the next report from that set is what decides it.
+converging off-device, and **`build-e2914be` is the build that decides it**. What
+each answer means was said on the issue before it shipped, so neither reading is a
+reversal later:
+
+- `own native : bin/ maps executable...` (or `lib/`, or `data/`) — there is a place
+  in the package this set will run a file of ours from, and the stub is worth
+  building.
+- `own native : REFUSED in res/, bin/, lib/, data/` — with `DID NOT RETURN` counting
+  as a refusal, because a mapping this firmware will not finish answering for is no
+  use to a stub loaded during start-up. There is then nowhere left to put one, and
+  the honest thing to say is that this TV cannot run Overscan.
+
+Anything else — a report that still says `(not asked)`, or one that names no
+locations — is a third build spent on the ladder rather than the question, and worth
+reading as a bug here before it is read as an answer from the set.
 
 `Overscan5/res/libovprobe.so` is a real ARM shared object — one function, no
 `DT_NEEDED`, `SONAME libovprobe.so`, built freestanding by `tools/elfprobe/build.sh`
