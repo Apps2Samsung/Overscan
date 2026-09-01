@@ -543,11 +543,14 @@ So the stub had a cheap prerequisite, and `build-9d856d1` is the build that aske
 it. **The Q80 answered on 2026-08-27 for `res/`, and the answer was no** — see *The
 exec mapping is refused, and where that leaves it* below.
 
-**The other four locations are still unanswered.** `build-85d0e4e` shipped to ask
-them and the set killed the app on the first rung instead, so the "if every location
-refuses, close #17" branch is **not** reached: only `res/` has ever answered. The
-ladder now resumes across launches — see *The ladder has to survive its own
-questions* — and the next report from that set is what decides it.
+**The other four locations are still unanswered.** Two builds have now been spent
+on the ladder rather than on the question: `build-85d0e4e` was killed on its first
+rung, and `build-3368aea` stopped between the `open` and the header read on
+2026-09-01 — see *The ladder also has to survive the questions nobody suspected*.
+So the "if every location refuses, close issue 17" branch is **not** reached, and
+saying it is would be a guess: only `res/` has ever answered. Every rung is now
+ledgered and every call has a watchdog, `tools/probeladder/run.sh` holds the walk to
+converging off-device, and the next report from that set is what decides it.
 
 `Overscan5/res/libovprobe.so` is a real ARM shared object — one function, no
 `DT_NEEDED`, `SONAME libovprobe.so`, built freestanding by `tools/elfprobe/build.sh`
@@ -693,9 +696,10 @@ Three things that are easy to get wrong here and are already right:
 - **The replayed answer comes back bare.** `Succeeded` tests the end of the string,
   so decorating a resumed `ok` with "(asked on an earlier launch)" would silently
   turn every replayed success into a failure. The note goes on the trail instead.
-- **The file is stamped `ledger 1`.** A ledger from another build is deleted rather
-  than parsed, or the first run of a new ladder would report the old one's answers.
-  Bump `LedgerVersion` whenever a step changes its name or its meaning.
+- **The file is stamped with a version.** A ledger from another build is deleted
+  rather than parsed, or the first run of a new ladder would report the old one's
+  answers. Bump `LedgerVersion` whenever a step changes its name or its meaning —
+  the rename to per-rung names took it to `ledger 2`.
 - **A killed step is a verdict, not a gap.** `Location.KilledUs` reaches the summary
   as "asking `res/` ended the launch", which is a *harder* refusal than `EPERM` and
   worth naming as one. A set that kills the asker is not a set a stub loads on.
@@ -703,6 +707,63 @@ Three things that are easy to get wrong here and are already right:
 The `Launches` count in the verdict is there for the same reason: a number above one
 says the set chose to die rather than answer, and that is a finding rather than an
 accident of the reporter's evening.
+
+### The ladder also has to survive the questions nobody suspected
+
+`build-3368aea` shipped that ledger and the Q80 stopped the walk again on
+2026-09-01, two rungs earlier than anything the ledger covered:
+
+```
+12:59:05    probe: copy libovprobe.so to data/
+12:59:05    engine : e_machine=40 e_flags=0x5000200 float=soft
+12:59:05    probe: open res/ /opt/usr/apps/org.apps2samsung.overscan/res/libovprobe.so
+```
+
+— and nothing after, for the 98 seconds until the next launch. The next trace line
+would have been `probe: read header of res/`, so the walk stopped inside `open`, the
+header `read`, or the plain `PROT_READ` mmap: the three rungs left unledgered
+*because nothing had ever refused them*, and therefore the three with nothing on
+disk to resume from. The report read `own native : (not asked)` for the second
+build running, on a launch whose trail plainly showed the probe walking.
+
+Two things were wrong, and each of them alone was enough:
+
+- **Only the rungs predicted to be dangerous were ledgered.** That prediction has
+  now been wrong twice, in both directions: the rung expected to be fatal answered
+  `EPERM` politely, and one of the three nobody instrumented is what stopped the
+  walk. **Every call in the walk is ledgered now** — the `open`, the header read,
+  the readable mapping, the engine's own header, the copy into `data/`, and the
+  `mount` and `getxattr` reads after the verdict. A rung "known safe" is a rung with
+  no evidence behind it; a ledger line costs one write.
+- **A call that never returns is not a call that killed the launch, and the ledger
+  could only ever learn from the second.** The probe runs on a background thread
+  (`SmackWall.InvestigateInBackground`), so a call stuck in the kernel leaves the
+  app alive, the walk parked, and the report saying nothing — which is
+  indistinguishable from a walk that never started. This set does exactly that:
+  `getxattr` has hung it twice, and the copy into `data/` proves a plain read of
+  `res/` is not refused, which makes a hang the better reading of that trail than a
+  kill. **Every call goes out under a watchdog now** (`Ledger.Watched`, five
+  seconds), and a miss is recorded as `DID NOT RETURN` *in the same launch*, so a
+  set that hangs on every rung still finishes the ladder without anybody opening
+  the app again.
+
+The header follows from the same reading. `Summary` was only written when the whole
+walk returned, so a page loaded a second after launch — which both reports were, and
+which is a reasonable thing for a reporter to do — showed `(not asked)` no matter
+what was already on the books. It is now written from the ledger before the first
+question and again after every location, and `NativeProbe.Dump` prints the ledger
+above this launch's trail. The half of the probe that outlives a launch is the half
+worth showing first.
+
+**`tools/probeladder/run.sh` holds all of that off-device.** It compiles the
+shipping `src/common/NativeProbe.cs` against stand-ins for the three platform types
+it touches and walks it over a fixture: a rung that hangs (a FIFO with no writer,
+which is an `open` that blocks for as long as the probe is willing to wait), a rung
+abandoned by a previous launch, a ledger from another build, and a clean run twice
+over. The `hang` scenario is the one that earns it — against `build-3368aea`'s file
+it does not fail, it never returns, which is precisely what the Q80 did with
+somebody's evening. Two builds is too many to spend discovering that a ladder does
+not climb.
 
 ### `ELM_ACCEL` has to be set before the window exists
 
