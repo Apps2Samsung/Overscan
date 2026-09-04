@@ -1344,6 +1344,81 @@ suspect the video path used to be; one that reaches rung 3 is a set where a
 sideloaded NUI WebView cannot be made to navigate, and that is the answer rather
 than another build.
 
+**That last sentence turned out to be wrong, and issue #53 is the set that
+proved it** — it reached rung 3 on every launch and then loaded a typed address
+at the first ask. The ladder had changed the view and the profile and never the
+*page*, and the page was the fault. There is a rung in front of the others now
+for exactly that case; the next section has it.
+
+### The start screen was eating itself
+
+Issue #20's reporter came back (as #53) with the black screen at every launch
+that the section above had written down as "did not recur, not confirmed fixed".
+Two reports, four days apart, identical: the ladder ran to the end — new view,
+cleared session, new view — and declared the view dead. The first of those
+trails also had this in it, fifty seconds after the verdict:
+
+```
+23:00:42  the web view is not starting loads at all
+23:01:32  navigate: https://tv4h.weebly.com
+23:01:33  load started: https://tv4h.weebly.com/
+```
+
+The view was fine. What never began, six times over two launches, was the
+**start screen** — `LoadHtmlString`, the page this app generates — and every
+rung of the ladder had asked for the same one again.
+
+The reason is in a healthy trail from four days earlier, once you know to look.
+The NUI WebView has no base-URL overload; a page loaded from a string is
+reported by the engine as a `data:` URL carrying the whole page percent-encoded,
+and that is what `PageLoadStarted` logs for it. `Store.RecordVisit` only knew
+the ElmSharp build's marker, `https://overscan.start/`. So on NUI **every start
+screen was recorded as a visit**, titled "Overscan", and the next start screen
+put it in a tile — the trail shows `href='data:text/html;charset=utf-8,%253C…'`,
+a start screen inside a start screen, double-encoded. That one measured 12,119
+characters against 3,507 for the same page with an empty history. Eight recent
+tiles, each a previous start screen that itself holds the eight before it, with
+`%` becoming `%25` at every level: roughly ×2.3 per launch. From 3.5 KB it
+passes Chromium's URL ceiling — `url::kMaxURLChars`, 2 MB, past which a `GURL`
+is simply invalid and the navigation is dropped without a start or an error —
+on about the ninth start screen. Nine launches is "after some time or days",
+which is exactly what the issue said.
+
+Everything else on those reports now reads as the same fault:
+
+- rung 2 clearing the profile did nothing because history is *ours*, in a file
+  the engine has never heard of — the one thing the ladder was designed to
+  preserve was the one thing that was wrong;
+- the reinstall that "fixed" it the first time wiped `history.tsv`;
+- resident memory jumping from 75 MB to 377 MB with nothing loading fits a
+  multi-megabyte string being built, escaped and refused (an inference from the
+  trail, not a measurement);
+- the ElmSharp build never had it, because `LoadHtml(html, BaseUrl)` makes the
+  engine report the marker and the guard matched.
+
+The fix is in `Store`, for all six packages: `IsGenerated` knows both shapes
+(the marker and any `data:` URL), `RecordVisit` and `ToggleFavourite` refuse
+them, and `Init` drops any that an earlier build let into either file and
+writes the file back clean — which is what turns that set's black screen back
+into a browser without a reinstall, and says how many it dropped on the log.
+`tools/startpage/run.sh` compiles the shipping `Store.cs` and `HomePage.cs` and
+holds them to it; against the previous `Store.cs` its twelve-launch check ends
+on a 21-million-character page.
+
+Two things changed on the NUI side as well. **The ladder has a rung in front of
+the others for the start screen**: when the load that never began is the
+generated page, the first thing changed is the page — `ShowHome` builds it bare,
+no tiles, while a recovery is in progress — because the tiles are the only part
+of it that differs from one launch to the next. And the report carries a
+`start page:` line with the page's size, since nothing on it said how large the
+page the engine was refusing had got. The last rung no longer says the view is
+not starting loads "at all"; it says *this* load, which is all it knows.
+
+The rule this leaves behind is about the ladder, not the store: **a recovery
+that retries the same request on a different substrate has not changed the one
+thing the request itself could be wrong about.** Rebuilding the view answered
+"is the view broken" three times; nobody had asked "is the page".
+
 ### The reels death is not an eviction, and it leaves no line at all
 
 `build-c0cd5ab` is the first build whose heartbeat survived to the end of a run,
@@ -1753,9 +1828,10 @@ and both fail against the old code.
 ### What is left on the 2025 sets
 
 Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the one
-person testing that half of this app in anger. As of 2026-08-30, after his ninth
-report — two diagnostics pages from `build-5490157`, the in-page one carrying the
-`video rect :` reading the previous build was shipped to ask for — the state is:
+person testing that half of this app in anger. As of 2026-09-04, after his
+eleventh report — issue #53, the black screen at every launch, which he had
+already sent once on #20 on 2026-08-30 and which went unanswered for four days —
+the state is:
 
 - **The session not surviving a restart — fixed.** Shipped in `build-9d856d1`.
   Nothing pending.
@@ -1808,12 +1884,21 @@ report — two diagnostics pages from `build-5490157`, the in-page one carrying 
   never match the previous line and so was never deduplicated. Fixed; the count now
   means elements. This mattered more than a cosmetic tidy: the trail is the only
   evidence a death leaves, and it was two-thirds noise on the runs it exists for.
-- **A black screen at every launch — did not recur, and is not confirmed fixed.**
-  Both runs in this report opened the start screen normally and `blank view:` reads
-  `(never blank)`, so the recovery ladder never had to run. That is one clean
-  launch on a fresh profile, not a fix: the machinery that would explain it is now
-  in place and untriggered. **Waiting on:** the next time it happens, when
-  `blank view:` will say which rung got a page loading.
+- **A black screen at every launch — found, and fixed in the build cut from the
+  start-screen change (see *The start screen was eating itself* above).** It was
+  never the view: the start screen was recording itself into history on every
+  launch and outgrew Chromium's 2 MB URL ceiling on about the ninth. The fix
+  heals his existing `history.tsv` on first launch, so no reinstall. **Waiting
+  on:** his report from that build showing `start page:` at a few KB and a
+  `store: dropped N generated page(s)` line, and the start screen opening. If it
+  still does not open with the store healed, `blank view:` now says whether a
+  *bare* start screen loaded, which separates the page from the view for good.
+- **The captcha — answered: it works.** His 2026-08-30 comment: "captcha works
+  now tried on instagram, spotify site". That is the thing #20 is named for.
+- **The address bar still shows when scrolling with the channel rocker and when
+  unmuting** — same comment. Open, small, not started: `build-5490157` took the
+  bar off pointer keys, and the rocker and the volume/mute keys are evidently not
+  in that set.
 - **"A frame at the top" — it is our own address bar, and he has now said it is in
   the way.** It was shown on *every* key down, cursor moves included, each repeat
   re-arming its own four-second idle timer, so it was on screen the whole time
@@ -1858,13 +1943,16 @@ report — two diagnostics pages from `build-5490157`, the in-page one carrying 
   diagnostics report from the first version, because the check sits in the path of
   every request on TV hardware.
 
-Four things about that set are settled and should not be re-derived: **key `5` is
+Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
 picture, so a report of black or silent video is the in-page path failing and not a
 regression — **the video path has nothing to do with a view that will not
 navigate**, which cost a build to learn, **the reels death is not the app growing
-too large**, which cost two, and **it is not a decoder budget either**, which cost
-a whole class that does nothing on the feed it was written for.
+too large**, which cost two, **it is not a decoder budget either**, which cost
+a whole class that does nothing on the feed it was written for, and **a start
+screen that will not load is not a view that will not load** — his view has
+navigated at the first ask on every trail where he typed an address, and the
+ladder reaching its last rung is not evidence that the set cannot run Overscan.
 
 ## Emulator notes
 

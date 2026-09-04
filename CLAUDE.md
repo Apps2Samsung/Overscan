@@ -109,6 +109,22 @@ the probe **reads and does nothing else**. The page marks every call it must not
 — `pause`, `load`, `play`, a changed `src`, a changed DOM — and fails the run if one
 happens. A probe sent to explain a black screen must not be able to cause one.
 
+### The start-page harness
+
+Any change to `Store` or `HomePage` — what gets saved as a visit or favourite, and
+the page built from it — is exercised off-device first:
+
+```sh
+tools/startpage/run.sh
+```
+
+It compiles the shipping files against a stub log and runs twelve start screens in
+a row, recording each the way the NUI engine reports it (a `data:` URL carrying the
+page). Issue #53 was that loop with no guard: the start screen recorded itself as a
+visit on every launch, roughly doubled each time, and after nine launches was past
+the 2 MB Chromium will load — a black screen with no line anywhere, on a view that
+was fine. Needs only the .NET 6 SDK under `~/.dotnet-local`.
+
 ### The probe-ladder harness
 
 Any change to `NativeProbe` — the walk that asks issue #17's set whether it will map
