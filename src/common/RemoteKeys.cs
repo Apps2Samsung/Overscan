@@ -117,15 +117,36 @@ namespace Overscan
         }
 
         /// <summary>
-        /// True for the buttons that only move or press the pointer. These are the
-        /// ones somebody holds down for a minute at a time to get across a page, so
-        /// they are the ones that must not be treated as "the viewer wants to see
-        /// the address bar" — see NuiBrowserApp.OnWindowKey.
+        /// True for a button whose press is a reason to show the address bar:
+        /// going back, opening the menu, or one of the numbered shortcuts, each of
+        /// which changes something the bar then names. Everything else leaves the
+        /// bar alone — the pointer, the channel rocker, and any button this app has
+        /// no binding for (volume, mute, whatever a remote we have never seen sends).
         /// </summary>
-        public static bool IsPointerKey(string key)
+        /// <remarks>
+        /// A list of the buttons that <em>do</em> show it, not "everything but the
+        /// pointer". The first version was the exclusion, and that is how the
+        /// rocker got through: `build-5490157` took the bar off the pointer keys,
+        /// and issue #20's reporter, who reads a feed by paging it with channel
+        /// up/down, still had the bar come back on every page and asked again.
+        /// A button somebody holds down to move through a page must never be the
+        /// thing that keeps the bar alive, and the only way to be sure of that for
+        /// buttons nobody has tested is to name the ones that qualify.
+        /// </remarks>
+        public static bool IsChromeKey(string key)
         {
-            return key == Left || key == Right || key == Up || key == Down ||
-                   key == Ok || key == OkKeypad;
+            if (key == Back || key == Info)
+            {
+                return true;
+            }
+
+            if (key == Num0 || key == Num1 || key == Num2 || key == Num3 || key == Num4 ||
+                key == Num5 || key == Num6 || key == Num7 || key == Num8 || key == Num9)
+            {
+                return true;
+            }
+
+            return Contains(MenuKeys, key) || Contains(MediaKeys, key);
         }
 
         private static bool Contains(string[] keys, string key)
