@@ -99,6 +99,7 @@ namespace Overscan
         private bool _overlayVisible;
         private bool _hintsWanted = true;
         private bool _imagesOn = true;
+        private bool _adBlockOn = true;
         private bool _videoOverlay = true;
 
         /// <summary>
@@ -407,6 +408,14 @@ namespace Overscan
                 }
 
                 ConfigureCookies();
+
+                // Before the first load, so the start screen's tiles are the first
+                // requests it sees. Default on: a feature that is off by default is
+                // a feature only the people who already know about it have.
+                _adBlockOn = Store.GetBool("adblock", true);
+                Breadcrumbs.Drop("installing request filter");
+                NuiAdBlock.Install(_web, _adBlockOn);
+                DiagLog.Add("ad block: " + NuiAdBlock.LastResult);
 
                 // Read here, applied later. See ApplyVideoPath: on this set a
                 // stored overlay handed to a WebView that has never loaded
@@ -1216,6 +1225,7 @@ namespace Overscan
                 new RemoteMenu.Item(RemoteMenu.ActionKeysToPage, "Send keys to page", "4"),
                 new RemoteMenu.Item(RemoteMenu.ActionFitPage, "Fit page to screen", "6"),
                 new RemoteMenu.Item(RemoteMenu.ActionImages, "Images on/off", "Info"),
+                new RemoteMenu.Item(RemoteMenu.ActionAdBlock, "Ad blocking on/off", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionVideoPath, "Video: in page / overlay", "5"),
                 new RemoteMenu.Item(RemoteMenu.ActionHints, "Remote card on/off", "7"),
                 new RemoteMenu.Item(RemoteMenu.ActionDiagnostics, "Diagnostics", "3"),
@@ -1388,6 +1398,10 @@ namespace Overscan
 
                 case RemoteMenu.ActionImages:
                     ToggleImages();
+                    break;
+
+                case RemoteMenu.ActionAdBlock:
+                    ToggleAdBlock();
                     break;
 
                 case RemoteMenu.ActionVideoPath:
@@ -1901,6 +1915,30 @@ namespace Overscan
         }
 
         /// <summary>
+        /// The switch is read on the request thread, so flipping it takes effect on
+        /// the next request; the reload is so the page that is open shows the
+        /// difference rather than the next one. Menu only — every digit and Info
+        /// are spoken for, and the menu is what a slim remote uses anyway.
+        /// </summary>
+        private void ToggleAdBlock()
+        {
+            _adBlockOn = !_adBlockOn;
+            NuiAdBlock.Enabled = _adBlockOn;
+            Store.Set("adblock", _adBlockOn);
+            DiagLog.Add("ad block " + (_adBlockOn ? "ON" : "OFF"));
+            Flash(_adBlockOn ? "Ad blocking on" : "Ad blocking off — ads and trackers load");
+            UpdateStatus();
+            try
+            {
+                _web.Reload();
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("reload after ad block toggle failed: " + ex.Message);
+            }
+        }
+
+        /// <summary>
         /// The one real speed-up available: the engine cannot be made faster, but it
         /// can be given much less to do.
         /// </summary>
@@ -2063,7 +2101,8 @@ namespace Overscan
                            ShortPreset(_presets[_presetIndex].Label) +
                            "   ·   " + (_keysToPage ? "page keys" : "cursor") +
                            (_viewportFix ? "   ·   fit" : string.Empty) +
-                           (_imagesOn ? string.Empty : "   ·   no images");
+                           (_imagesOn ? string.Empty : "   ·   no images") +
+                           (_adBlockOn ? string.Empty : "   ·   ads allowed");
         }
 
         private string Report()
@@ -2087,6 +2126,7 @@ namespace Overscan
                   "video rect: " + NuiVideoRect.LastBox + "\n" +
                   "blank view: " + _blankState + "\n" +
                   "start page: " + _startPageState + "\n" +
+                  "ad block  : " + NuiAdBlock.Summary() + "\n" +
                   "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
                   "last words: " + NuiDeathWatch.LastWord + "\n" +
                   "stderr    : " + NativeStdErr.SessionState + "\n" +
