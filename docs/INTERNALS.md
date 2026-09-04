@@ -1396,7 +1396,7 @@ Everything else on those reports now reads as the same fault:
 - the ElmSharp build never had it, because `LoadHtml(html, BaseUrl)` makes the
   engine report the marker and the guard matched.
 
-The fix is in `Store`, for all six packages: `IsGenerated` knows both shapes
+The fix shipped in `build-87100d9` and is in `Store`, for all six packages: `IsGenerated` knows both shapes
 (the marker and any `data:` URL), `RecordVisit` and `ToggleFavourite` refuse
 them, and `Init` drops any that an earlier build let into either file and
 writes the file back clean — which is what turns that set's black screen back
@@ -1884,8 +1884,8 @@ the state is:
   never match the previous line and so was never deduplicated. Fixed; the count now
   means elements. This mattered more than a cosmetic tidy: the trail is the only
   evidence a death leaves, and it was two-thirds noise on the runs it exists for.
-- **A black screen at every launch — found, and fixed in the build cut from the
-  start-screen change (see *The start screen was eating itself* above).** It was
+- **A black screen at every launch — found, and fixed in `build-87100d9` (see
+  *The start screen was eating itself* above).** It was
   never the view: the start screen was recording itself into history on every
   launch and outgrew Chromium's 2 MB URL ceiling on about the ninth. The fix
   heals his existing `history.tsv` on first launch, so no reinstall. **Waiting
