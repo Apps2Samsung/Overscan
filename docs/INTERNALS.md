@@ -2008,7 +2008,7 @@ one its report has to come from. The state is:
   (2026-09-04) answered both**, and the second answer stopped mattering when the
   first one came in. The fix built on it is `AdSilence`: the ad's own host,
   answered with a second of decodable silence instead of a refusal. Shipped in
-  `build-TBD`. **Waiting on:** his report from that build, taken after an ad
+  `build-2f3862d`. **Waiting on:** his report from that build, taken after an ad
   would have played. What each answer decides is under *The ad is on its own host
   after all*.
 
@@ -2205,7 +2205,7 @@ there passes by timing out. Both failure modes were checked by breaking the clip
 purpose: a broken sync word fails the decode, and a half-length clip — uBlock's own
 bug — fails the duration.
 
-**What his next report decides.** Shipped as `build-TBD`. The `ad block` line:
+**What his next report decides.** Shipped as `build-2f3862d`. The `ad block` line:
 
 - `silenced` above zero and the music playing: it works, and the feature is done.
 - `silenced` above zero and the player stuck on the ad: the clip decodes but the
