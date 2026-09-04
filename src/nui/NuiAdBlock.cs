@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Threading;
@@ -106,11 +107,36 @@ namespace Overscan
 
             try
             {
+                // Everything the trail wants is read before the request is
+                // answered, because after the answer the object may not be
+                // touched. The headers are a marshalled copy of the engine's
+                // map, per request; that is this diagnostic's cost, and the
+                // report's "handler" number is where it shows.
+                string url = request.Url;
+                string method = request.Method;
+                string dest = null;
+                string mode = null;
+                bool hasRange = false;
+                try
+                {
+                    IDictionary<string, string> headers = request.Headers;
+                    dest = RequestTrail.HeaderOf(headers, "Sec-Fetch-Dest");
+                    mode = RequestTrail.HeaderOf(headers, "Sec-Fetch-Mode");
+                    hasRange = RequestTrail.HeaderOf(headers, "Range") != null;
+                }
+                catch (Exception)
+                {
+                    // Recorded as a value, not a silence: a column of these
+                    // says the headers are not readable here, which is itself
+                    // one of the two answers this build is out for.
+                    dest = "(headers threw)";
+                }
+
                 string host = null;
                 bool refuse = false;
                 if (_enabled && _hosts != null)
                 {
-                    host = AdHosts.HostOf(request.Url);
+                    host = AdHosts.HostOf(url);
                     refuse = _hosts.Matches(host);
                 }
 
@@ -140,6 +166,8 @@ namespace Overscan
                         request.Ignore();
                     }
                 }
+
+                RequestTrail.Record(url, method, dest, mode, hasRange, refuse);
             }
             catch (Exception)
             {

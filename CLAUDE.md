@@ -127,8 +127,9 @@ was fine. Needs only the .NET 6 SDK under `~/.dotnet-local`.
 
 ### The ad-block harness
 
-Any change to `AdHosts` or to `src/nui/adhosts.txt` — the host list the NUI
-build refuses requests to — is exercised off-device first:
+Any change to `AdHosts`, to `src/nui/adhosts.txt` — the host list the NUI
+build refuses requests to — or to `RequestTrail`, the report's per-host request
+census, is exercised off-device first:
 
 ```sh
 tools/adblock/run.sh
@@ -138,8 +139,10 @@ It compiles the shipping matcher with the shipping list embedded and holds it to
 the answers that matter: a listed host and everything under it refused, the
 look-alikes and the top-level domain not, the sites this app is actually used on
 (Instagram, Spotify, Google sign-in, their CDNs) never on the list, and a lookup
-in the low microseconds. The matcher runs on every request the engine makes, on
-a thread that is not ours; `NuiAdBlock` explains what that decides. The list is
+in the low microseconds; and for the trail, that a URL folds to host plus first
+segment and no further, and that the line cap holds. Both run on every request
+the engine makes, on a thread that is not ours; `NuiAdBlock` explains what that
+decides. The list is
 refreshed with `tools/adhosts/update.sh`, which says where it comes from and why
 that source; commit the diff, do not fetch at build time.
 

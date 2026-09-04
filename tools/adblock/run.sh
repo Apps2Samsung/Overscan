@@ -17,7 +17,11 @@
 #      Google sign-in, their CDNs — because a list that refuses the page itself is
 #      worse than no list;
 #   5. cost: a lookup stays in the low microseconds on the desktop, which is the
-#      number the report's "handler" line is compared against later.
+#      number the report's "handler" line is compared against later;
+#   6. the request trail (RequestTrail.cs, the report's "requests this run"
+#      section): the key folds a URL to host/first-segment and never further,
+#      the header lookup is case-blind, the line cap holds, and a record costs
+#      microseconds too.
 # Needs only the .NET 6 SDK under ~/.dotnet-local.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -44,6 +48,7 @@ cat > "$work/adblock.csproj" <<CSPROJ
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="$PWD/../../src/nui/AdHosts.cs" />
+    <Compile Include="$PWD/../../src/nui/RequestTrail.cs" />
     <EmbeddedResource Include="$PWD/../../src/nui/adhosts.txt" LogicalName="Overscan.adhosts.txt" />
   </ItemGroup>
 </Project>

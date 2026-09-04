@@ -1864,10 +1864,10 @@ Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the on
 person testing that half of this app in anger. **#20 and #53 are closed** as of
 2026-09-04: the captcha #20 is named for works (his words, 30 August), the black
 screen of #53 is fixed and confirmed from his report. This section stays the
-state of the 2025 sets across the issues that followed — #37's ad blocking
-(`build-6b29b8e`) is the one waiting on a report now, and anything he sends
-about `build-df14af8`'s address bar or `build-e9ef92f`'s remote card lands here
-too. Four builds went out on 2026-09-04 alone; the tag each bullet names is the
+state of the 2025 sets across the issues that followed — #37's ad blocking is
+the one open thread (his `build-6b29b8e` report is in, the request-trail build
+that answers it is the one waiting now), and anything he sends about
+`build-df14af8`'s address bar or `build-e9ef92f`'s remote card lands here too. Four builds went out on 2026-09-04 alone; the tag each bullet names is the
 one its report has to come from. The state is:
 
 - **The session not surviving a restart — fixed.** Shipped in `build-9d856d1`.
@@ -1994,14 +1994,21 @@ one its report has to come from. The state is:
   default, a menu row switches it (no digit is free), and the report has an
   `ad block  :` line with requests seen, refused, and the handler's average and
   worst cost. See *Refusing requests on the 2025 sets* below. Shipped in
-  `build-6b29b8e`. **Waiting on:** his first report from that build. The `ad block` line answers two questions at
-  once: whether the interceptor installed at all on his firmware (`installed,
-  N hosts` against `install failed:`), and what it costs per request. Under a
-  millisecond average is invisible; tens of milliseconds means the callback's
-  crossing into managed code is the cost and the feature is off by default from
-  the next build. A site that stops working on that build and works with the row
-  switched off is a list problem, and the `last refused:` host on the line names
-  it.
+  `build-6b29b8e`. **His report from it (2026-09-04, "there are ads on spotify
+  site on latest build") settled the hook and sank the list:** `on, installed,
+  3547 hosts | 823 requests, 1 refused | handler 0.389 ms avg, 151.14 ms max |
+  last refused: www.googletagmanager.com`. So the callback exists on his
+  firmware, costs a third of a millisecond, and refused one request in a whole
+  Spotify session. The ads never touched a listed host, and they never will:
+  Spotify serves its audio ads from its own CDNs, the same hosts the music comes
+  from (see *Spotify's ads are not on any host list* below). **The build after
+  it asks the two questions that decide the fix**, and nothing else: which hosts
+  and paths his Spotify session actually requests, and whether the request's
+  `Sec-Fetch-Dest` header reaches the callback, which is the one thing that
+  tells an `<audio>` element's load (`audio`) from the music's XHR (`empty`).
+  Both come out in a new `requests this run` section of the report. **Waiting
+  on:** his report from that build, taken after an ad has played. What it
+  decides is written under *Spotify's ads are not on any host list*.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
@@ -2064,6 +2071,85 @@ per-site exceptions were ruled out of scope on the issue.
 holds it to its answers, including the one that matters most: the sites this app
 is used on are never on the list. A list that refuses the page itself is worse
 than no list.
+
+### Spotify's ads are not on any host list
+
+`build-6b29b8e`'s report from the Spotify session that still played ads: the hook
+installed, the handler averaged 0.389 ms, and 1 request in 823 was refused
+(`www.googletagmanager.com`). That is the list working exactly as built and
+being beside the point. Where Spotify's web-player ads actually come from, and
+how the blockers that do work on it handle them, was read off the public filter
+lists and three WebView-based Spotify players (one of them a Tizen wrapper for
+`open.spotify.com`), so that nobody re-derives it from a TV:
+
+- **EasyList and uBlock's own lists carry no network rule for Spotify's ads.**
+  What they have for `open.spotify.com` is one cosmetic rule hiding the
+  leaderboard slot. Peter Lowe's list has `wl.spotify.com`, a tracking pixel.
+  The audio ads are served from `*.scdn.co/audio/`, `*.spotifycdn.com/audio/`
+  and `*.akamaized.net/audio/`, which are the same hosts and the same path the
+  music comes from, plus a few that are ad-only: `scdn.co/mp3-ad/`,
+  `adstudio-assets.scdn.co`, `amillionads.com`, `adxcel.com`, `2mdn.net`. The
+  ad *decisions* come from `spclient.wg.spotify.com/ad-logic/` and `/ads/`,
+  the same host as the playlist and metadata API. A host list cannot touch any
+  of it without taking the music down as well (`2mdn.net` is on ours already and
+  did not matter).
+- **What works on the web player is not a block.** uBlock Origin's rule set
+  (its `filters-2020.txt`, tracking uAssets #14231, #18148, #22198) answers the
+  ad's audio request with a bundled one-second silent clip, `noop-1s.mp4`
+  (3,753 bytes), and only when the request is a `media` type from
+  `open.spotify.com`. Two things in its history matter here: a 0.5-second clip
+  left the player "stuck on the ad until reloading the page" (#18148, 2023), so
+  the duration is load-bearing, and the `media` type is what keeps the same rule
+  off the music, which the player fetches by XHR. Every WebView port that
+  cannot see the type (the Android ones) restricted itself to the ad-only hosts
+  and left the shared `/audio/` paths alone, because probing them cost the
+  playback its smoothness.
+- **`ad-logic`: refused on the desktop, answered empty on the web.** The desktop
+  blocker (`abba23/spotify-adblock`) fails `spclient.wg.spotify.com/ads/` and
+  `/ad-logic/` outright and the client skips the slot. The Tizen wrapper
+  answers the same paths with an empty 200 from inside the page *and* still
+  needed a script to skip the ad when one got through. So on the web player it
+  is not known to be enough on its own; it is one of the two things the trail
+  build measures.
+
+**What the interceptor gives us.** `WebHttpRequestInterceptor` exposes `Url`,
+`Method` and the request `Headers`, and nothing that names the resource type.
+Chromium 130 writes the type into the request itself as `Sec-Fetch-Dest`
+(`audio` for an `<audio>` element, `empty` for fetch and XHR, `script`, `image`,
+…), but whether those headers are already on the request at the point where
+Tizen's hook sits is documented nowhere. That is what the `dest` column of the
+new `requests this run` section answers. The section is `RequestTrail`: one
+line per host and first path segment (never the second, which is the track
+hash), with count, refusals, methods, `Sec-Fetch-Dest`, `Sec-Fetch-Mode`,
+whether a `Range` header was seen, and the first URL seen without its query.
+Capped at 300 lines, everything past that one counter. It runs on the
+interceptor's thread under the same rules as the matcher and costs half a
+microsecond on the desktop plus whatever marshalling the engine's header map
+costs on the set, which the `handler` number will show.
+
+**What his next report decides.** Read the `requests this run` section of a
+report taken after an ad has played:
+
+- `dest=audio` on a line under `scdn.co/audio`, `spotifycdn.com/audio` or
+  `akamaized.net/audio`, with `dest=empty` on the music's line (same key or
+  another): the type reaches us, and the fix is uBlock's, done natively: answer
+  a `Sec-Fetch-Dest: audio` request to those paths from an `open.spotify.com`
+  page with the embedded one-second clip and a 200, never a 403. Music untouched.
+- `dest=-` everywhere: the headers are not on the request where the hook sits.
+  Then the fix can only key on the URL, which means the ad-only hosts and paths
+  above (silent clip) and `spclient.wg.spotify.com/ad-logic/` and `/ads/`
+  (refused), and whether that is enough is the following report's question. It
+  is what the Android ports settled for.
+- The ad's audio on a host not in the list above: the list above gains it, same
+  fix.
+- Either way the change is a **path rule for one site, with a canned response**,
+  which is past what the issue decided ("no paths, not uBlock"). The cost
+  argument does not change (the path is only looked at when the host is one of
+  a handful) but the decision is Patrick's, and it is written here so it is
+  made once.
+- What no report from him can settle is whether an ad that the player expected
+  and got a second of silence for counts against his account in some way. uBlock
+  has shipped this for years without a report of it; that is the evidence there is.
 
 ## Emulator notes
 
