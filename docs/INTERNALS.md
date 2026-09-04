@@ -1917,8 +1917,9 @@ the state is:
   of his six recent tiles were 3 KB recaptcha URLs, plus `accounts/onetap/`;
   `Store.IsWaypoint` skips those as visits and heals his history on first
   launch (`store: dropped N sign-in page(s) from history`). See *The start
-  screen was eating itself* above. Not asked for, not worth a question; his
-  next report's `start page:` line will simply be smaller.
+  screen was eating itself* above. Shipped in `build-d39d71a`. Not asked for,
+  not worth a question; his next report's `start page:` line will simply be
+  smaller.
 - **The address bar still showed when scrolling with the channel rocker — fixed,
   and the rule inverted so it cannot happen with a third button.** His 30 August
   comment: "address bar shows again & again when scrolling using channels button".
