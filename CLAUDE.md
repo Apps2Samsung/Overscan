@@ -146,6 +146,24 @@ decides. The list is
 refreshed with `tools/adhosts/update.sh`, which says where it comes from and why
 that source; commit the diff, do not fetch at build time.
 
+### The silent-clip harness
+
+Any change to `AdSilence` — the one-second clip served in place of Spotify's audio
+ads, and the hosts that get it — is exercised against a real decoder first:
+
+```sh
+tools/adsilence/run.sh
+```
+
+It compiles the shipping `.cs`, hands the bytes it builds to desktop chromium's own
+decoder, and checks what comes back is one channel at 44.1 kHz, 1.045 s long, and
+every sample exactly zero. This is the only thing we serve *as* content rather than
+refusing, and both ways it can be wrong reach us from a TV without naming it: a clip
+that does not decode leaves the player waiting on an ad that never ends ("the music
+stopped"), and one that decodes to anything but silence plays over the speakers. The
+routing — which hosts get the clip and, far more importantly, which do not — is in
+`tools/adblock/run.sh` with the rest of the matcher.
+
 ### The probe-ladder harness
 
 Any change to `NativeProbe` — the walk that asks issue #17's set whether it will map

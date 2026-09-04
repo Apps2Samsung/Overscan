@@ -2000,15 +2000,17 @@ one its report has to come from. The state is:
   last refused: www.googletagmanager.com`. So the callback exists on his
   firmware, costs a third of a millisecond, and refused one request in a whole
   Spotify session. The ads never touched a listed host, and they never will:
-  Spotify serves its audio ads from its own CDNs, the same hosts the music comes
-  from (see *Spotify's ads are not on any host list* below). **`build-f295172`
-  asks the two questions that decide the fix**, and nothing else: which hosts
-  and paths his Spotify session actually requests, and whether the request's
-  `Sec-Fetch-Dest` header reaches the callback, which is the one thing that
-  tells an `<audio>` element's load (`audio`) from the music's XHR (`empty`).
-  Both come out in a new `requests this run` section of the report. **Waiting
-  on:** his report from `build-f295172`, taken after an ad has played. What it
-  decides is written under *Spotify's ads are not on any host list*.
+  Spotify serves its audio ads from its own CDNs — which was half right, and the
+  wrong half was the half that mattered (see *The ad is on its own host after
+  all* below). `build-f295172` asked the two questions that decide the fix and
+  nothing else: which hosts and paths his Spotify session actually requests, and
+  whether `Sec-Fetch-Dest` reaches the callback. **His report from it
+  (2026-09-04) answered both**, and the second answer stopped mattering when the
+  first one came in. The fix built on it is `AdSilence`: the ad's own host,
+  answered with a second of decodable silence instead of a refusal. Shipped in
+  `build-TBD`. **Waiting on:** his report from that build, taken after an ad
+  would have played. What each answer decides is under *The ad is on its own host
+  after all*.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
@@ -2072,7 +2074,7 @@ holds it to its answers, including the one that matters most: the sites this app
 is used on are never on the list. A list that refuses the page itself is worse
 than no list.
 
-### Spotify's ads are not on any host list
+### What the blockers that work on Spotify actually do
 
 `build-6b29b8e`'s report from the Spotify session that still played ads: the hook
 installed, the handler averaged 0.389 ms, and 1 request in 823 was refused
@@ -2085,14 +2087,17 @@ lists and three WebView-based Spotify players (one of them a Tizen wrapper for
 - **EasyList and uBlock's own lists carry no network rule for Spotify's ads.**
   What they have for `open.spotify.com` is one cosmetic rule hiding the
   leaderboard slot. Peter Lowe's list has `wl.spotify.com`, a tracking pixel.
-  The audio ads are served from `*.scdn.co/audio/`, `*.spotifycdn.com/audio/`
-  and `*.akamaized.net/audio/`, which are the same hosts and the same path the
-  music comes from, plus a few that are ad-only: `scdn.co/mp3-ad/`,
-  `adstudio-assets.scdn.co`, `amillionads.com`, `adxcel.com`, `2mdn.net`. The
-  ad *decisions* come from `spclient.wg.spotify.com/ad-logic/` and `/ads/`,
-  the same host as the playlist and metadata API. A host list cannot touch any
-  of it without taking the music down as well (`2mdn.net` is on ours already and
-  did not matter).
+  The audio ads are reported as served from `*.scdn.co/audio/`,
+  `*.spotifycdn.com/audio/` and `*.akamaized.net/audio/`, which are the same
+  hosts and the same path the music comes from, plus a few that are ad-only:
+  `scdn.co/mp3-ad/`, `adstudio-assets.scdn.co`, `amillionads.com`, `adxcel.com`,
+  `2mdn.net`. The ad *decisions* come from `spclient.wg.spotify.com/ad-logic/`
+  and `/ads/`, the same host as the playlist and metadata API. Read as "a host
+  list cannot touch any of it without taking the music down as well", which is
+  what this section used to be called. **The trail build disproved that**, and
+  the ad-only entry in that list is where it went — see the next section. The
+  shared-path half may still be true for some accounts, and if his next report
+  shows it, it comes back.
 - **What works on the web player is not a block.** uBlock Origin's rule set
   (its `filters-2020.txt`, tracking uAssets #14231, #18148, #22198) answers the
   ad's audio request with a bundled one-second silent clip, `noop-1s.mp4`
@@ -2112,44 +2117,110 @@ lists and three WebView-based Spotify players (one of them a Tizen wrapper for
   is not known to be enough on its own; it is one of the two things the trail
   build measures.
 
-**What the interceptor gives us.** `WebHttpRequestInterceptor` exposes `Url`,
-`Method` and the request `Headers`, and nothing that names the resource type.
-Chromium 130 writes the type into the request itself as `Sec-Fetch-Dest`
-(`audio` for an `<audio>` element, `empty` for fetch and XHR, `script`, `image`,
-…), but whether those headers are already on the request at the point where
-Tizen's hook sits is documented nowhere. That is what the `dest` column of the
-new `requests this run` section answers. The section is `RequestTrail`: one
-line per host and first path segment (never the second, which is the track
-hash), with count, refusals, methods, `Sec-Fetch-Dest`, `Sec-Fetch-Mode`,
-whether a `Range` header was seen, and the first URL seen without its query.
-Capped at 300 lines, everything past that one counter. It runs on the
-interceptor's thread under the same rules as the matcher and costs half a
-microsecond on the desktop plus whatever marshalling the engine's header map
-costs on the set, which the `handler` number will show.
+**What the interceptor gives us, and what it does not.**
+`WebHttpRequestInterceptor` exposes `Url`, `Method` and the request `Headers`, and
+nothing that names the resource type. Chromium 130 writes the type into the request
+itself as `Sec-Fetch-Dest` (`audio` for an `<audio>` element, `empty` for fetch and
+XHR, `script`, `image`, …), but whether those headers are already on the request
+where Tizen's hook sits was documented nowhere, so `build-f295172` added the `dest`
+column to the report's `requests this run` section to find out. **The answer is no.**
+His report came back with `dest=-` on all sixty lines. It is that header and not the
+header map: `Sec-Fetch-Mode` shows `cors` on twenty of those lines and `Range` is
+read on two, and no line says `(headers threw)`, so the map is readable and
+`Sec-Fetch-Dest` is simply not on the request yet at that point. uBlock's
+discriminator is not available to us and will not become available; the column stays
+in the report because it costs nothing and a firmware that started sending it would
+be worth knowing about.
 
-**What his next report decides.** Shipped as `build-f295172`. Read the
-`requests this run` section of a report from it taken after an ad has played:
+### The ad is on its own host after all
 
-- `dest=audio` on a line under `scdn.co/audio`, `spotifycdn.com/audio` or
-  `akamaized.net/audio`, with `dest=empty` on the music's line (same key or
-  another): the type reaches us, and the fix is uBlock's, done natively: answer
-  a `Sec-Fetch-Dest: audio` request to those paths from an `open.spotify.com`
-  page with the embedded one-second clip and a 200, never a 403. Music untouched.
-- `dest=-` everywhere: the headers are not on the request where the hook sits.
-  Then the fix can only key on the URL, which means the ad-only hosts and paths
-  above (silent clip) and `spclient.wg.spotify.com/ad-logic/` and `/ads/`
-  (refused), and whether that is enough is the following report's question. It
-  is what the Android ports settled for.
-- The ad's audio on a host not in the list above: the list above gains it, same
-  fix.
-- Either way the change is a **path rule for one site, with a canned response**,
-  which is past what the issue decided ("no paths, not uBlock"). The cost
-  argument does not change (the path is only looked at when the host is one of
-  a handful) but the decision is Patrick's, and it is written here so it is
-  made once.
-- What no report from him can settle is whether an ad that the player expected
-  and got a second of silence for counts against his account in some way. uBlock
-  has shipped this for years without a report of it; that is the evidence there is.
+The rest of that same report made the missing header stop mattering. The two lines
+of the `requests this run` section that decide everything:
+
+```
+count  answered  method  dest  mode  range  host/first-segment
+265    -         GET     -     -     yes    audio-ak.spotifycdn.com/audio     the music
+  8    -         GET     -     -     yes    adstudio-assets.scdn.co/mp3       the ad
+```
+
+Different hosts entirely, so the ad is separable **by address alone** — no path rule,
+no resource type, nothing the issue said it did not want. `adstudio-assets.scdn.co`
+is Spotify's Ad Studio creative CDN and carries nothing else; the music resolves
+through `storage-resolve/v2/files/audio/...` to `*.spotifycdn.com/audio/<hash>` (the
+same hash appears on both lines of his trail) and never goes near it. It was already
+in the ad-only list read off the public blockers above, and it was not in
+`adhosts.txt`, which is why nothing stopped it. So the sentence in the reply that
+went with `build-f295172` — that the ads come off the same hosts and the same
+`/audio/` path as the music, so no host list can touch them — was wrong for his
+session, and the report he sent is what says so.
+
+**Why it is not simply added to the list.** A 403 is the right answer for a tracker
+and the wrong one for audio the player is waiting on. Spotify's web player treats the
+ad slot as a track: it starts the ad's audio, waits for it to end, and only then
+moves to the music. A failed load is not an ending. uBlock learned this twice
+(uAssets #18148): its half-second clip left the player "stuck on the ad until
+reloading the page", so what ships there is not a block but a **substitution** —
+the ad's request is answered with a real one-second silent clip. `AdSilence` does
+the same thing natively:
+
+- The host list that gets the clip lives in `AdSilence.cs`, **not** in
+  `adhosts.txt`, because `tools/adhosts/update.sh` rewrites that file wholesale from
+  Peter Lowe's list and an entry added there by hand survives until the next refresh.
+  It matches through `AdHosts` so there is still only one matcher in the app.
+- The clip is forty MPEG-1 Layer III frames built byte by byte: header `FF FB 10 C4`
+  (MPEG-1, Layer III, no CRC, 32 kbit/s, 44.1 kHz, mono) and a hundred zero bytes
+  each. Zeroed side info means `part2_3_length = 0` in both granules, so there is no
+  Huffman data to read and every coefficient is zero — the frame decodes to silence
+  rather than to noise. 104 bytes and 1152/44100 s per frame, so forty of them are
+  4,160 bytes and 1.045 s. It is built rather than committed as a binary so that what
+  ships can be read, and there is no Xing header, which is correct for constant
+  bitrate.
+- No `Content-Length` of ours goes with it. The engine derives one from the body,
+  which is what the 403 path has always done and it reaches the set as an ordinary
+  failed load; a second one from us would be a duplicate header on a response a media
+  decoder is about to read.
+- The report's `ad block` line gains a `silenced` count and a `last silenced:` host,
+  both printed whether or not they have moved — a zero there is the answer to "did an
+  ad ever reach the hook", and an absent field could not tell that apart from a
+  session with no ad in it. The trail's second column is now headed `answered`
+  rather than `refused`, because a silenced ad did not leave the TV either.
+
+**`spclient.wg.spotify.com/ads/` is deliberately still untouched.** The desktop
+blocker fails it outright and the client skips the slot, but that host also serves
+the playlist, metadata and collection APIs, so keying on it needs the path rule this
+change did not need, and its value on the *web* player is unproven (the Tizen wrapper
+that answers those paths empty still needed a script to skip ads that got through).
+Leaving it out is what keeps this build's one question answerable.
+
+**What the harnesses hold this to.** `tools/adblock/run.sh` gained the routing: the
+ad host and its subdomains silenced, the music's hosts and the seven neighbours a
+careless parent-domain rule would take with it not, and the clip's framing and
+length. `tools/adsilence/run.sh` is new and asks the only question a reading of the
+MPEG spec cannot answer — it compiles the shipping `AdSilence.cs`, hands the bytes it
+produces to a desktop Chromium's own decoder, and checks what comes back is one
+channel at 44.1 kHz, 1.045 s long, with every sample exactly zero. It decodes through
+`OfflineAudioContext` rather than playing an `<audio>` element because headless chrome
+has no audio device and never advances a media clock, so a `play()`-to-`ended` test
+there passes by timing out. Both failure modes were checked by breaking the clip on
+purpose: a broken sync word fails the decode, and a half-length clip — uBlock's own
+bug — fails the duration.
+
+**What his next report decides.** Shipped as `build-TBD`. The `ad block` line:
+
+- `silenced` above zero and the music playing: it works, and the feature is done.
+- `silenced` above zero and the player stuck on the ad: the clip decodes but the
+  player wants something else from it — length, or a `Content-Length`, or a
+  `206` answer to its `Range`. Those are three more builds and each is a guess, so
+  that answer is the one that would make this not worth continuing on the web player.
+- `silenced: 0` with ads still audible: the ad came from somewhere else this time,
+  and the `requests this run` section names the host it came from — one more list
+  entry, same fix.
+- Anything on Spotify that worked before and does not now: the clip is being served
+  where it should not be, and `last silenced:` names the host that did it.
+
+What no report from him can settle is whether an ad that the player expected and got
+a second of silence for counts against his account in some way. uBlock has shipped
+this for years without a report of it; that is the evidence there is.
 
 ## Emulator notes
 

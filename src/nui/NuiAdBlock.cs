@@ -42,6 +42,12 @@ namespace Overscan
     /// A refused request gets a 403 with an empty body rather than a hang or a
     /// connection error. The page sees an ordinary failed load, which is the case
     /// every site already handles; a stalled request is the case none of them do.
+    ///
+    /// The one exception is <see cref="AdSilence"/>: a handful of hosts serve audio
+    /// the page is *waiting on*, and a failed load is not something those pages
+    /// carry on from — they sit on the ad. Those are answered with a real one-second
+    /// silent clip and a 200 instead. It is the same decision as a refusal, taken on
+    /// the same host list, and only the answer differs.
     /// </remarks>
     internal static class NuiAdBlock
     {
@@ -56,10 +62,12 @@ namespace Overscan
 
         private static long _seen;
         private static long _refused;
+        private static long _silenced;
         private static long _failed;
         private static long _ticks;
         private static long _maxTicks;
         private static string _lastRefused = "(none yet)";
+        private static string _lastSilenced = "(none yet)";
 
         /// <summary>How installation went, for the report. Never throws.</summary>
         public static string LastResult = "(not installed)";
@@ -83,6 +91,13 @@ namespace Overscan
             {
                 _hosts = AdHosts.LoadEmbedded();
 
+                // Built here, on the main thread, and not left to the first request
+                // that happens to be for an ad. A static initialiser that throws
+                // throws once and stays thrown: every later request would take the
+                // handler's outer catch and be ignored, so the whole feature would
+                // go quiet rather than fail, on the thread with no way to say so.
+                int clipBytes = AdSilence.Clip.Length;
+
                 WebContext context = web == null ? null : web.Context;
                 if (context == null)
                 {
@@ -92,7 +107,7 @@ namespace Overscan
 
                 _callback = OnRequest;
                 context.RegisterHttpRequestInterceptedCallback(_callback);
-                LastResult = "installed, " + _hosts.Count + " hosts";
+                LastResult = "installed, " + _hosts.Count + " hosts, " + clipBytes + "-byte clip";
             }
             catch (Exception ex)
             {
@@ -134,10 +149,16 @@ namespace Overscan
 
                 string host = null;
                 bool refuse = false;
-                if (_enabled && _hosts != null)
+                bool silence = false;
+                if (_enabled)
                 {
                     host = AdHosts.HostOf(url);
-                    refuse = _hosts.Matches(host);
+
+                    // Asked first, and independent of the embedded list: these hosts
+                    // are answered rather than refused, and the list they are on is
+                    // in the app rather than in adhosts.txt, which update.sh rewrites.
+                    silence = AdSilence.Matches(host);
+                    refuse = silence || (_hosts != null && _hosts.Matches(host));
                 }
 
                 if (!refuse)
@@ -146,16 +167,42 @@ namespace Overscan
                 }
                 else
                 {
-                    Interlocked.Increment(ref _refused);
-                    _lastRefused = host;
+                    int status;
+                    string reason;
+                    string contentType;
+                    byte[] body;
+                    if (silence)
+                    {
+                        Interlocked.Increment(ref _silenced);
+                        _lastSilenced = host;
+                        status = 200;
+                        reason = "OK";
+                        contentType = AdSilence.ContentType;
+                        body = AdSilence.Clip;
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref _refused);
+                        _lastRefused = host;
+                        status = 403;
+                        reason = "Refused by Overscan";
+                        contentType = "text/plain";
+                        body = EmptyBody;
+                    }
 
                     // Status, then body. The body call is the last thing allowed on
                     // the object; if the status call fails the request is still
                     // ours to hand back, so it is ignored rather than left hanging.
-                    if (request.SetResponseStatus(403, "Refused by Overscan"))
+                    //
+                    // No Content-Length of ours goes with it. The engine derives one
+                    // from the body — that is what the 403 path has always done and
+                    // it arrives on the set as an ordinary failed load — and a second
+                    // one from us would be a duplicate header on a response a media
+                    // decoder is about to read.
+                    if (request.SetResponseStatus(status, reason))
                     {
-                        request.AddResponseHeader("Content-Type", "text/plain");
-                        if (!request.SetResponseBody(EmptyBody))
+                        request.AddResponseHeader("Content-Type", contentType);
+                        if (!request.SetResponseBody(body))
                         {
                             Interlocked.Increment(ref _failed);
                         }
@@ -201,6 +248,7 @@ namespace Overscan
         {
             long seen = Interlocked.Read(ref _seen);
             long refused = Interlocked.Read(ref _refused);
+            long silenced = Interlocked.Read(ref _silenced);
             long failed = Interlocked.Read(ref _failed);
             long ticks = Interlocked.Read(ref _ticks);
             long maxTicks = Interlocked.Read(ref _maxTicks);
@@ -218,10 +266,15 @@ namespace Overscan
                     ticks * msPerTick / seen, maxTicks * msPerTick);
             }
 
+            // The silenced count is printed whether or not it has moved: a zero
+            // there is the answer to "did an ad ever reach the hook", and an absent
+            // field could not tell that apart from an ad that was never played.
             return (_enabled ? "on" : "off") + ", " + LastResult +
-                   " | " + seen + " requests, " + refused + " refused" +
+                   " | " + seen + " requests, " + refused + " refused, " + silenced + " silenced" +
                    (failed > 0 ? ", " + failed + " could not be answered" : string.Empty) +
-                   " | " + timing + " | last refused: " + _lastRefused;
+                   " | " + timing +
+                   " | last refused: " + _lastRefused +
+                   " | last silenced: " + _lastSilenced;
         }
     }
 }

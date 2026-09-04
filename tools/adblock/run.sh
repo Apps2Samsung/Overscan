@@ -21,7 +21,12 @@
 #   6. the request trail (RequestTrail.cs, the report's "requests this run"
 #      section): the key folds a URL to host/first-segment and never further,
 #      the header lookup is case-blind, the line cap holds, and a record costs
-#      microseconds too.
+#      microseconds too;
+#   7. the hosts answered with a second of silence instead of a 403
+#      (AdSilence.cs): the ad's host and every subdomain of it, none of the
+#      music's hosts, and the clip's framing and length. Whether that clip
+#      actually decodes is a question for a decoder, and that is a separate
+#      harness: tools/adsilence/run.sh.
 # Needs only the .NET 6 SDK under ~/.dotnet-local.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -48,6 +53,7 @@ cat > "$work/adblock.csproj" <<CSPROJ
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="$PWD/../../src/nui/AdHosts.cs" />
+    <Compile Include="$PWD/../../src/nui/AdSilence.cs" />
     <Compile Include="$PWD/../../src/nui/RequestTrail.cs" />
     <EmbeddedResource Include="$PWD/../../src/nui/adhosts.txt" LogicalName="Overscan.adhosts.txt" />
   </ItemGroup>
