@@ -897,6 +897,21 @@ Anything still unrecognised prints its own name on the remote card in the corner
 not only in the diagnostics log. The user who most needs to report an unknown button
 is the one whose remote cannot reach the diagnostics screen.
 
+**The remote card is the surface that teaches the keys.** Issue #38, decided
+2026-09-04. Before that every function was written down somewhere — the start
+screen, a menu row, the card — but never in the same place, and the start screen
+was the only one a first-time user read. #20's reporter asked for channel-rocker
+scrolling that had existed since the first release, and found key `5` only because
+a release note told him to press it. So: the card (`7`) lists **every** key the
+build answers to, each with the one line that says what it is for and when to reach
+for it, because the card is the only surface visible while a page is open, which
+is when the question occurs. The start screen's hint is cut to the four things that
+get somebody unstuck on the first evening — `0`, `7`, `9`, the rocker — plus the one
+keyboard fact nothing else shows (`start` sets the opening page). Menu rows stay
+labels with their shortcut. A fifth place saying the same thing in slightly
+different words is the thing that must not be added; a new key goes on the card
+with its reason, and nowhere else.
+
 ## The D-pad pointer
 
 chromium-efl exposes no way for an app to inject synthetic mouse input (the NUI
@@ -1964,7 +1979,9 @@ the state is:
   `trusted=true&x=130&y=50` — a real click, delivered — on a run where the parent
   page has no way to know it. That is the same shape as the TV's `none/none`.
 - **Scrolling with the channel rocker — asked for, and it already existed.**
-  Documented; the general problem is #38.
+  Documented; the general problem was #38, settled: the remote card teaches every
+  key with its reason, the start screen only points at the card. See *Remotes
+  without a numpad* above.
 - **Ad blocking — built, #37, shipped alone in its build.** `NuiAdBlock`
   registers on the `WebContext`'s request-intercepted callback and answers a
   request to a listed host with an empty 403 before it leaves the TV; everything
@@ -1972,8 +1989,8 @@ the state is:
   compiled in; the match is whole host or any parent domain, nothing else. On by
   default, a menu row switches it (no digit is free), and the report has an
   `ad block  :` line with requests seen, refused, and the handler's average and
-  worst cost. See *Refusing requests on the 2025 sets* below. **Waiting on:** his
-  first report from that build. The `ad block` line answers two questions at
+  worst cost. See *Refusing requests on the 2025 sets* below. Shipped in
+  `build-6b29b8e`. **Waiting on:** his first report from that build. The `ad block` line answers two questions at
   once: whether the interceptor installed at all on his firmware (`installed,
   N hosts` against `install failed:`), and what it costs per request. Under a
   millisecond average is invisible; tens of milliseconds means the callback's
