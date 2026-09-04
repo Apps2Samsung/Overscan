@@ -15,7 +15,12 @@ namespace Overscan
     /// </summary>
     internal static class HomePage
     {
-        /// <summary>Marks the generated page so history does not record it.</summary>
+        /// <summary>
+        /// Marks the generated page so history does not record it — on the builds
+        /// whose engine accepts a base URL. The NUI WebView does not, and reports
+        /// the page as a <c>data:</c> URL instead; <see cref="Store.IsGenerated"/>
+        /// knows both shapes, and is the check to use rather than this constant.
+        /// </summary>
         public const string BaseUrl = "https://overscan.start/";
 
         public static string Build(IList<Bookmark> favourites, IList<Bookmark> history, string searchUrl)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Tizen.Applications;
 using Tizen.NUI;
@@ -127,6 +128,15 @@ namespace Overscan
         /// <summary>What that load was for, so a recovery retries it and not home.</summary>
         private string _loadAskedFor;
         private int _blankRecoveries;
+
+        /// <summary>
+        /// How big the start screen was the last time it was built, for the report.
+        /// Issue #53's black screen was a start screen that had grown past what
+        /// the engine will load, and nothing on the report said how large the page
+        /// it was refusing had got. Volatile for the same reason as
+        /// <see cref="_blankState"/>.
+        /// </summary>
+        private volatile string _startPageState = "(not built yet)";
 
         /// <summary>
         /// What the blank-view watchdog has had to do, for the report. Volatile
@@ -866,18 +876,36 @@ namespace Overscan
             Breadcrumbs.Drop("no load began within " + BlankViewSeconds + "s (attempt " +
                              _blankRecoveries + ")");
 
-            if (_blankRecoveries == 1)
+            // The start screen gets a rung of its own in front of the others, and
+            // issue #53 is why. Its set walked the whole ladder — new view, cleared
+            // session, new view again — and every rung asked for the *same* page,
+            // which was the one thing wrong: a start screen that had swallowed
+            // eight copies of itself and outgrown what the engine will load. A
+            // typed address loaded first time on the "dead" view. So when what
+            // failed is the page this app generates, the first thing to change is
+            // the page, and <see cref="ShowHome"/> builds it bare while a recovery
+            // is in progress; the report then carries its size either way.
+            bool startScreen = _loadAskedFor == null;
+            int rung = startScreen ? _blankRecoveries : _blankRecoveries + 1;
+
+            if (rung == 1)
             {
-                _blankState = "no load began — rebuilt the view";
+                _blankState = "start screen would not load — shown without its tiles";
+                Flash("The start screen would not load — showing it without your tiles");
+            }
+            else if (rung == 2)
+            {
+                _blankState = (startScreen ? "bare start screen" : "no load") +
+                              " would not load either — rebuilt the view";
                 Flash("Nothing loaded — starting the browser engine over");
                 if (!RebuildWebView())
                 {
                     return;
                 }
             }
-            else if (_blankRecoveries == 2)
+            else if (rung == 3)
             {
-                _blankState = "no load began twice — cleared the session and rebuilt";
+                _blankState = "still nothing after a rebuild — cleared the session and rebuilt";
                 Flash("Still nothing — clearing saved sign-ins and trying once more");
                 ClearStoredSession();
                 if (!RebuildWebView())
@@ -887,9 +915,12 @@ namespace Overscan
             }
             else
             {
-                _blankState = "the web view is not starting loads at all";
+                // Not "at all": issue #53's set reached this rung and then loaded a
+                // typed address at the first ask. What is known here is only that
+                // *this* load will not begin, so that is what gets said.
+                _blankState = "the web view is not starting this load";
                 Breadcrumbs.Drop(_blankState);
-                Flash("Nothing will load. Open http://<this TV>:8081 for the report.");
+                Flash("This will not load. Try typing an address (0). Report at http://<this TV>:8081");
                 return;
             }
 
@@ -1828,9 +1859,27 @@ namespace Overscan
                 _atHome = true;
                 _loadAskedAt = DateTime.UtcNow;
                 _loadAskedFor = null;
-                _web.LoadHtmlString(HomePage.Build(Store.AllFavourites, Store.RecentHistory, Urls.Home));
+
+                // Bare while the blank-view ladder is climbing — see
+                // CheckSomethingLoaded. The tiles are the only part of this page
+                // that changes from one launch to the next, so they are the part a
+                // recovery has to take away to learn anything.
+                bool bare = _blankRecoveries > 0;
+                IList<Bookmark> favourites = bare ? new List<Bookmark>() : Store.AllFavourites;
+                IList<Bookmark> history = bare ? new List<Bookmark>() : Store.RecentHistory;
+                string html = HomePage.Build(favourites, history, Urls.Home);
+
+                // The engine carries this page as a percent-encoded data: URL, so
+                // what it is asked to load is a few times this long, and Chromium
+                // refuses any URL past 2 MB in silence. The report says how close.
+                _startPageState = (html.Length / 1024) + " KB of HTML, " +
+                                  Math.Min(favourites.Count, 12) + " favourite + " +
+                                  Math.Min(history.Count, 8) + " recent tiles" +
+                                  (bare ? "  (bare — recovering)" : string.Empty);
+
+                _web.LoadHtmlString(html);
                 _cursor.Center();
-                DiagLog.Add("home screen shown");
+                DiagLog.Add("home screen shown" + (bare ? " (bare)" : string.Empty));
             }
             catch (Exception ex)
             {
@@ -2036,6 +2085,7 @@ namespace Overscan
                   "video cap : " + NuiVideoCap.LastAction + "\n" +
                   "video rect: " + NuiVideoRect.LastBox + "\n" +
                   "blank view: " + _blankState + "\n" +
+                  "start page: " + _startPageState + "\n" +
                   "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
                   "last words: " + NuiDeathWatch.LastWord + "\n" +
                   "stderr    : " + NativeStdErr.SessionState + "\n" +
