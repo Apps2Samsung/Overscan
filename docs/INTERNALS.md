@@ -1419,6 +1419,24 @@ that retries the same request on a different substrate has not changed the one
 thing the request itself could be wrong about.** Rebuilding the view answered
 "is the view broken" three times; nobody had asked "is the page".
 
+**The report that confirmed the fix showed the next thing.** His healed start
+page was 9 KB with six recent tiles, all of them named `instagram.com`, and two
+of them were `auth_platform/recaptcha/?apc=<3 KB token>` — the captcha page,
+recorded as a visit because it loaded, indistinguishable on the screen from the
+real one, and a dead end if opened (the token is spent). `accounts/onetap/` and
+`auth_platform/codeentry/` are the same kind of page. So `Store.IsWaypoint` now
+refuses a visit whose path has a whole segment naming a sign-in step
+(`recaptcha`, `oauth2`, `login`, `onetap`, ... — the list is in the source with
+the reason for each) or whose URL is over 1 KB, which nobody typed and no tile
+can show; `Init` drops any an earlier build recorded, from history only, and
+logs `store: dropped N sign-in page(s) from history`. Favourites are never
+filtered this way — pressing `8` is a decision. The match is on path segments,
+not on the host or the query or by substring, because `login.example.com` is a
+site and `/daily-challenge/` is a page; the harness holds both of those as
+kept. The 1 KB ceiling is also the second guard on the start page's size: the
+page carries every recent URL inside itself, and #53 is what an unbounded one
+does.
+
 ### The reels death is not an eviction, and it leaves no line at all
 
 `build-c0cd5ab` is the first build whose heartbeat survived to the end of a run,
@@ -1895,6 +1913,12 @@ the state is:
   *bare* start screen loaded, which separates the page from the view for good.
 - **The captcha — answered: it works.** His 2026-08-30 comment: "captcha works
   now tried on instagram, spotify site". That is the thing #20 is named for.
+- **Sign-in pages as recent tiles — fixed, from his `build-87100d9` report.** Two
+  of his six recent tiles were 3 KB recaptcha URLs, plus `accounts/onetap/`;
+  `Store.IsWaypoint` skips those as visits and heals his history on first
+  launch (`store: dropped N sign-in page(s) from history`). See *The start
+  screen was eating itself* above. Not asked for, not worth a question; his
+  next report's `start page:` line will simply be smaller.
 - **The address bar still showed when scrolling with the channel rocker — fixed,
   and the rule inverted so it cannot happen with a third button.** His 30 August
   comment: "address bar shows again & again when scrolling using channels button".

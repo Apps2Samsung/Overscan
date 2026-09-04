@@ -18,9 +18,14 @@
 #   2. a history file an earlier build wrote, generated pages included, is healed
 #      on load and written back clean;
 #   3. twelve start screens in a row, each recorded the way the NUI engine would
-#      report it, leave the page the size it started at.
+#      report it, leave the page the size it started at;
+#   4. a sign-in waypoint (a captcha, a code entry, an OAuth step, a URL too long
+#      to be anything but a token) is passed through and not recorded, while a
+#      host or a fragment that merely contains one of those words is kept;
+#   5. a history file with waypoints in it is healed on load, favourites untouched.
 # Number 3 is the bug itself: against the Store.cs before this fix it fails on
-# the second screen.
+# the second screen. Numbers 4 and 5 are the same reporter's next report: six
+# recent tiles, two of them 3 KB recaptcha pages nobody can go back to.
 set -euo pipefail
 cd "$(dirname "$0")"
 

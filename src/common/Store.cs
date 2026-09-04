@@ -57,6 +57,15 @@ namespace Overscan
                 DiagLog.Add("store: dropped " + dropped + " generated page(s) that had been saved as visits");
             }
 
+            // Same idea, one level down: the sign-in waypoints an earlier build
+            // recorded as visits. History only — a favourite is something a person
+            // pressed a key for, and stays whatever it points at.
+            int passed = DropWaypoints(History, "history.tsv");
+            if (passed > 0)
+            {
+                DiagLog.Add("store: dropped " + passed + " sign-in page(s) from history");
+            }
+
             DiagLog.Add("store: " + Favourites.Count + " favourites, " + History.Count +
                         " history, " + Settings.Count + " settings");
         }
@@ -92,6 +101,91 @@ namespace Overscan
 
             return url.StartsWith(HomePage.BaseUrl, StringComparison.Ordinal) ||
                    url.StartsWith("data:", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Longest URL worth keeping as a visit. Nobody typed a longer one, no tile
+        /// can show it, and every one of them is a token some site put in the
+        /// address for its own use — issue #53's report has recaptcha pages at
+        /// 3 KB apiece sitting in the reporter's recent tiles. The start screen
+        /// carries every recent URL inside itself, and #53 is what happens when
+        /// that page is allowed to grow without anyone watching, so the ceiling
+        /// is part of keeping it small as well as tidy.
+        /// </summary>
+        private const int VisitUrlLimit = 1024;
+
+        /// <summary>
+        /// Path segments that mark a page a sign-in flow passes through on the way
+        /// to somewhere else: the captcha, the code entry, the consent screen, the
+        /// "continue as" page. Matched as whole segments of the path, lower-case,
+        /// never against the host or the query — <c>login.example.com/</c> is a
+        /// site, <c>/daily-challenge/</c> is a page somebody may want back, and
+        /// neither should be touched. These are the shapes seen in real trails
+        /// (Instagram's <c>auth_platform/recaptcha/</c>, <c>auth_platform/codeentry/</c>
+        /// and <c>accounts/onetap/</c>) plus the names OAuth and the big identity
+        /// providers use for the same steps.
+        /// </summary>
+        private static readonly string[] WaypointSegments =
+        {
+            "auth_platform", "recaptcha", "captcha", "challenge", "onetap", "codeentry",
+            "oauth", "oauth2", "authorize", "consent", "sso", "signin", "sign-in", "login",
+        };
+
+        /// <summary>
+        /// Whether a URL is a page a user passes through rather than one they went
+        /// to: a step of a sign-in flow, or an address too long to be anything but a
+        /// token. Not recorded as a visit, because revisiting it either fails (the
+        /// token is spent) or bounces straight to the page it was in front of, and
+        /// on the start screen it shows as yet another tile named after the site's
+        /// host with nothing to tell it apart from the real one. Favourites are not
+        /// filtered by this — a favourite is an explicit act.
+        /// </summary>
+        public static bool IsWaypoint(string url)
+        {
+            if (string.IsNullOrEmpty(url))
+            {
+                return false;
+            }
+
+            if (url.Length > VisitUrlLimit)
+            {
+                return true;
+            }
+
+            // Path only: after the host, before the query or fragment.
+            int start = url.IndexOf("://", StringComparison.Ordinal);
+            start = start < 0 ? 0 : url.IndexOf('/', start + 3);
+            if (start < 0)
+            {
+                return false;
+            }
+
+            int end = url.Length;
+            int query = url.IndexOf('?', start);
+            if (query >= 0)
+            {
+                end = query;
+            }
+
+            int fragment = url.IndexOf('#', start);
+            if (fragment >= 0 && fragment < end)
+            {
+                end = fragment;
+            }
+
+            string[] segments = url.Substring(start, end - start).ToLowerInvariant().Split('/');
+            for (int i = 0; i < segments.Length; i++)
+            {
+                for (int j = 0; j < WaypointSegments.Length; j++)
+                {
+                    if (segments[i] == WaypointSegments[j])
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         public static IList<Bookmark> AllFavourites
@@ -140,6 +234,12 @@ namespace Overscan
 
             // The home page is generated, not visited — in either of its shapes.
             if (IsGenerated(url))
+            {
+                return;
+            }
+
+            // A sign-in step is passed through, not visited.
+            if (IsWaypoint(url))
             {
                 return;
             }
@@ -213,6 +313,27 @@ namespace Overscan
             for (int i = list.Count - 1; i >= 0; i--)
             {
                 if (IsGenerated(list[i].Url))
+                {
+                    list.RemoveAt(i);
+                    dropped++;
+                }
+            }
+
+            if (dropped > 0)
+            {
+                Save(fileName, list);
+            }
+
+            return dropped;
+        }
+
+        /// <summary>Removes sign-in waypoints an earlier build recorded, and saves if any were.</summary>
+        private static int DropWaypoints(List<Bookmark> list, string fileName)
+        {
+            int dropped = 0;
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                if (IsWaypoint(list[i].Url))
                 {
                     list.RemoveAt(i);
                     dropped++;

@@ -102,6 +102,59 @@ namespace Overscan
             Check(last == first, "twelve start screens later the page is still " + last + " chars (was " + first + ")");
             Check(Store.RecentHistory.Count == 1, "and history still holds the one real visit");
 
+            // 4. Sign-in waypoints are passed through, not visited. The three shapes
+            //    are Instagram's, straight from issue #53's report; the long one is
+            //    the same recaptcha page with its real-length token.
+            string wayDir = Path.Combine(dir, "waypoints");
+            Directory.CreateDirectory(wayDir);
+            Store.Init(wayDir);
+            Store.RecordVisit("https://www.instagram.com/", "Instagram");
+            Store.RecordVisit("https://www.instagram.com/auth_platform/recaptcha/?apc=Q8HeCgM0", "Instagram");
+            Store.RecordVisit("https://www.instagram.com/auth_platform/codeentry/?apc=AdqowNHA", "Instagram");
+            Store.RecordVisit("https://www.instagram.com/accounts/onetap/", "Instagram");
+            Store.RecordVisit("https://accounts.google.com/o/oauth2/v2/auth?client_id=1", "Sign in");
+            Store.RecordVisit("https://example.com/Login?next=%2F", "Log in");
+            Store.RecordVisit("https://example.com/page#/challenge", "Fragment is not path");
+            Store.RecordVisit("https://example.com/p?q=" + new string('x', 1100), "Token");
+            Store.RecordVisit("https://login.example.com/", "Host is not path");
+            Store.RecordVisit("https://example.com/daily-challenge/", "Whole segments only");
+            Store.RecordVisit("https://www.instagram.com/reels/DcrJqxByZTE/", "Instagram");
+            Check(Store.RecentHistory.Count == 5,
+                  "five real visits kept, six waypoints skipped (" + Store.RecentHistory.Count + " entries)");
+            Check(Store.RecentHistory[0].Url == "https://www.instagram.com/reels/DcrJqxByZTE/" &&
+                  Store.RecentHistory[1].Url == "https://example.com/daily-challenge/" &&
+                  Store.RecentHistory[2].Url == "https://login.example.com/" &&
+                  Store.RecentHistory[3].Url == "https://example.com/page#/challenge" &&
+                  Store.RecentHistory[4].Url == "https://www.instagram.com/",
+                  "and they are the right five");
+            Check(Store.ToggleFavourite("https://www.instagram.com/accounts/onetap/", "Instagram") &&
+                  Store.AllFavourites.Count == 1,
+                  "a waypoint can still be kept as a favourite on purpose");
+
+            // 5. A history file with waypoints in it is healed on load; favourites are not touched.
+            string wayHealDir = Path.Combine(dir, "waypoints-heal");
+            Directory.CreateDirectory(wayHealDir);
+            File.WriteAllLines(Path.Combine(wayHealDir, "history.tsv"), new[]
+            {
+                "https://www.instagram.com/\tInstagram",
+                "https://www.instagram.com/auth_platform/recaptcha/?apc=Q8HeCgM0\tInstagram",
+                "https://www.instagram.com/accounts/onetap/\tInstagram",
+                "https://www.instagram.com/reels/DcrJqxByZTE/\tInstagram",
+            });
+            File.WriteAllLines(Path.Combine(wayHealDir, "favourites.tsv"), new[]
+            {
+                "https://www.instagram.com/accounts/onetap/\tInstagram",
+            });
+            DiagLog.Lines.Clear();
+            Store.Init(wayHealDir);
+            Check(Store.RecentHistory.Count == 2 && Store.AllFavourites.Count == 1,
+                  "waypoints dropped from history only (history " + Store.RecentHistory.Count +
+                  ", favourites " + Store.AllFavourites.Count + ")");
+            Check(File.ReadAllLines(Path.Combine(wayHealDir, "history.tsv")).Length == 2,
+                  "history written back clean");
+            Check(DiagLog.Lines.Exists(l => l.Contains("dropped 2 sign-in")),
+                  "the log says how many: " + string.Join(" | ", DiagLog.Lines));
+
             Console.WriteLine();
             Console.WriteLine(_failures == 0 ? "startpage: all checks passed" : "startpage: FAILED (" + _failures + ")");
             return _failures == 0 ? 0 : 1;
