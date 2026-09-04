@@ -1865,8 +1865,8 @@ person testing that half of this app in anger. **#20 and #53 are closed** as of
 2026-09-04: the captcha #20 is named for works (his words, 30 August), the black
 screen of #53 is fixed and confirmed from his report. This section stays the
 state of the 2025 sets across the issues that followed — #37's ad blocking is
-the one open thread (his `build-6b29b8e` report is in, the request-trail build
-that answers it is the one waiting now), and anything he sends about
+the one open thread (his `build-6b29b8e` report is in, `build-f295172`, the
+request-trail build that answers it, is the one waiting now), and anything he sends about
 `build-df14af8`'s address bar or `build-e9ef92f`'s remote card lands here too. Four builds went out on 2026-09-04 alone; the tag each bullet names is the
 one its report has to come from. The state is:
 
@@ -2001,13 +2001,13 @@ one its report has to come from. The state is:
   firmware, costs a third of a millisecond, and refused one request in a whole
   Spotify session. The ads never touched a listed host, and they never will:
   Spotify serves its audio ads from its own CDNs, the same hosts the music comes
-  from (see *Spotify's ads are not on any host list* below). **The build after
-  it asks the two questions that decide the fix**, and nothing else: which hosts
+  from (see *Spotify's ads are not on any host list* below). **`build-f295172`
+  asks the two questions that decide the fix**, and nothing else: which hosts
   and paths his Spotify session actually requests, and whether the request's
   `Sec-Fetch-Dest` header reaches the callback, which is the one thing that
   tells an `<audio>` element's load (`audio`) from the music's XHR (`empty`).
   Both come out in a new `requests this run` section of the report. **Waiting
-  on:** his report from that build, taken after an ad has played. What it
+  on:** his report from `build-f295172`, taken after an ad has played. What it
   decides is written under *Spotify's ads are not on any host list*.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
@@ -2127,8 +2127,8 @@ interceptor's thread under the same rules as the matcher and costs half a
 microsecond on the desktop plus whatever marshalling the engine's header map
 costs on the set, which the `handler` number will show.
 
-**What his next report decides.** Read the `requests this run` section of a
-report taken after an ad has played:
+**What his next report decides.** Shipped as `build-f295172`. Read the
+`requests this run` section of a report from it taken after an ad has played:
 
 - `dest=audio` on a line under `scdn.co/audio`, `spotifycdn.com/audio` or
   `akamaized.net/audio`, with `dest=empty` on the music's line (same key or
