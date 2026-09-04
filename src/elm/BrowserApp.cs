@@ -627,10 +627,10 @@ namespace Overscan
         private void BuildHints()
         {
             Size screen = _window.ScreenSize;
-            int width = 470;
+            int width = 680;
             // One row taller than the rows need, because the last line of this card
             // is the unrecognised-button report and it must not fall off the bottom.
-            int height = 560;
+            int height = 720;
             int left = screen.Width - width - 40;
             int top = screen.Height - height - 40;
 
@@ -661,6 +661,12 @@ namespace Overscan
         /// The contents of the remote card. Re-rendered rather than built once,
         /// because the last line of it changes: an unrecognised button reports its
         /// own name there.
+        ///
+        /// This card is the surface that teaches the keys (issue #38): every key
+        /// this build answers to, each with the one line that says what it is for.
+        /// It is the only surface visible while a page is open, which is when a
+        /// question about a key occurs. The start screen points here and says
+        /// little else; the menu rows stay labels.
         /// </summary>
         private void DrawHints()
         {
@@ -668,18 +674,21 @@ namespace Overscan
             // is the only row on this card that can be acted on at all, and a list
             // opening with eight things the user cannot do reads as "this app is
             // not for your remote" (issue #27).
-            string[][ ] rows =
+            string[][] rows =
             {
-                new[] { "hold OK", "menu" },
-                new[] { "Ch up/down", "scroll the page" },
-                new[] { "0", "address bar" },
-                new[] { "1", "identify as…" },
+                new[] { "hold OK", "menu — every action, on any remote" },
+                new[] { "Ch up/down", "scroll a page" },
+                new[] { "0", "type an address" },
+                new[] { "1", "identify as… — a lighter site, or desktop" },
                 new[] { "2", "pointer style" },
-                new[] { "3", "diagnostics" },
-                new[] { "4", "keys to page" },
-                new[] { "5", "type in field" },
-                new[] { "6", "fit page" },
-                new[] { "7", "hide this" },
+                new[] { "3", "diagnostics — the report at :8081" },
+                new[] { "4", "keys to page — when a search box is dead" },
+                new[] { "5", "type in the field you clicked" },
+                new[] { "6", "fit page — when the page is cut off" },
+                new[] { "7", "hide this card" },
+                new[] { "8", "keep this page as a tile" },
+                new[] { "9", "start screen" },
+                new[] { "Info", "images off — the one real speed-up" },
             };
 
             var text = new System.Text.StringBuilder();

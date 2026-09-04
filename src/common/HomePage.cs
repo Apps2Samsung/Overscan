@@ -70,18 +70,15 @@ namespace Overscan
                 AppendGrid(html, history, 8);
             }
 
+            // Four things that get somebody unstuck on their first evening, and
+            // where the rest is. The remote card (7) is the surface that teaches
+            // every key (issue #38); this is not a second copy of it.
             html.Append(@"<div class='hint'>
-<b>0</b> type an address &nbsp;·&nbsp; <b>8</b> keep this page &nbsp;·&nbsp;
-<b>9</b> back to this screen &nbsp;·&nbsp; <b>7</b> all keys<br/>
-Move the pointer with the D-pad, press OK to click, and scroll with the
-<b>channel up/down</b> rocker — that one works on every remote, numpad or not.<br/>
-On the keyboard: <b>shift</b> for capitals, <b>sym</b> for punctuation
-(<b>@</b> is on the bottom row), and <b>start</b> to make what you typed the page
-this browser opens on — press <b>start</b> with nothing typed to get this
-screen back.<br/>
-Slow set? Press <b>Info</b> to load pages without images, or <b>1</b> for the
-lighter mobile version of a site. Some sites have a dedicated TV interface —
-<b>youtube.com/tv</b> is far faster than the desktop one.
+<b>0</b> type an address &nbsp;·&nbsp; <b>7</b> the remote card — every key, and what it is for &nbsp;·&nbsp;
+<b>9</b> back to this screen &nbsp;·&nbsp; <b>channel up/down</b> scrolls, on every remote<br/>
+Move the pointer with the D-pad and press OK to click. On the keyboard, <b>start</b>
+makes what you typed the page this browser opens on; press it with nothing typed
+to get this screen back.
 </div></body></html>");
             return html.ToString();
         }

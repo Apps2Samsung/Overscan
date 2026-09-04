@@ -1111,11 +1111,18 @@ namespace Overscan
             _window.Add(_overlay);
         }
 
+        /// <summary>
+        /// The remote card is the surface that teaches the keys (issue #38): every
+        /// key this build answers to, each with the one line that says what it is
+        /// for, because it is the only surface visible while a page is open, which
+        /// is when a question about a key actually occurs. The start screen says
+        /// where this card is and little else; the menu rows stay labels.
+        /// </summary>
         private void BuildHints()
         {
             Size2D screen = _window.WindowSize;
-            int width = 470;
-            int height = 604;
+            int width = 640;
+            int height = 688;
 
             _hints = new View
             {
@@ -1141,17 +1148,19 @@ namespace Overscan
             // is not for your remote" (issue #27).
             string[][] rows =
             {
-                new[] { "hold OK", "menu" },
-                new[] { "Ch up/down", "scroll the page" },
-                new[] { "0", "address bar" },
-                new[] { "1", "identify as…" },
-                new[] { "2", "type in field" },
-                new[] { "3", "diagnostics" },
-                new[] { "4", "keys to page" },
-                new[] { "6", "fit page" },
-                new[] { "7", "hide this" },
-                new[] { "8", "keep page" },
+                new[] { "hold OK", "menu — every action, on any remote" },
+                new[] { "Ch up/down", "scroll a page" },
+                new[] { "0", "type an address" },
+                new[] { "1", "identify as… — a lighter site, or desktop" },
+                new[] { "2", "type in the field you clicked" },
+                new[] { "3", "diagnostics — the report at :8081" },
+                new[] { "4", "keys to page — when a search box is dead" },
+                new[] { "5", "video: TV overlay / in page — if black" },
+                new[] { "6", "fit page — when the page is cut off" },
+                new[] { "7", "hide this card" },
+                new[] { "8", "keep this page as a tile" },
                 new[] { "9", "start screen" },
+                new[] { "Info", "images off — the one real speed-up" },
             };
 
             for (int i = 0; i < rows.Length; i++)
