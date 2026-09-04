@@ -605,7 +605,11 @@ namespace Overscan
                 UpdateStatus();
             }
 
-            bool busy = _loading || (_keyboard != null && _keyboard.IsVisible) || _diagVisible;
+            // The menu is on the list because arrowing through it is pointer keys,
+            // which no longer keep the bar alive; without this it would time out
+            // underneath an open menu.
+            bool busy = _loading || (_keyboard != null && _keyboard.IsVisible) || _diagVisible ||
+                        (_menu != null && _menu.Visible);
             if (_chromeVisible && !busy &&
                 DateTime.UtcNow - _lastActivity > TimeSpan.FromSeconds(4))
             {
@@ -1147,7 +1151,16 @@ namespace Overscan
         private void OnKeyDown(object sender, EvasKeyEventArgs e)
         {
             string key = e.KeyName;
-            ShowChrome();
+
+            // Same rule as the NUI build: the bar shows for the buttons that change
+            // something it names — back, menu, a numbered shortcut — and stays down
+            // for the pointer, the channel rocker and anything unbound. Showing it
+            // on every key kept it on screen for as long as anyone was moving the
+            // cursor (issue #20); this build simply never got that fix.
+            if (RemoteKeys.IsChromeKey(key))
+            {
+                ShowChrome();
+            }
 
             // With no engine, only the log and the way out still work. The log is
             // the entire reason anyone is still pressing buttons at this point, so

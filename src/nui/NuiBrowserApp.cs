@@ -1469,14 +1469,15 @@ namespace Overscan
 
             string key = e.Key.KeyPressedName;
 
-            // Every key except the pointer's. The bar earns its four seconds when
-            // somebody navigates, opens the menu or presses a numbered shortcut —
-            // but moving the cursor is what people do continuously, and calling
-            // ShowChrome on it meant the address bar was on screen the entire time
-            // anyone was using the browser, re-arming its own idle timer with every
-            // repeat so it could never time out. Issue #20's reporter asked for it
-            // to stop; it was never meant to behave that way.
-            if (!RemoteKeys.IsPointerKey(key))
+            // Only the buttons that earn the bar its four seconds: going back, the
+            // menu, a numbered shortcut. The bar used to come up on every key down,
+            // each repeat re-arming its own idle timer, so it sat on screen the
+            // whole time anyone was moving the cursor (issue #20). Taking the
+            // pointer keys out was not enough — the reporter pages through a feed
+            // with the channel rocker, and that brought the bar back on every
+            // page — so the rule is now the short list of buttons that do show it,
+            // and nothing a person holds down to get through a page is on it.
+            if (RemoteKeys.IsChromeKey(key))
             {
                 ShowChrome();
             }

@@ -1895,10 +1895,18 @@ the state is:
   *bare* start screen loaded, which separates the page from the view for good.
 - **The captcha — answered: it works.** His 2026-08-30 comment: "captcha works
   now tried on instagram, spotify site". That is the thing #20 is named for.
-- **The address bar still shows when scrolling with the channel rocker and when
-  unmuting** — same comment. Open, small, not started: `build-5490157` took the
-  bar off pointer keys, and the rocker and the volume/mute keys are evidently not
-  in that set.
+- **The address bar still showed when scrolling with the channel rocker — fixed,
+  and the rule inverted so it cannot happen with a third button.** His 30 August
+  comment: "address bar shows again & again when scrolling using channels button".
+  `build-5490157` had taken the bar off the six pointer keys and left it on
+  everything else, and the rocker is not a pointer key. The rule is now
+  `RemoteKeys.IsChromeKey`: a short list of the buttons that *do* show the bar
+  (back, the menu keys, the transport keys, `Info`, the digits), so the rocker,
+  the volume and mute keys if a set ever delivers them, and any button we have
+  never seen all leave it down. The ElmSharp build gets the same rule; it had
+  never had the pointer fix at all, and its idle timer now treats an open menu as
+  busy the way the NUI one already did. **Waiting on:** nothing that needs a
+  question answered — he will say if it still appears.
 - **"A frame at the top" — it is our own address bar, and he has now said it is in
   the way.** It was shown on *every* key down, cursor moves included, each repeat
   re-arming its own four-second idle timer, so it was on screen the whole time
