@@ -125,6 +125,24 @@ visit on every launch, roughly doubled each time, and after nine launches was pa
 the 2 MB Chromium will load — a black screen with no line anywhere, on a view that
 was fine. Needs only the .NET 6 SDK under `~/.dotnet-local`.
 
+### The ad-block harness
+
+Any change to `AdHosts` or to `src/nui/adhosts.txt` — the host list the NUI
+build refuses requests to — is exercised off-device first:
+
+```sh
+tools/adblock/run.sh
+```
+
+It compiles the shipping matcher with the shipping list embedded and holds it to
+the answers that matter: a listed host and everything under it refused, the
+look-alikes and the top-level domain not, the sites this app is actually used on
+(Instagram, Spotify, Google sign-in, their CDNs) never on the list, and a lookup
+in the low microseconds. The matcher runs on every request the engine makes, on
+a thread that is not ours; `NuiAdBlock` explains what that decides. The list is
+refreshed with `tools/adhosts/update.sh`, which says where it comes from and why
+that source; commit the diff, do not fetch at build time.
+
 ### The probe-ladder harness
 
 Any change to `NativeProbe` — the walk that asks issue #17's set whether it will map

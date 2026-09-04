@@ -33,4 +33,11 @@
     <Compile Include="../src/nui/**/*.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The ad and tracker host list (issue #37). Only this package can refuse
+         a request, so only this package carries the list; the name is what
+         AdHosts.LoadEmbedded asks for. tools/adhosts/update.sh refreshes it. -->
+    <EmbeddedResource Include="../src/nui/adhosts.txt" LogicalName="Overscan.adhosts.txt" />
+  </ItemGroup>
+
 </Project>

@@ -1965,16 +1965,22 @@ the state is:
   page has no way to know it. That is the same shape as the TV's `none/none`.
 - **Scrolling with the channel rocker — asked for, and it already existed.**
   Documented; the general problem is #38.
-- **Ad blocking — accepted in principle, not started. Proposal in #37.** The NUI
-  WebView can refuse a request before it goes out (`RequestIntercepted`,
-  `WebHttpRequestInterceptor`, `WebContext` are all in `Samsung.Tizen.Ref` 9.0.104),
-  so this is real blocking on the 2025 sets and structurally impossible on the four
-  `Tizen.WebView` packages, which have no such hook. Two constraints are decided and
-  should not be relitigated: it ships as the **only** new thing in its build, because
-  the reporter is the sole tester of that half of the app and a mixed build makes
-  "slower" or "site broken" unattributable; and the handler timing goes in the
-  diagnostics report from the first version, because the check sits in the path of
-  every request on TV hardware.
+- **Ad blocking — built, #37, shipped alone in its build.** `NuiAdBlock`
+  registers on the `WebContext`'s request-intercepted callback and answers a
+  request to a listed host with an empty 403 before it leaves the TV; everything
+  else is handed back untouched. The list is Peter Lowe's, about 3,500 hosts,
+  compiled in; the match is whole host or any parent domain, nothing else. On by
+  default, a menu row switches it (no digit is free), and the report has an
+  `ad block  :` line with requests seen, refused, and the handler's average and
+  worst cost. See *Refusing requests on the 2025 sets* below. **Waiting on:** his
+  first report from that build. The `ad block` line answers two questions at
+  once: whether the interceptor installed at all on his firmware (`installed,
+  N hosts` against `install failed:`), and what it costs per request. Under a
+  millisecond average is invisible; tens of milliseconds means the callback's
+  crossing into managed code is the cost and the feature is off by default from
+  the next build. A site that stops working on that build and works with the row
+  switched off is a list problem, and the `last refused:` host on the line names
+  it.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
@@ -1986,6 +1992,57 @@ a whole class that does nothing on the feed it was written for, and **a start
 screen that will not load is not a view that will not load** — his view has
 navigated at the first ask on every trail where he typed an address, and the
 ladder reaching its last rung is not evidence that the set cannot run Overscan.
+
+## Refusing requests on the 2025 sets
+
+Issue #37, asked for by #20's reporter for Spotify's web player. Only the NUI
+build can do it: `Tizen.NUI.WebContext.RegisterHttpRequestInterceptedCallback`
+hands every HTTP request to the app before the engine sends it, and the app
+either ignores it (the engine proceeds) or writes a response of its own. The
+`Tizen.WebView` binding the four older packages use has nothing of the kind, so
+on those sets the feature does not exist and is not pretended.
+
+What the toolkit's own documentation of that callback says, and what each line
+decided (the source is `src/Tizen.NUI/src/internal/WebView/` in TizenFX; the
+`Samsung.Tizen.Ref` 9.0.104 pack carries no XML docs, so it was read from
+GitHub):
+
+- *"This callback is not called on UI(Main) thread."* Nothing in the handler
+  touches a view or the log. The counters are `Interlocked`, the on/off switch is
+  `volatile`, the host set is built once at install and never written again.
+- *"No other than WebEngineRequestInterceptor API should be used in the
+  callback."* Same conclusion; also why the report line is assembled on the main
+  thread from the counters rather than the handler writing a line per refusal.
+- `Ignore()` *"can be called only INSIDE"* the callback and *"notifies engine to
+  proceed with normal resource loading"*. So it is the answer for every request
+  that is not refused, and it must be given inside the callback; a request that
+  gets neither an ignore nor a response never completes. Every path out of the
+  handler does one or the other, including the catch.
+- `SetResponseBody`: *"After this call, any further call on
+  WebHttpRequestInterceptor results in undefined behavior."* So the refusal is
+  status, one header, body, in that order, and nothing after the body. If the
+  status call fails the request is still ours and is ignored instead; if the body
+  call fails there is nothing further that may be called, and the report counts
+  it under "could not be answered".
+
+The refusal is a 403 with an empty body rather than a stalled request or a
+connection error, because a failed load is the case every site already handles
+and a hanging one is the case none of them do.
+
+The list is committed (`src/nui/adhosts.txt`) and refreshed by hand with
+`tools/adhosts/update.sh`, never fetched at build or at run time: CI must not
+depend on a third party, a build must be reproducible from the repo, and the app
+must start on a set with no network. Peter Lowe's list was chosen over the
+unified ones for size alone: 58 KB as text, about 22 KB inside the tpk, against
+a package that was 114 KB before it. The match is deliberately not a rule
+language — whole host or any parent domain, no wildcards, no paths — because the
+lookup runs on every request on TV hardware and because cosmetic filtering and
+per-site exceptions were ruled out of scope on the issue.
+
+`tools/adblock/run.sh` compiles the shipping matcher with the shipping list and
+holds it to its answers, including the one that matters most: the sites this app
+is used on are never on the list. A list that refuses the page itself is worse
+than no list.
 
 ## Emulator notes
 
