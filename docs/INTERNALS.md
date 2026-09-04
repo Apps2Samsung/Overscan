@@ -1905,8 +1905,8 @@ the state is:
   the volume and mute keys if a set ever delivers them, and any button we have
   never seen all leave it down. The ElmSharp build gets the same rule; it had
   never had the pointer fix at all, and its idle timer now treats an open menu as
-  busy the way the NUI one already did. **Waiting on:** nothing that needs a
-  question answered — he will say if it still appears.
+  busy the way the NUI one already did. Shipped in `build-df14af8`. **Waiting
+  on:** nothing that needs a question answered — he will say if it still appears.
 - **"A frame at the top" — it is our own address bar, and he has now said it is in
   the way.** It was shown on *every* key down, cursor moves included, each repeat
   re-arming its own four-second idle timer, so it was on screen the whole time
