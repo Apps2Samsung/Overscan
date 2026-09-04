@@ -2148,6 +2148,12 @@ namespace Overscan
                    "platform  : NUI WebView, api-version 9.0+\n" +
                    "trail file : " + Breadcrumbs.Location + "\n" +
                    engine + "\n\n" +
+                   // Issue #37's second question. dest is the engine's own
+                   // Sec-Fetch-Dest for the request: `audio` is an <audio>
+                   // element loading, `empty` is fetch/XHR, a dash means the
+                   // header is not on the request where the hook sits.
+                   "requests this run (one line per host and first path segment, most first)\n" +
+                   RequestTrail.Dump() + "\n\n" +
                    "previous run (last line is where it died)\n" + Breadcrumbs.Previous + "\n\n" +
                    "previous run's native output\n" + Breadcrumbs.PreviousStdErr + "\n\n" +
                    "log\n" + DiagLog.Dump();
