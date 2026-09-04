@@ -120,7 +120,10 @@ namespace Overscan
                   dump.IndexOf("https://audio-fa.scdn.co/audio/aaa\n", StringComparison.Ordinal) >= 0 ||
                   dump.IndexOf("  ·  https://audio-fa.scdn.co/audio/aaa", StringComparison.Ordinal) >= 0,
                   "the sample is the first URL seen, without its query");
-            Check(dump.IndexOf("1      1        GET     script", StringComparison.Ordinal) >= 0, "a refused request is counted on its line");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(dump, @"(?m)^1 +1 +GET +script\b"),
+                  "a request we answered is counted on its line");
+            Check(dump.IndexOf("count  answered  method", StringComparison.Ordinal) >= 0,
+                  "the column is \"answered\": a silenced ad never left the TV either");
 
             for (int i = 0; i < RequestTrail.MaxKeys + 50; i++)
             {
@@ -141,7 +144,63 @@ namespace Overscan
             double perRecordUs = trailClock.Elapsed.TotalMilliseconds * 1000.0 / Rounds;
             Check(perRecordUs < 20.0, "a trail record costs " + perRecordUs.ToString("0.00") + " us on this box");
 
+            // 7. The hosts answered with a second of silence rather than refused
+            //    (AdSilence.cs). The whole point of the split is that the ad's host
+            //    and the music's host are different, so the checks that matter are
+            //    the negative ones.
+            Check(AdSilence.Matches("adstudio-assets.scdn.co"), "the ad host is silenced");
+            Check(AdSilence.Matches("ADSTUDIO-ASSETS.SCDN.CO."), "case and a trailing dot do not matter to it either");
+            Check(AdSilence.Matches("eu.adstudio-assets.scdn.co"), "a subdomain of it is silenced too");
+            string[] mustNotBeSilenced =
+            {
+                // The music, on the host build-f295172's report actually saw it on,
+                // and the two neighbours a careless parent-domain rule would take
+                // with it. A clip served in place of any of these is silence where
+                // the song should be, which is worse than the ad.
+                "audio-ak.spotifycdn.com", "audio-fa.spotifycdn.com", "seektables.spotifycdn.com",
+                "i.scdn.co", "encore.scdn.co", "misc.scdn.co", "www.scdn.co", "scdn.co",
+                "open.spotify.com", "open.spotifycdn.com", "spclient.wg.spotify.com",
+                "gae2-spclient.spotify.com", "video-cf.spotifycdn.com",
+                // A longer name that merely ends in the listed one.
+                "notadstudio-assets.scdn.co",
+            };
+            foreach (string host in mustNotBeSilenced)
+            {
+                Check(!AdSilence.Matches(host), "not silenced: " + host);
+            }
+
+            Check(!hosts.Matches("adstudio-assets.scdn.co"),
+                  "the ad host is not also in adhosts.txt, where update.sh would overwrite it");
+
+            byte[] clip = AdSilence.Clip;
+            Check(clip.Length == 4160, "the clip is 4,160 bytes: " + clip.Length);
+            Check(AdSilence.ContentType == "audio/mpeg", "served as audio/mpeg");
+            int frames = 0;
+            bool framing = true;
+            for (int i = 0; i < clip.Length; i += 104)
+            {
+                frames++;
+                if (clip[i] != 0xFF || clip[i + 1] != 0xFB || clip[i + 2] != 0x10 || clip[i + 3] != 0xC4)
+                {
+                    framing = false;
+                }
+
+                for (int j = i + 4; j < i + 104; j++)
+                {
+                    if (clip[j] != 0)
+                    {
+                        framing = false;
+                    }
+                }
+            }
+
+            Check(framing && frames == 40, "40 MPEG-1 Layer III frames, each a header and a hundred zero bytes");
+            Check(Math.Abs(frames * 1152.0 / 44100.0 - 1.045) < 0.01,
+                  "which is the second uBlock found the player needs: " + (frames * 1152.0 / 44100.0).ToString("0.000") + "s");
+            Check(ReferenceEquals(AdSilence.Clip, clip), "the same array is handed back every time, never rebuilt per request");
+
             Console.WriteLine();
+            Console.WriteLine("adblock: the clip decoding is tools/adsilence/run.sh, in a real decoder.");
             Console.WriteLine(_failures == 0 ? "adblock: all checks passed" : "adblock: FAILED (" + _failures + ")");
             return _failures == 0 ? 0 : 1;
         }

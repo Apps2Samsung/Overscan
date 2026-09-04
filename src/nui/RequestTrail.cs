@@ -221,7 +221,11 @@ namespace Overscan
                 }
 
                 text.Append('\n');
-                text.Append("count  refused  method  dest        mode      range  host/first-segment  ·  first seen\n");
+                // "answered" and not "refused": since build-f295172 the interceptor
+                // answers an ad host with a silent clip and a 200 as well as refusing
+                // a tracker with a 403, and both are requests that never left the TV.
+                // Which of the two it was is the ad-block line's "silenced" count.
+                text.Append("count  answered  method  dest        mode      range  host/first-segment  ·  first seen\n");
                 foreach (KeyValuePair<string, Entry> line in lines)
                 {
                     Entry e = line.Value;
@@ -230,7 +234,7 @@ namespace Overscan
                     {
                         range = e.RangeSeen ? (e.NoRangeSeen ? "some" : "yes") : "no";
                         text.Append(Pad(e.Count.ToString(), 5)).Append("  ")
-                            .Append(Pad(e.Refused == 0 ? "-" : e.Refused.ToString(), 7)).Append("  ")
+                            .Append(Pad(e.Refused == 0 ? "-" : e.Refused.ToString(), 8)).Append("  ")
                             .Append(Pad(Blank(e.Methods), 6)).Append("  ")
                             .Append(Pad(Blank(e.Dests), 10)).Append("  ")
                             .Append(Pad(Blank(e.Modes), 8)).Append("  ")
