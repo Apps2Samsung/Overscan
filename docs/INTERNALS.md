@@ -910,7 +910,7 @@ get somebody unstuck on the first evening — `0`, `7`, `9`, the rocker — plus
 keyboard fact nothing else shows (`start` sets the opening page). Menu rows stay
 labels with their shortcut. A fifth place saying the same thing in slightly
 different words is the thing that must not be added; a new key goes on the card
-with its reason, and nowhere else.
+with its reason, and nowhere else. Shipped in `build-e9ef92f`, both builds.
 
 ## The D-pad pointer
 
@@ -1861,10 +1861,14 @@ and both fail against the old code.
 ### What is left on the 2025 sets
 
 Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the one
-person testing that half of this app in anger. As of 2026-09-04, after his
-eleventh report — issue #53, the black screen at every launch, which he had
-already sent once on #20 on 2026-08-30 and which went unanswered for four days —
-the state is:
+person testing that half of this app in anger. **#20 and #53 are closed** as of
+2026-09-04: the captcha #20 is named for works (his words, 30 August), the black
+screen of #53 is fixed and confirmed from his report. This section stays the
+state of the 2025 sets across the issues that followed — #37's ad blocking
+(`build-6b29b8e`) is the one waiting on a report now, and anything he sends
+about `build-df14af8`'s address bar or `build-e9ef92f`'s remote card lands here
+too. Four builds went out on 2026-09-04 alone; the tag each bullet names is the
+one its report has to come from. The state is:
 
 - **The session not surviving a restart — fixed.** Shipped in `build-9d856d1`.
   Nothing pending.
