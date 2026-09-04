@@ -194,7 +194,11 @@ gh workflow run build.yml --ref main -f release=true
 ```
 
 Publishes a `build-<sha7>` tag with all six `.tpk` assets, default-signed. Issue
-replies quote that tag. Reporters re-sign with their own partner certificate, so
+replies quote that tag. The sha is main's after the squash, so the docs follow-up
+that names the tag can be opened while the run is still going. To wait for a PR's
+checks from a script, poll `gh pr checks N`'s exit code (0 all passed, 1 a
+failure, 8 still pending); not every `gh` has `--json` on that subcommand, and a
+loop built on it fails silently forever. Reporters re-sign with their own partner certificate, so
 signing is not in our path.
 
 **Checking what actually shipped needs the file, and this box cannot fetch it.**
@@ -241,7 +245,8 @@ around spending it well.
   head.** What is waiting on a reporter, what the next report decides, and any
   decision that is Patrick's rather than a session's. Two sections hold the current
   state and are the first thing to read when picking this up: *What is left on the
-  Q80* (issue #17) and *What is left on the 2025 sets* (issue #20). Update them in
+  Q80* (issue #17) and *What is left on the 2025 sets* (#20 and #53, both closed,
+  and whatever their reporter sends about the builds since). Update them in
   the same change that ships the build they describe.
 - **Every reply on an issue quotes a release tag, and every open question names what
   each possible answer decides** — including the answer that means "this set cannot
