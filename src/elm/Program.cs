@@ -23,6 +23,28 @@ namespace Overscan
             Breadcrumbs.Init(PackageId);
             Breadcrumbs.Drop("Main entered");
 
+            // A managed exception on any thread but this one ends the process with
+            // no line anywhere: Main's catch below only sees the main thread. The
+            // probes run on threads of their own, and on issue #17's set every
+            // launch has ended within a second of the engine failing with three of
+            // those threads going quiet at once. If one of them threw, this is the
+            // only place that would ever say so. Drop waits for the disk, so the
+            // line is written before the runtime carries on with the abort.
+            try
+            {
+                AppDomain.CurrentDomain.UnhandledException += delegate (object sender, UnhandledExceptionEventArgs e)
+                {
+                    Exception ex = e.ExceptionObject as Exception;
+                    Breadcrumbs.Drop("FATAL on thread '" + (Thread.CurrentThread.Name ?? "?") + "': " +
+                                     (ex == null ? e.ExceptionObject.ToString()
+                                                 : ex.GetType().Name + ": " + ex.Message + "\n" + ex.StackTrace));
+                };
+            }
+            catch (Exception)
+            {
+                // Nothing to do without it but carry on as before.
+            }
+
             try
             {
                 // Before Elementary, and therefore long before the window: the

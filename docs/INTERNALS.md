@@ -558,9 +558,12 @@ has a watchdog, a rung has to end two launches before it counts as a refusal, th
 trail can no longer hold the thread that writes to it and says in the header when it
 is stuck, the ladder walks ahead of the engine on an install whose disk already says
 the engine fails there, `tools/probeladder/run.sh` and `tools/trail/run.sh` hold all
-of that off-device, and **`build-1933ad8` is the build that decides it** (shipped 2026-09-05). What each
-answer means was said on the issue before it shipped, so neither reading is a
-reversal later:
+of that off-device, and the engine waits for the walk on an install where the walk
+goes first — `build-1933ad8` answered seven rungs of `res/` in one launch that way
+and lost the launch a second after the engine failed, see *Whatever ends the launch
+is a second behind the engine* — and **`build-<next>` is the build that decides
+it**. What each answer means was said on the issue before it shipped, so neither
+reading is a reversal later:
 
 - `own native : bin/ maps executable...` (or `lib/`, or `data/`) — there is a place
   in the package this set will run a file of ours from, and the stub is worth
@@ -1006,6 +1009,69 @@ starts the walk ahead of the engine, and a second start is turned away) and
 - `own native :` — the same two branches as before, with `KILLED THE PROCESS` now
   meaning two launches ended on the same rung, which is a claim worth the weight
   the verdict puts on it.
+
+### Whatever ends the launch is a second behind the engine, and does not care what the probe is doing
+
+`build-1933ad8` came back within the hour, three pages from two launches on a fresh
+install. The first launch ran the ordinary order and ended, as before, on the ladder's
+first rung. The second found the ledger, walked ahead of the engine, and answered
+seven rungs — `control:anon-exec = ok` (the rung the launch before had "ended" on),
+the copy into `data/`, the engine's header, and `res/`'s open, header, readable
+mapping and `PROT_EXEC` (`EPERM`, the fourth time) — before ending on the
+`/proc/self/fd` retry of that mapping, which is where `build-85d0e4e` ended too. The
+permission probe ran beside it for the first time on this set and got as far as the
+`getxattr` reads on `libmarlin.so.0`.
+
+Two things are settled by that page and one is not.
+
+- **The ladder converges now.** Two launches, seven answers, the abandoned rung asked
+  again and answered. The reporter's instruction is unchanged and finally true: open
+  it again until `own native :` stops saying `still asking`.
+- **The writer was healthy.** `trail write: 29 lines on disk` on the page served from
+  inside the first launch, `3 lines on disk` at the start of each of the others. No
+  page was served *during* a silence, so the stall reading is not excluded — but it is
+  no longer the first reading.
+- **What ends the launch is still unnamed, and it now has a shape.** Both launches went
+  silent within a second of `ENGINE FAILURE`: the first at `17:03:15` on the anon-exec
+  rung, the second at `17:04:43` on the `/proc/self/fd` retry, with the probe thread,
+  the permission probe's thread and the failure screen's heartbeat all stopping in the
+  same second and the deadline on the rung in flight never reporting. The early walk
+  bought the ladder exactly the half-second the engine took to fail. Whatever this is,
+  it is timed off the engine's failure or the failure screen behind it, not off any
+  rung, and three threads stopping together is a process ending, not a call parking.
+  The reporter has said as much since 2026-08-24 — "the logs lasts longer on the
+  screen … still not launching" — which is the on-screen log flashing and the app
+  closing.
+
+The two places on the main thread that can end a process a second after
+`ENGINE FAILURE` are drawing the failure screen and handing control to the main loop,
+where whatever `ewk_init` registered before it failed gets its first chance to run.
+Nothing on the trail separates those, and a managed exception on any thread but the
+main one — the probe's, the permission probe's, the writer's — ends the process with
+no line at all, because `Program.Main`'s catch sees only its own thread.
+
+So `build-<next>` does three things, all in `src/elm` and `Program.cs`:
+
+- **The engine waits for the walk.** On an install where the ladder started ahead of
+  the engine, `OnCreate` waits for it — `NativeProbe.WaitForWalk`, ninety seconds at
+  most — before `TryStartEngine`, and says so on the trail either way. If the killer
+  is timed off the engine's failure, the ladder gets the whole launch instead of a
+  rung or two; if it is timed off the process's start, nothing is lost that was not
+  lost already. Ninety seconds because a set that stalls every rung would otherwise
+  hold a black screen for four minutes; the ledger carries whatever is left.
+- **Two markers around the hand-over.** `failure screen drawn — OnCreate returns, the
+  main loop starts` is the last line `OnCreate` writes, and an `EcoreMainloop.Post`
+  writes `main loop: first iteration ran` when the loop runs it. A trail that ends
+  between them ends in the main loop's first iteration, which is the engine's
+  registered callbacks; one that ends before the first ends in drawing the screen; one
+  that gets past both is something else.
+- **An `UnhandledException` handler in `Main`** writes the thread's name, the type,
+  the message and the stack before the runtime aborts. `Drop` waits for the disk, so
+  the line lands.
+
+None of that is a fourth question for the reporter. The question is still the
+ladder's, and the wait is what gives it the time to answer in one launch; the markers
+and the handler are there so the *next* silence names its side of the hand-over.
 
 ### `ELM_ACCEL` has to be set before the window exists
 

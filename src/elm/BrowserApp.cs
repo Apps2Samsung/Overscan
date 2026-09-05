@@ -138,7 +138,26 @@ namespace Overscan
             // install whose disk already says the engine fails here: see
             // NativeProbe.StartEarlyIfUnfinished for the reasoning. On every set
             // this app works on there is no ledger and this is a File.Exists.
-            NativeProbe.StartEarlyIfUnfinished();
+            //
+            // And when it does start, the engine waits for it. build-1933ad8 walked
+            // ahead of the engine and still lost the launch a second after the
+            // engine failed, seven rungs in: whatever ends these launches is about a
+            // second behind ENGINE FAILURE and indifferent to the probe, so the only
+            // head start that counts is one where the engine is not asked until the
+            // ladder is done. Bounded, because a set that stalls every rung would
+            // otherwise hold a black screen for four minutes; the ledger carries the
+            // rest to the next launch. See NativeProbe.WaitForWalk.
+            if (NativeProbe.StartEarlyIfUnfinished())
+            {
+                const int WalkBudgetMs = 90000;
+                Breadcrumbs.Drop("native probe: the engine waits for the walk (up to " +
+                                 (WalkBudgetMs / 1000) + " s)");
+                var walkClock = System.Diagnostics.Stopwatch.StartNew();
+                bool finished = NativeProbe.WaitForWalk(WalkBudgetMs);
+                Breadcrumbs.Drop(finished
+                    ? "native probe: walk finished after " + walkClock.ElapsedMilliseconds + " ms — on to the engine"
+                    : "native probe: still walking after " + (WalkBudgetMs / 1000) + " s — on to the engine anyway");
+            }
 
             // Bringing up chromium-efl is the one step we expect to be able to
             // fail: there are reports of an app-created Tizen.WebView crashing on
@@ -165,6 +184,27 @@ namespace Overscan
             if (!started)
             {
                 ShowEngineFailure();
+
+                // The last two lines OnCreate can write, and the first the main
+                // loop does. Every launch on issue #17's set has gone silent within
+                // a second of ENGINE FAILURE, with the probe's thread, the permission
+                // probe's thread and the heartbeat all stopping together — which is
+                // the process ending, not a call stalling. The two places that can
+                // end it on the main thread are drawing this screen and handing
+                // control to the main loop, where whatever ewk_init registered
+                // before it failed gets its first chance to run. These lines say
+                // which side of that hand-over the launch was on.
+                Breadcrumbs.Drop("failure screen drawn — OnCreate returns, the main loop starts");
+                try
+                {
+                    EcoreMainloop.Post(delegate { Breadcrumbs.Drop("main loop: first iteration ran"); });
+                }
+                catch (Exception ex)
+                {
+                    Breadcrumbs.Drop("main loop: could not post the first-iteration marker (" +
+                                     ex.GetType().Name + ")");
+                }
+
                 return;
             }
 

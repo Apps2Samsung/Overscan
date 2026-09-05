@@ -856,6 +856,7 @@ namespace Overscan
                 return;
             }
 
+            Finished.Reset();
             try
             {
                 Walk();
@@ -863,11 +864,44 @@ namespace Overscan
             finally
             {
                 Interlocked.Exchange(ref _walking, 0);
+                Finished.Set();
             }
         }
 
         /// <summary>1 while a walk is in progress on some thread.</summary>
         private static int _walking;
+
+        /// <summary>Set whenever no walk is in progress; reset while one is.</summary>
+        private static readonly ManualResetEvent Finished = new ManualResetEvent(true);
+
+        /// <summary>
+        /// Waits for a walk started by <see cref="StartEarlyIfUnfinished"/> to finish,
+        /// for at most <paramref name="timeoutMs"/>. True if it did.
+        ///
+        /// Both reports on `build-1933ad8` went silent within a second of
+        /// `ENGINE FAILURE` — the first at the ladder's first rung, the second, walking
+        /// ahead of the engine, seven rungs further on — with the probe thread, the
+        /// permission probe's thread and the failure screen's heartbeat all stopping
+        /// together and the trail writer healthy at the last page load. Whatever ends
+        /// those launches, it does so about a second in and does not care what the
+        /// probe is doing; the head start the early walk got was the half-second the
+        /// engine took to fail. So on an install where the ladder is walking ahead of
+        /// the engine, the engine waits for it. A set where the walk is what dies
+        /// loses nothing: the ledger has the rung. A set where the engine's failure —
+        /// or the main loop that follows it — is what dies gets the whole ladder in
+        /// one launch instead of a rung or two per launch.
+        /// </summary>
+        public static bool WaitForWalk(int timeoutMs)
+        {
+            try
+            {
+                return Finished.WaitOne(timeoutMs);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
 
         /// <summary>
         /// Walks the ladder now, on a thread of its own, if an earlier launch on this
@@ -929,6 +963,7 @@ namespace Overscan
                 return;
             }
 
+            Finished.Reset();
             try
             {
                 var thread = new Thread(delegate ()
@@ -940,6 +975,7 @@ namespace Overscan
                     finally
                     {
                         Interlocked.Exchange(ref _walking, 0);
+                        Finished.Set();
                     }
                 });
                 thread.IsBackground = true;
@@ -957,6 +993,7 @@ namespace Overscan
                 finally
                 {
                     Interlocked.Exchange(ref _walking, 0);
+                    Finished.Set();
                 }
             }
         }
