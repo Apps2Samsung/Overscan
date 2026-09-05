@@ -509,6 +509,32 @@ does not cover fails the install outright on the sets that currently work.
 
 ### What is left on the Q80, and the decision nobody should take alone
 
+**Answered — nothing is left, and the answer is no.** The Q80's report on
+`build-9f4a87a` (2026-09-05) is the one the whole ladder was built to get: the engine
+waited, the walk went first and for the first time *finished in a single launch* (1251
+ms), and every rung answered for real —
+
+```
+own native : REFUSED in res/, bin/, bin/ (assembly path), lib/, data/
+             — anonymous exec memory is allowed, so this is about files we ship — took 2 launches
+```
+
+Anonymous `PROT_EXEC` is `ok`; every file we ship is `mmap PROT_READ|PROT_EXEC: EPERM`
+and `dlopen: failed to map segment`, in all five locations and each re-asked through
+`/proc/self/fd` — `PROT_READ` alone works everywhere, so the gate is specifically on
+execute-mapping a *file of ours*, exactly the SFD unsigned-ELF shape predicted below.
+No `DID NOT RETURN` this time: a clean, complete refusal. This is the pre-committed
+branch — anonymous memory allowed, every location refused — so there is nowhere left to
+put a stub `libprivileged-service-client.so`, the stub idea is dead, and **the Q80 on
+Tizen 5.5 cannot run Overscan.** The only lever left is outside the app entirely: a
+future firmware update that ships a different `libchromium-impl.so`. On 2026-09-05 the
+reply quoting `build-9f4a87a` went out and #17 was closed (not planned) — a close on #17
+is the "this set cannot run Overscan" signal, so it was Patrick's to send. A follow-up
+on the same day asks the one external question worth asking: whether the Q80 is already
+on the latest firmware, since a software update is the only thing that could ship a
+different engine and change this — if it pulls one, reinstall `build-9f4a87a`, resend
+the page, and reopen. The rest of this section is the road that got here.
+
 Both questions this was waiting on were answered by the report on `build-d8563ab`,
 and the section above is what came back. Written down here rather than carried in
 somebody's head, because the next person to work on it may be a different person at
