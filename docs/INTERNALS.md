@@ -561,8 +561,8 @@ the engine fails there, `tools/probeladder/run.sh` and `tools/trail/run.sh` hold
 of that off-device, and the engine waits for the walk on an install where the walk
 goes first — `build-1933ad8` answered seven rungs of `res/` in one launch that way
 and lost the launch a second after the engine failed, see *Whatever ends the launch
-is a second behind the engine* — and **`build-<next>` is the build that decides
-it**. What each answer means was said on the issue before it shipped, so neither
+is a second behind the engine* — and **`build-9f4a87a` is the build that decides
+it** (shipped 2026-09-05). What each answer means was said on the issue before it shipped, so neither
 reading is a reversal later:
 
 - `own native : bin/ maps executable...` (or `lib/`, or `data/`) — there is a place
@@ -1050,7 +1050,7 @@ Nothing on the trail separates those, and a managed exception on any thread but 
 main one — the probe's, the permission probe's, the writer's — ends the process with
 no line at all, because `Program.Main`'s catch sees only its own thread.
 
-So `build-<next>` does three things, all in `src/elm` and `Program.cs`:
+So `build-9f4a87a` does three things, all in `src/elm` and `Program.cs`:
 
 - **The engine waits for the walk.** On an install where the ladder started ahead of
   the engine, `OnCreate` waits for it — `NativeProbe.WaitForWalk`, ninety seconds at
