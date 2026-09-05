@@ -86,11 +86,32 @@ namespace Overscan
         /// stamped with anything else is thrown away rather than half-believed —
         /// otherwise the first run of a new build would report the previous build's
         /// ladder as already answered.
+        ///
+        /// `ledger 3`: a bare step name no longer means <see cref="Killed"/> on its
+        /// own — see <see cref="FatalAfter"/> — and every launch of the walk writes a
+        /// <see cref="LaunchKey"/> line, which is now where the launch count comes from.
         /// </summary>
-        private const string LedgerVersion = "ledger 2";
+        private const string LedgerVersion = "ledger 3";
 
         /// <summary>What a step's result reads as when the launch that ran it never came back.</summary>
         private const string Killed = "KILLED THE PROCESS";
+
+        /// <summary>
+        /// How many launches a rung has to end before it is recorded as
+        /// <see cref="Killed"/> and never asked again.
+        ///
+        /// One used to be enough, and issue #17's set showed on 2026-09-05 why it is
+        /// not: the ledger came back with `control:anon-exec` begun and unanswered —
+        /// an anonymous `PROT_EXEC` page, the one rung on the ladder that set had
+        /// already answered `ok` three times over, on `build-85d0e4e` twice and on
+        /// `build-3368aea` once. Whatever ended that launch, it was not the mmap. On a
+        /// set that stops launches at moments of its own choosing, a rung that was in
+        /// flight when one stopped is a rung with bad luck, not a refusal; the same
+        /// rung in flight twice is a pattern. A false refusal here is the worst answer
+        /// this ladder can give — the verdict that says "nowhere left to put a file"
+        /// closes the issue — so a rung gets a second launch before it is believed.
+        /// </summary>
+        private const int FatalAfter = 2;
 
         /// <summary>
         /// What a step's result reads as when the call was still inside the kernel when
@@ -249,8 +270,12 @@ namespace Overscan
             private static readonly Dictionary<string, string> Answered =
                 new Dictionary<string, string>(StringComparer.Ordinal);
 
-            /// <summary>Steps a previous launch began and never finished.</summary>
-            private static readonly HashSet<string> Abandoned = new HashSet<string>(StringComparer.Ordinal);
+            /// <summary>
+            /// Steps a previous launch began and never finished, and how many launches
+            /// each has ended that way. See <see cref="FatalAfter"/>.
+            /// </summary>
+            private static readonly Dictionary<string, int> Abandoned =
+                new Dictionary<string, int>(StringComparer.Ordinal);
 
             /// <summary>
             /// The order steps were first heard of, so the report reads in the order
@@ -276,6 +301,14 @@ namespace Overscan
 
             /// <summary>The line the verdict is kept under. Not a step, so never asked.</summary>
             private const string VerdictKey = "verdict";
+
+            /// <summary>
+            /// Written once per launch of the walk, before its first question. Counting
+            /// these is how <see cref="Launches"/> is known; it used to be inferred
+            /// from the abandoned steps, which stopped being the same thing once a
+            /// step could be abandoned and asked again.
+            /// </summary>
+            private const string LaunchKey = "launch";
 
             /// <summary>True when there is nowhere to keep one, so nothing resumes.</summary>
             public static bool Unavailable
@@ -309,6 +342,7 @@ namespace Overscan
                     if (lines.Length > 0 && string.Equals(lines[0], LedgerVersion, StringComparison.Ordinal))
                     {
                         Parse(lines);
+                        Append(path, LaunchKey);
                         return "ok";
                     }
 
@@ -320,19 +354,27 @@ namespace Overscan
 
                     Parse(new string[0]);
                     Append(path, LedgerVersion);
+                    Append(path, LaunchKey);
                     return other ? "from another build, starting over" : "new";
                 });
 
                 if (string.Equals(outcome, "ok", StringComparison.Ordinal) ||
-                    string.Equals(outcome, "new", StringComparison.Ordinal))
+                    string.Equals(outcome, "new", StringComparison.Ordinal) ||
+                    outcome.StartsWith("from another build", StringComparison.Ordinal))
                 {
-                    _path = path;
-                    return;
-                }
+                    // This launch is one of them, whatever the file said — its own
+                    // marker is on the file now, and Parse only counted the others.
+                    lock (Book)
+                    {
+                        Launches++;
+                    }
 
-                if (outcome.StartsWith("from another build", StringComparison.Ordinal))
-                {
-                    Trace("  probe ledger: " + outcome);
+                    if (!string.Equals(outcome, "ok", StringComparison.Ordinal) &&
+                        !string.Equals(outcome, "new", StringComparison.Ordinal))
+                    {
+                        Trace("  probe ledger: " + outcome);
+                    }
+
                     _path = path;
                     return;
                 }
@@ -343,6 +385,39 @@ namespace Overscan
                 Trace("  probe ledger unavailable: " + outcome +
                       " — this launch cannot resume, and cannot be resumed from");
                 _path = null;
+            }
+
+            /// <summary>
+            /// Where the ladder stands on this install, read from the file under the
+            /// deadline and never written: "no ledger", "finished" (a verdict is on it),
+            /// "unfinished", or "unfinished — another build's ledger". For
+            /// <see cref="StartEarlyIfUnfinished"/>, which is the only caller.
+            /// </summary>
+            public static string Standing(string path)
+            {
+                return Deadline.Run(delegate
+                {
+                    if (!File.Exists(path))
+                    {
+                        return "no ledger";
+                    }
+
+                    string[] lines = File.ReadAllLines(path);
+                    if (lines.Length == 0 || !string.Equals(lines[0], LedgerVersion, StringComparison.Ordinal))
+                    {
+                        return "unfinished — another build's ledger";
+                    }
+
+                    for (int i = 1; i < lines.Length; i++)
+                    {
+                        if (lines[i].StartsWith(VerdictKey + "\t", StringComparison.Ordinal))
+                        {
+                            return "finished";
+                        }
+                    }
+
+                    return "unfinished";
+                });
             }
 
             /// <summary>
@@ -410,14 +485,25 @@ namespace Overscan
 
                     // A name on its own is a call that was started; the same name
                     // with an answer after it retires that. Later lines win, which
-                    // is what makes the file append-only.
+                    // is what makes the file append-only. A name left bare twice by
+                    // two launches is counted twice — that count is what decides
+                    // whether the step is asked again (see FatalAfter).
+                    int launches = 0;
                     for (int i = 1; i < lines.Length; i++)
                     {
                         string line = lines[i];
                         int split = line.IndexOf('\t');
                         if (split < 0)
                         {
-                            Abandoned.Add(line);
+                            if (string.Equals(line, LaunchKey, StringComparison.Ordinal))
+                            {
+                                launches++;
+                                continue;
+                            }
+
+                            int ended;
+                            Abandoned.TryGetValue(line, out ended);
+                            Abandoned[line] = ended + 1;
                             Remember(line);
                         }
                         else
@@ -435,17 +521,9 @@ namespace Overscan
                         }
                     }
 
-                    // Every step that ended a launch is one extra launch this ladder
-                    // has cost, whether it has been retired into an answer already or
-                    // is still sitting there unanswered.
-                    Launches = 1 + Abandoned.Count;
-                    foreach (string answer in Answered.Values)
-                    {
-                        if (string.Equals(answer, Killed, StringComparison.Ordinal))
-                        {
-                            Launches++;
-                        }
-                    }
+                    // The launches the walk has started so far, not counting one that
+                    // has not written its own marker yet. Open adds this launch.
+                    Launches = launches;
                 }
             }
 
@@ -494,12 +572,20 @@ namespace Overscan
                     return remembered;
                 }
 
-                if (remembered == null && WasAbandoned(step))
+                int ended = remembered == null ? AbandonedCount(step) : 0;
+                if (ended >= FatalAfter)
                 {
                     // The strongest refusal there is: not an errno, but the end of the
-                    // launch that asked. Recorded so it is never asked again.
+                    // launch that asked — twice, by two launches, see FatalAfter.
+                    // Recorded so it is never asked again.
                     Record(step, Killed);
                     return Killed;
+                }
+
+                if (ended > 0)
+                {
+                    Trace("  " + step + ": the launch that asked this ended before it answered — " +
+                          "asking once more; a second launch ending here is a refusal");
                 }
 
                 Append(step);
@@ -593,11 +679,20 @@ namespace Overscan
                     foreach (string step in Order)
                     {
                         string answer;
+                        if (Answered.TryGetValue(step, out answer))
+                        {
+                            text.Add("    " + step.PadRight(22) + " = " + answer);
+                            continue;
+                        }
+
+                        int ended;
+                        Abandoned.TryGetValue(step, out ended);
                         text.Add("    " + step.PadRight(22) + " = " +
-                                 (Answered.TryGetValue(step, out answer)
-                                      ? answer
-                                      : "(began, never answered — the next launch reads this as " +
-                                        Killed + ")"));
+                                 (ended >= FatalAfter
+                                      ? "(began and never answered on " + ended.ToString(CultureInfo.InvariantCulture) +
+                                        " launches — the next walk records this as " + Killed + ")"
+                                      : "(began and never answered on " + ended.ToString(CultureInfo.InvariantCulture) +
+                                        " launch — asked once more before it counts as a refusal)"));
                     }
 
                     if (_verdict != null)
@@ -610,9 +705,10 @@ namespace Overscan
             }
 
             /// <summary>
-            /// How many launches this ladder has taken so far, counting this one. It
-            /// goes in the verdict because a number above one means the set killed the
-            /// app to avoid answering, and that is a finding rather than an accident.
+            /// How many launches this ladder has taken so far, counting this one: the
+            /// <see cref="LaunchKey"/> lines on the file. It goes in the verdict
+            /// because a number above one means the set ended launches rather than
+            /// answer, and that is a finding rather than an accident.
             /// </summary>
             public static int Launches = 1;
 
@@ -626,11 +722,13 @@ namespace Overscan
                 }
             }
 
-            private static bool WasAbandoned(string step)
+            /// <summary>How many launches ended with this step begun and unanswered.</summary>
+            private static int AbandonedCount(string step)
             {
                 lock (Book)
                 {
-                    return Abandoned.Contains(step);
+                    int ended;
+                    return Abandoned.TryGetValue(step, out ended) ? ended : 0;
                 }
             }
 
@@ -689,9 +787,17 @@ namespace Overscan
                 }
             }
 
+            /// <summary>
+            /// Under <see cref="Deadline"/>, like the open: on issue #17's set a write
+            /// to our own `data/` is a call like any other, and the 2026-09-05 report
+            /// has a launch whose last act was an append here. An append that misses
+            /// writes the ledger off for the rest of this launch — one line on the
+            /// trail, not one five-second wait per rung — and the walk carries on with
+            /// its books behind it, which the next launch reads as "ask again".
+            /// </summary>
             private static void Append(string path, string line)
             {
-                try
+                string outcome = Deadline.Run(delegate
                 {
                     using (var file = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
                     using (var writer = new StreamWriter(file))
@@ -699,10 +805,17 @@ namespace Overscan
                         writer.WriteLine(line);
                         writer.Flush();
                     }
-                }
-                catch (Exception)
+
+                    return "ok";
+                });
+
+                if (!string.Equals(outcome, "ok", StringComparison.Ordinal))
                 {
-                    // Best-effort, like everything else that reaches past managed code.
+                    // Best-effort, like everything else that reaches past managed code —
+                    // but said once, and not tried again this launch.
+                    _path = null;
+                    Trace("  probe ledger: writing \"" + line + "\" " + outcome +
+                          " — written off for this launch; the walk carries on without it");
                 }
             }
         }
@@ -733,6 +846,122 @@ namespace Overscan
         /// reading behind it, on every launch, forever.
         /// </summary>
         public static void Run()
+        {
+            if (Interlocked.CompareExchange(ref _walking, 1, 0) != 0)
+            {
+                // Already on its way — see StartEarlyIfUnfinished. Two walks on two
+                // threads would leave a trail nobody can order and a ledger with every
+                // line twice.
+                Trace("native probe: already walking on another thread");
+                return;
+            }
+
+            try
+            {
+                Walk();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _walking, 0);
+            }
+        }
+
+        /// <summary>1 while a walk is in progress on some thread.</summary>
+        private static int _walking;
+
+        /// <summary>
+        /// Walks the ladder now, on a thread of its own, if an earlier launch on this
+        /// install got as far as starting it and it has not reached a verdict.
+        /// Returns whether it did.
+        ///
+        /// The ladder normally runs after the engine has failed, behind the retry,
+        /// the explainer and the permission probe — the rule since #13 has been that
+        /// a diagnostic which can end the process goes after the thing it is meant to
+        /// explain, never in front of it. This is the one exception, and the evidence
+        /// for it is on the disk: the ledger only ever comes into existence on a
+        /// launch whose engine had already failed, so a ledger with no verdict means
+        /// the engine's failure on this install is recorded, ten builds over, and the
+        /// ladder's verdict is not. On issue #17's set the six native calls between
+        /// the first `refcount=0` and the start of the walk — the implementation's
+        /// preload, `ewk_set_arguments`, the retry, the explainer's two dlopens and
+        /// its directory listing — each stall now and then, and on 2026-09-05 they
+        /// stopped four launches out of five in front of the ladder. Every one of
+        /// those launches was spent re-establishing a failure that was already on
+        /// the books. So on an install where the books already say so, the ladder
+        /// goes first and the engine is asked afterwards, and the worst the walk can
+        /// do to the engine's start is be in the process — one library with one
+        /// symbol, if a location ever takes it — while ewk_init runs.
+        ///
+        /// A ledger from another build counts as unfinished: whatever it says, this
+        /// build's ladder has not been walked here. An install with no ledger at all
+        /// gets the ordinary order, which is every set this app works on.
+        /// </summary>
+        public static bool StartEarlyIfUnfinished()
+        {
+            string directory = DataDirectory();
+            if (string.IsNullOrEmpty(directory))
+            {
+                return false;
+            }
+
+            string outcome = Ledger.Standing(Path.Combine(directory, LedgerFile));
+            if (!outcome.StartsWith("unfinished", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            Trace("native probe: the engine failed on an earlier launch here and the ladder is " +
+                  outcome + " — walking it now, ahead of the engine");
+            RunInBackground();
+            return true;
+        }
+
+        /// <summary>
+        /// <see cref="Run"/> on a background thread. The walk is claimed here, before
+        /// the thread exists, so a <see cref="Run"/> that follows on another thread
+        /// finds it taken rather than racing it.
+        /// </summary>
+        public static void RunInBackground()
+        {
+            if (Interlocked.CompareExchange(ref _walking, 1, 0) != 0)
+            {
+                Trace("native probe: already walking on another thread");
+                return;
+            }
+
+            try
+            {
+                var thread = new Thread(delegate ()
+                {
+                    try
+                    {
+                        Walk();
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref _walking, 0);
+                    }
+                });
+                thread.IsBackground = true;
+                thread.Name = "native-probe";
+                thread.Start();
+            }
+            catch (Exception ex)
+            {
+                // A set that will not give us a thread gets asked the dangerous way.
+                Trace("native probe: no thread (" + ex.GetType().Name + "), walking inline");
+                try
+                {
+                    Walk();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _walking, 0);
+                }
+            }
+        }
+
+        private static void Walk()
         {
             try
             {

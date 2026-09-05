@@ -172,6 +172,10 @@ namespace Overscan
                     // Q80 has not come back from twice, so anything queued behind
                     // it is a probe that never runs — and two probes racing on two
                     // threads would leave a trail nobody can order afterwards.
+                    // On an install whose ledger says the engine already failed
+                    // here the walk started ahead of the engine, from OnCreate, and
+                    // this Run finds it taken and says so; see
+                    // NativeProbe.StartEarlyIfUnfinished.
                     NativeProbe.Run();
                     Investigate(target);
                 });

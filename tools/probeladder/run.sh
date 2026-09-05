@@ -20,6 +20,11 @@
 #                  that was not. The walk wrote nothing for 84 seconds, and the page
 #                  — fetched at launch, as every page from that set has been — read
 #                  `(not asked)` over whatever the launch before had put on disk.
+#   build-1a5fd68  reached the ladder on one launch in five — the other four stopped
+#                  in the engine explainer in front of it — and that launch ended on
+#                  the anonymous-exec control, a rung the set had answered `ok` three
+#                  times before. One ended launch is not a refusal, and a ladder that
+#                  is only reached one launch in three is not a ladder.
 #
 # Each round trip is somebody's evening: install, re-sign, launch, copy a page out
 # of a TV browser. That is far too expensive a way to find out that a ladder does
@@ -104,11 +109,17 @@ rm "$work/hang/res/libovprobe.so"
 mkfifo "$work/hang/res/libovprobe.so"
 run hang
 
-# A rung whose name is on the ledger with no answer under it: the launch that asked
-# it never came back.
+# A rung whose name is on the ledger with no answer under it, from two launches:
+# neither launch that asked it came back.
 layout "$work/killed"
-printf 'ledger 2\nres/:exec\n' > "$work/killed/data/probe-ledger.txt"
+printf 'ledger 3\nlaunch\nres/:exec\nlaunch\nres/:exec\n' > "$work/killed/data/probe-ledger.txt"
 run killed
+
+# The same, once. build-1a5fd68's ledger came back exactly like this, on a rung the
+# set had answered three times before, so one is asked again and two is a refusal.
+layout "$work/abandoned"
+printf 'ledger 3\nlaunch\nres/:exec\n' > "$work/abandoned/data/probe-ledger.txt"
+run abandoned
 
 # A ledger left by an earlier build, claiming an answer for a rung that may since
 # have changed its meaning.
@@ -125,9 +136,20 @@ run ledgerhang
 # A page loaded before the walk: the header and the block come off the disk, verdict
 # included, and loading the page does not start the walk.
 layout "$work/peek"
-printf 'ledger 2\ncontrol:anon-exec\tok\nres/:exec\tPROT_READ|PROT_EXEC: EPERM (operation not permitted)\nverdict\tREFUSED in res/ — seeded by the harness\n' \
+printf 'ledger 3\nlaunch\ncontrol:anon-exec\tok\nres/:exec\tPROT_READ|PROT_EXEC: EPERM (operation not permitted)\nverdict\tREFUSED in res/ — seeded by the harness\n' \
   > "$work/peek/data/probe-ledger.txt"
 run peek
 
+# An install where the engine has already failed and the ladder has no verdict: the
+# walk goes ahead of the engine. Seeded with another build's ledger, which is the
+# shape the Q80 has on disk right now.
+layout "$work/early"
+printf 'ledger 2\ncontrol:anon-exec\n' > "$work/early/data/probe-ledger.txt"
+run early
+
+# And the two installs it must leave alone: no ledger, and a finished one.
+layout "$work/notearly"
+run notearly
+
 echo
-echo "PASS — the ladder converges on all seven shapes"
+echo "PASS — the ladder converges on all ten shapes"
