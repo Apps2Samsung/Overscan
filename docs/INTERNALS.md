@@ -554,7 +554,8 @@ branch is **not** reached, and saying it is would be a guess: only `res/` has ev
 answered. Every rung is ledgered, every call has a watchdog — the ledger's own
 `open` and the engine explainer included now — the report reads the ledger off the
 disk before the walk has begun, `tools/probeladder/run.sh` holds all of that
-off-device, and **`build-<next>` is the build that decides it**. What each answer
+off-device, and **`build-1a5fd68` is the build that decides it** (shipped 2026-09-05).
+What each answer
 means was said on the issue before it shipped, so neither reading is a reversal
 later:
 
