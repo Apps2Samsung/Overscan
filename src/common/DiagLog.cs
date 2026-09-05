@@ -18,13 +18,24 @@ namespace Overscan
         private static readonly Queue<string> Lines = new Queue<string>();
         private static readonly object Sync = new object();
 
-        /// <summary>dlog tag. Unreachable on a locked-down TV, hence DiagServer.</summary>
+        /// <summary>dlog tag, used by <see cref="Breadcrumbs"/>'s writer. Unreachable on a locked-down TV, hence DiagServer.</summary>
         public const string LogTag = "Overscan";
 
         public static void Add(string message)
         {
-            Tizen.Log.Info(LogTag, message);
+            Record(message);
+            Breadcrumbs.Log(message);
+        }
 
+        /// <summary>
+        /// Into memory only. Memory first, and on the caller's thread: the dlog call
+        /// that used to sit in front of this is a write to a socket, and on issue
+        /// #17's set no write is trusted to come back — see <see cref="Breadcrumbs"/>,
+        /// whose writer thread makes it now. What is in here is what the diagnostics
+        /// page shows, so it has to be the part that cannot stall.
+        /// </summary>
+        public static void Record(string message)
+        {
             lock (Sync)
             {
                 Lines.Enqueue(DateTime.Now.ToString("HH:mm:ss") + "  " + message);

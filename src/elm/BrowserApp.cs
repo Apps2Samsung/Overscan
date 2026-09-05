@@ -134,6 +134,12 @@ namespace Overscan
             BuildUi();
             Breadcrumbs.Drop("OnCreate: UI built");
 
+            // The one diagnostic allowed in front of the engine, and only on an
+            // install whose disk already says the engine fails here: see
+            // NativeProbe.StartEarlyIfUnfinished for the reasoning. On every set
+            // this app works on there is no ledger and this is a File.Exists.
+            NativeProbe.StartEarlyIfUnfinished();
+
             // Bringing up chromium-efl is the one step we expect to be able to
             // fail: there are reports of an app-created Tizen.WebView crashing on
             // the TV emulator with nothing in the log, and the TV profile is not
@@ -1731,6 +1737,7 @@ namespace Overscan
                            : ChromiumImpl.Blocked + " — " + SmackWall.Summary) + "\n" +
                        "own native : " + NativeProbe.Summary + "\n" +
                        "trail file : " + Breadcrumbs.Location + "\n" +
+                       "trail write: " + Breadcrumbs.Status + "\n" +
                        (full ? "\nefl ladder (ewk_init's own order)\n" + EflSubsystems.Dump() +
                                "\nengine implementation (libchromium-impl.so)\n" + ChromiumImpl.Dump() +
                                "\nnative code of our own\n" + NativeProbe.Dump() +

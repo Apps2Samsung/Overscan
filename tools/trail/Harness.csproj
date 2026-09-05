@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Compiles the shipping src/common/Breadcrumbs.cs and DiagLog.cs, unchanged,
+    against a stand-in for the one platform call they make (dlog). A harness with
+    its own copy of the code under test tests nothing.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>trail</AssemblyName>
+    <RootNamespace>Overscan.Harness</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyVersion>0.1.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Stubs.cs" />
+    <Compile Include="../../src/common/Breadcrumbs.cs" />
+    <Compile Include="../../src/common/DiagLog.cs" />
+  </ItemGroup>
+
+</Project>

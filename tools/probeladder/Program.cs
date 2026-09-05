@@ -62,6 +62,15 @@ namespace Overscan.Harness
                 case "peek":
                     Peek(root);
                     break;
+                case "abandoned":
+                    Abandoned(root);
+                    break;
+                case "early":
+                    Early(root, clock);
+                    break;
+                case "notearly":
+                    NotEarly(root);
+                    break;
                 default:
                     Console.Error.WriteLine("unknown scenario: " + scenario);
                     return 2;
@@ -87,7 +96,8 @@ namespace Overscan.Harness
                    "the report shows the answers that outlive a launch");
 
             string ledger = Ledger(root);
-            Expect(ledger.StartsWith("ledger 2"), "the ledger is stamped with this build's version");
+            Expect(ledger.StartsWith("ledger 3\nlaunch\n"),
+                   "the ledger is stamped with this build's version, and this launch is counted on it");
             Expect(ledger.Contains("res/:open\tok"), "the open is on the books — it was not on 3368aea's");
             Expect(ledger.Contains("res/:header\t"), "so is the header read");
             Expect(ledger.Contains("res/:read\t"), "so is the readable mapping");
@@ -190,8 +200,9 @@ namespace Overscan.Harness
         }
 
         /// <summary>
-        /// A rung whose name is on the ledger with no answer under it: the launch that
-        /// asked never came back. It is skipped, recorded, and never asked again.
+        /// A rung whose name is on the ledger with no answer under it, twice, from two
+        /// launches: both launches that asked it never came back. It is skipped,
+        /// recorded, and never asked again.
         /// </summary>
         private static void Killed(string root)
         {
@@ -200,12 +211,83 @@ namespace Overscan.Harness
             string trail = Breadcrumbs.Trail;
 
             Expect(trail.Contains("res/ mmap PROT_READ|PROT_EXEC: KILLED THE PROCESS"),
-                   "the abandoned rung is reported as the refusal it is");
+                   "the twice-abandoned rung is reported as the refusal it is");
             Expect(!trail.Contains("probe: mmap PROT_READ|PROT_EXEC res/"),
                    "and is not asked again");
             Expect(Ledger(root).Contains("res/:exec\tKILLED THE PROCESS"),
                    "and its verdict is on the books for every launch after this one");
             Expect(trail.Contains("res/ dlopen:"), "the rungs behind it are still asked");
+            Expect(NativeProbe.Dump().Contains("(ledger 3, launch 3)"),
+                   "and the launches are counted from the ledger's own markers");
+        }
+
+        /// <summary>
+        /// The 2026-09-05 shape: a rung begun and unanswered on one launch. That rung
+        /// had answered `ok` three times on the same set before, so one ended launch is
+        /// bad luck, not a refusal — it is asked again, and said to be.
+        /// </summary>
+        private static void Abandoned(string root)
+        {
+            NativeProbe.Run();
+
+            string trail = Breadcrumbs.Trail;
+
+            Expect(trail.Contains("res/:exec: the launch that asked this ended before it answered — asking once more"),
+                   "a rung abandoned once is asked again, and the trail says why");
+            Expect(trail.Contains("probe: mmap PROT_READ|PROT_EXEC res/"),
+                   "so the mapping is actually made");
+            Expect(!trail.Contains("res/ mmap PROT_READ|PROT_EXEC: KILLED THE PROCESS"),
+                   "and not reported as a kill");
+            Expect(Ledger(root).Contains("res/:exec\tPROT_READ|PROT_EXEC: ok"),
+                   "and this box's answer retires the abandonment");
+            Expect(NativeProbe.Dump().Contains("(ledger 3, launch 2)"),
+                   "while the launch that ended is still counted");
+        }
+
+        /// <summary>
+        /// An install whose ledger says the engine failed here before and the ladder
+        /// has no verdict: the walk starts ahead of the engine, on its own thread, and
+        /// a second start behind it finds the walk taken rather than racing it.
+        /// </summary>
+        private static void Early(string root, Stopwatch clock)
+        {
+            bool started = NativeProbe.StartEarlyIfUnfinished();
+            Expect(started, "an unfinished ledger starts the walk ahead of the engine");
+            Expect(Breadcrumbs.Trail.Contains("walking it now, ahead of the engine"),
+                   "and the trail says so before the walk's first line");
+
+            NativeProbe.Run();
+            Expect(Breadcrumbs.Trail.Contains("native probe: already walking on another thread"),
+                   "the ordinary start behind it is turned away rather than run twice");
+
+            while (NativeProbe.Summary.StartsWith("still asking") || NativeProbe.Summary.StartsWith("(not asked"))
+            {
+                if (clock.ElapsedMilliseconds > 60000)
+                {
+                    break;
+                }
+
+                System.Threading.Thread.Sleep(50);
+            }
+
+            Expect(NativeProbe.Summary.Contains("maps executable and dlopen loaded it"),
+                   "and the early walk reaches this box's verdict (" + NativeProbe.Summary + ")");
+            Expect(Occurrences(Breadcrumbs.Trail, "native probe: starting") == 1,
+                   "having started exactly once");
+        }
+
+        /// <summary>
+        /// The two installs the early start must leave alone: one with no ledger — every
+        /// set this app works on — and one whose ledger already holds a verdict.
+        /// </summary>
+        private static void NotEarly(string root)
+        {
+            Expect(!NativeProbe.StartEarlyIfUnfinished(), "no ledger: the engine goes first, as always");
+
+            File.WriteAllText(Path.Combine(root, "data", "probe-ledger.txt"),
+                              "ledger 3\nlaunch\nres/:exec\tPROT_READ|PROT_EXEC: ok\nverdict\tseeded\n");
+            Expect(!NativeProbe.StartEarlyIfUnfinished(), "a ledger with a verdict: nothing left to ask early");
+            Expect(!Breadcrumbs.Trail.Contains("native probe: starting"), "and neither started a walk");
         }
 
         /// <summary>
@@ -222,7 +304,7 @@ namespace Overscan.Harness
                    "a ledger stamped for another build is discarded");
             Expect(trail.Contains("probe: mmap PROT_READ|PROT_EXEC res/"),
                    "so its answers are asked for again rather than replayed");
-            Expect(Ledger(root).StartsWith("ledger 2"), "and the file is re-stamped");
+            Expect(Ledger(root).StartsWith("ledger 3"), "and the file is re-stamped");
         }
 
         private static string Ledger(string root)

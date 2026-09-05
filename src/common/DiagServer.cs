@@ -100,7 +100,8 @@ namespace Overscan
                 // one a reporter copies first — so it is here too, on the page they
                 // get when the UI is not up yet.
                 return "Overscan — no report provider yet (UI has not started)\n\n" +
-                       "own native : " + NativeProbe.Summary + "\n\n" +
+                       "own native : " + NativeProbe.Summary + "\n" +
+                       "trail write: " + Breadcrumbs.Status + "\n\n" +
                        "this run\n" + DiagLog.Dump() +
                        "\nprevious run (last line is where it died)\n" +
                        Breadcrumbs.Previous +

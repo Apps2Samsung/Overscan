@@ -175,8 +175,10 @@ tools/probeladder/run.sh
 
 It compiles the shipping `src/common/NativeProbe.cs` against stand-ins for the three
 platform types it touches, and walks it over the shapes that set has actually
-produced: a rung that hangs, a rung a previous launch never came back from, a ledger
-left by another build, a ledger that never opens, a page loaded before the walk, and
+produced: a rung that hangs, a rung a previous launch never came back from (once,
+which is asked again, and twice, which is a refusal), a ledger left by another
+build, a ledger that never opens, a page loaded before the walk, an install whose
+ledger says the engine already failed there (the walk goes ahead of the engine), and
 a clean run twice over. It needs a C compiler for the stand-in library and nothing
 else.
 
@@ -185,6 +187,25 @@ rungs and locations behind it still get asked. Two builds have been spent findin
 from a TV that it did not, which is a reporter's evening each. The `hang` scenario is
 the one that holds it: against the previous `NativeProbe.cs` it does not fail, it
 never returns.
+
+### The trail harness
+
+Any change to `Breadcrumbs` or `DiagLog` — the trail every diagnostic in this app
+reports through — is exercised off-device first:
+
+```sh
+tools/trail/run.sh
+```
+
+It compiles the shipping files against a dlog stand-in and holds them to two
+promises that pull against each other: a line is on disk before `Drop` returns while
+the disk behaves, and a disk or a dlog that does not come back cannot hold the
+dropping thread for more than two seconds, cannot hold the lines behind it at all,
+and shows up in the report's `trail write:` header line. Issue #17's set went silent
+on 2026-09-05 with a watchdog and a heartbeat both armed on their own threads, and
+every stall it has ever shown was a call immediately followed by a trail write; the
+trail written on the caller's thread could not tell the two apart. Needs only the
+.NET 6 SDK under `~/.dotnet-local`.
 
 ### The native probe library
 
@@ -246,6 +267,9 @@ around spending it well.
   own and names a native call *before* making it, so when the process dies the
   last line is the call that killed it. The previous run's trail is set aside at
   start-up — the app that dies has no "afterwards" in which to read anything back.
+  Read the header's `trail write:` line before the trail: a trail whose writer is
+  `STALLED` stopped at the write, not at the call after it, and the page in hand is
+  the record for that launch.
 - **`http://<TV-IP>:8081`** serves the diagnostics report (`DiagServer`), and key
   `3` shows a shorter version on the TV. Ask for the *whole* page: the
   `previous run` block is where a launch actually ended, and the `this run` block

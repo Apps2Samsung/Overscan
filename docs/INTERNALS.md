@@ -543,21 +543,24 @@ So the stub had a cheap prerequisite, and `build-9d856d1` is the build that aske
 it. **The Q80 answered on 2026-08-27 for `res/`, and the answer was no** — see *The
 exec mapping is refused, and where that leaves it* below.
 
-**The other four locations are still unanswered.** Three builds have now been spent
+**The other four locations are still unanswered.** Four builds have now been spent
 on the ladder rather than on the question: `build-85d0e4e` was killed on its first
 rung, `build-3368aea` stopped between the `open` and the header read on 2026-09-01
-— see *The ladder also has to survive the questions nobody suspected* — and
+— see *The ladder also has to survive the questions nobody suspected* —
 `build-f295172` (the same probe as `build-e2914be`) came back on 2026-09-04 with the
 walk never having written a line, see *The ladder has to start, and the page has to
-show it without the walk*. So the "if every location refuses, close issue 17"
-branch is **not** reached, and saying it is would be a guess: only `res/` has ever
-answered. Every rung is ledgered, every call has a watchdog — the ledger's own
-`open` and the engine explainer included now — the report reads the ledger off the
-disk before the walk has begun, `tools/probeladder/run.sh` holds all of that
-off-device, and **`build-1a5fd68` is the build that decides it** (shipped 2026-09-05).
-What each answer
-means was said on the issue before it shipped, so neither reading is a reversal
-later:
+show it without the walk*, and `build-1a5fd68` came back the same day with five
+launches of which one reached the ladder and ended on its first rung, a rung that
+set had answered three times before — see *The trail is a write too*. So the "if
+every location refuses, close issue 17" branch is **not** reached, and saying it is
+would be a guess: only `res/` has ever answered. Every rung is ledgered, every call
+has a watchdog, a rung has to end two launches before it counts as a refusal, the
+trail can no longer hold the thread that writes to it and says in the header when it
+is stuck, the ladder walks ahead of the engine on an install whose disk already says
+the engine fails there, `tools/probeladder/run.sh` and `tools/trail/run.sh` hold all
+of that off-device, and **`build-<next>` is the build that decides it**. What each
+answer means was said on the issue before it shipped, so neither reading is a
+reversal later:
 
 - `own native : bin/ maps executable...` (or `lib/`, or `data/`) — there is a place
   in the package this set will run a file of ours from, and the stub is worth
@@ -568,8 +571,11 @@ later:
   the honest thing to say is that this TV cannot run Overscan.
 
 Anything else — a report that still says `(not asked)`, or one that names no
-locations — is a third build spent on the ladder rather than the question, and worth
-reading as a bug here before it is read as an answer from the set.
+locations — is another build spent on the ladder rather than the question, and worth
+reading as a bug here before it is read as an answer from the set. The header's
+`trail write:` line is read first now, whatever the rest says: if it reads `STALLED`,
+the page in hand is the only complete record of that launch and the trail file is
+not — see *The trail is a write too*.
 
 `Overscan5/res/libovprobe.so` is a real ARM shared object — one function, no
 `DT_NEEDED`, `SONAME libovprobe.so`, built freestanding by `tools/elfprobe/build.sh`
@@ -865,6 +871,141 @@ is that we do not need to know. Every reading the verdict depends on is now made
 under a deadline or replayed from the disk, so the walk converges on a set that
 stalls every call — the harness's `hang` and `ledgerhang` scenarios are exactly that
 set — and a stall is a recorded refusal rather than a missing one.
+
+### The trail is a write too, and the ladder cannot queue behind a failure already on the books
+
+`build-1a5fd68` shipped the heartbeat and the deadline-everywhere arrangement above,
+and the Q80 answered it the same day with five launches in five minutes. Where each
+trail stopped, and how long until the next launch:
+
+| Launch | Last line on the trail | Then |
+| --- | --- | --- |
+| 13:33:34 | `readable by us: yes` — the next call is the explainer's `RTLD_LAZY` dlopen, **under `Deadline`** | nothing for 35 s |
+| 13:34:09 | `native probe: anonymous PROT_EXEC control` — the ladder's first rung, under `Deadline`, with the failure-screen heartbeat armed | nothing for 2 min |
+| 13:36:14 | `engine implementation: REFUSED …` — the page was served **during** this launch and showed the same last line | unknown |
+| 13:38:23 | `engine implementation: REFUSED …` | nothing for 23 s |
+| 13:38:46 | page loaded at `OnCreate: UI built` | unknown |
+
+Three things in that table had no reading under the design as it stood.
+
+**The second launch is the one the build was for, and it is the one that makes no
+sense.** The ledger came back with `control:anon-exec` begun and unanswered. That
+rung is an anonymous `PROT_READ|PROT_WRITE|PROT_EXEC` page — the one thing on the
+ladder this set had already answered, `ok`, on `build-85d0e4e` twice and
+`build-3368aea` once, and the thing the runtime's own JIT does on every launch.
+Whatever ended that launch, it was not the mmap. And the instruments built to say
+what it was said nothing: the rung was under a five-second deadline whose miss is
+written to the trail, the failure screen had a ten-second heartbeat writing to the
+trail, and neither wrote a line in two minutes. Under the previous section's rule —
+ticks and no probe lines is a parked probe, neither is a dead process — that is a
+dead process. But the ledger's reading of the same evidence was `KILLED THE
+PROCESS`, attributed to the rung, and the next launch would have recorded it as a
+refusal of anonymous executable memory. That would have been false.
+
+**The first launch went silent on a call that was under the deadline.** A dlopen
+that misses its deadline gets a `RTLD_LAZY: DID NOT RETURN in 5s` line. There was no
+line, for 35 seconds. So either the process was gone or the deadline's report — a
+trail write — did not come back.
+
+**The third launch was alive.** The reporter loaded the page during it, the socket
+thread answered, and `this run` ended on the same line the disk did. A process that
+serves HTTP is not dead and not frozen. Its main thread had stopped after
+`engine implementation: REFUSED`, and the next two things on that thread are
+`ewk_set_arguments` and the trail write that names it.
+
+Put those side by side and the pattern that has been in this issue since
+`build-3368aea` reads differently. Every stall this set has shown — `getxattr`, the
+`open` of our own file in `res/`, `Directory.GetFiles`, the ledger's I/O, the
+`RTLD_LAZY` dlopen, `ewk_set_arguments`, an anonymous mmap — is a call immediately
+followed by a write to `data/breadcrumbs.log` on the same thread, and a trail written
+on the caller's thread cannot say which of the two stalled. Worse, the deadline and
+the heartbeat both report *through that write*, so a stuck write silences the very
+instruments added to detect a stall. This is not a claim that the writes are the
+cause. It is the observation that every instrument so far assumed they were not, and
+that the assumption was never measured.
+
+Four changes, and a harness for the one that touches every package:
+
+- **`Breadcrumbs` writes on a thread of its own, and nobody waits on it for more than
+  two seconds.** `Drop` still returns with the line on disk whenever the disk is
+  behaving — the writer is normally a millisecond behind, so "the last line is the
+  call that killed us" holds exactly as before. When a write does not come back, the
+  caller carries on after two seconds, the lines behind it do not wait at all, and
+  every line is in `DiagLog`'s memory for the page. The dlog call moved into the same
+  writer: it is a write to a socket some other process may or may not be reading, and
+  it used to sit in front of the memory log. The header has a new line for it:
+
+  ```
+  trail write: 47 lines on disk
+  trail write: 47 lines on disk; the writer stalled 1 time(s), longest 38 s in the trail file, and caught up
+  trail write: STALLED — the trail file has held "engine init returned 0 — retrying (…)" for 41 s; 6 line(s) queued behind it are in "this run" below and nowhere else
+  ```
+
+  The third form is the finding this build exists to make possible. If a page from
+  the Q80 ever carries it, every "the set stalls on call X" in this document since
+  `build-3368aea` is a guess about the wrong call, and the trail file from that launch
+  is not the record — the page is.
+
+- **A rung has to end two launches before it counts as a refusal.** `ledger 3`:
+  a bare step name on the ledger is counted, not believed; the rung is asked again
+  and the trail says so (`the launch that asked this ended before it answered —
+  asking once more; a second launch ending here is a refusal`), and only a second
+  bare line records `KILLED THE PROCESS`. The cost is one launch per genuinely fatal
+  rung. The alternative was the verdict that closes the issue being produced by a
+  set that stops launches at moments of its own choosing, on whichever rung happened
+  to be in flight. Every launch of the walk now writes a `launch` marker, which is
+  where the launch count comes from; it used to be inferred from the abandonments,
+  which stopped meaning the same thing.
+
+- **The ladder walks ahead of the engine on an install whose disk already says the
+  engine fails there.** The rule since #13 is that a diagnostic which can end the
+  process goes after the thing it explains. This is the one exception, and the
+  evidence for it is the ledger's existence: the file is only ever created on a launch
+  whose engine had already failed, so a ledger with no verdict means the engine's
+  failure on this install is on the books — ten builds over — and the ladder's verdict
+  is not. Between the first `refcount=0` and the start of the walk there are six
+  native calls (the implementation's preload, `ewk_set_arguments`, the retry, two
+  explainer dlopens, a directory listing), and on 2026-09-05 they stopped four
+  launches in five in front of the ladder; each of those launches re-established a
+  failure already recorded and asked nothing new. So `NativeProbe.StartEarlyIfUnfinished`
+  runs from `OnCreate` right after the UI is built: on an install with no ledger —
+  every set this app works on — it is one `File.Exists` under the deadline and
+  nothing changes; on the Q80 it starts the walk on its own thread before `ewk_init`
+  and the ordinary start after the failure finds the walk taken. A ledger from
+  another build counts as unfinished, which is what the Q80 has on disk right now.
+  The worst the walk can do to the engine's start is be in the process — one library
+  with one symbol, if a location ever takes it — while `ewk_init` runs.
+
+- **The ledger's appends go under the deadline too**, and one miss writes the ledger
+  off for the rest of the launch rather than costing five seconds per rung. Only its
+  `open` was covered before; the 2026-09-05 launch that reached the ladder had an
+  append as the last thing it did.
+
+`tools/trail/run.sh` holds the first of those to both of its promises against the
+shipping `Breadcrumbs.cs`: a line on disk before `Drop` returns while the disk
+behaves, and — with the trail file swapped for a FIFO nobody reads, or dlog told to
+hold — a `Drop` that comes back in two seconds, lines behind it that do not wait, a
+header naming the write and the count, and every line landing in order with the time
+it was dropped once the disk comes back. `tools/probeladder/run.sh` gained three
+shapes: `abandoned` (one bare line — asked again), `early` (an unfinished ledger
+starts the walk ahead of the engine, and a second start is turned away) and
+`notearly` (no ledger, or a finished one — nothing changes). `killed` now needs two.
+
+**What the next report decides.** Read the header's `trail write:` line first:
+
+- `STALLED — …` on any page: the writes are what this set stops, the page is the
+  record for that launch, and the ladder's progress is in the `native code of our own`
+  block from memory. The verdict still comes from the ledger over launches, so
+  nothing about the two `own native :` branches changes — but the history of "hangs"
+  in this document gets a footnote.
+- `N lines on disk` and a trail that still stops with no ticks after it: the process
+  was gone at that moment, and the ledger carries the ladder on next launch as
+  designed. A `launch` count well above the number of launches the reporter made
+  would mean the early walk is being ended before the engine is asked, which is the
+  cost the exception above accepted knowingly.
+- `own native :` — the same two branches as before, with `KILLED THE PROCESS` now
+  meaning two launches ended on the same rung, which is a claim worth the weight
+  the verdict puts on it.
 
 ### `ELM_ACCEL` has to be set before the window exists
 
