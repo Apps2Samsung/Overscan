@@ -20,6 +20,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="Stubs.cs" />
     <Compile Include="../../src/common/NativeProbe.cs" />
+    <Compile Include="../../src/common/Deadline.cs" />
   </ItemGroup>
 
 </Project>

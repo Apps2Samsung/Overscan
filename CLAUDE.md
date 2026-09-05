@@ -176,8 +176,9 @@ tools/probeladder/run.sh
 It compiles the shipping `src/common/NativeProbe.cs` against stand-ins for the three
 platform types it touches, and walks it over the shapes that set has actually
 produced: a rung that hangs, a rung a previous launch never came back from, a ledger
-left by another build, and a clean run twice over. It needs a C compiler for the
-stand-in library and nothing else.
+left by another build, a ledger that never opens, a page loaded before the walk, and
+a clean run twice over. It needs a C compiler for the stand-in library and nothing
+else.
 
 The ladder's only real property is that it converges — whatever one rung does, the
 rungs and locations behind it still get asked. Two builds have been spent finding out

@@ -103,16 +103,7 @@ namespace Overscan
         /// one of those is indistinguishable, in the report, from a walk that was never
         /// asked to start.
         /// </summary>
-        private const string Stalled = "DID NOT RETURN";
-
-        /// <summary>
-        /// How long any one call gets before it is written off as <see cref="Stalled"/>.
-        /// Every rung here is a syscall against a 2 KB file: if one has not come back in
-        /// five seconds it is not coming back, and the worst case — every rung of every
-        /// location hanging — still finishes the walk inside three minutes, on a thread
-        /// nobody is waiting on.
-        /// </summary>
-        private const int CallTimeoutMs = 5000;
+        private const string Stalled = Deadline.Missed;
 
         [DllImport("libc.so.6", SetLastError = true)]
         private static extern int open(string path, int flags);
@@ -142,8 +133,26 @@ namespace Overscan
         [DllImport("libdl.so.2")]
         private static extern IntPtr dlsym(IntPtr handle, string symbol);
 
-        /// <summary>The one line for the report header.</summary>
-        public static string Summary = "(not asked)";
+        /// <summary>
+        /// The one line for the report header.
+        ///
+        /// Until this launch's walk has begun it is whatever an earlier launch left on
+        /// the ledger — the verdict, if one was reached, or how far the walk got. Every
+        /// report issue #17's set has ever sent was a page loaded a second or two after
+        /// launch, and until `build-f295172` such a page read `(not asked)` no matter
+        /// what was already on disk from the launch before. The half of the probe that
+        /// outlives a launch is the half a launch-time page has to show.
+        /// </summary>
+        public static string Summary
+        {
+            get { return _summary ?? Ledger.Peek(); }
+            private set { _summary = value; }
+        }
+
+        private static string _summary;
+
+        /// <summary>The header before anything has been asked, on this launch or any other.</summary>
+        private const string NotAsked = "(not asked)";
 
         private static readonly List<string> Lines = new List<string>();
 
@@ -211,6 +220,25 @@ namespace Overscan
         ///   that hangs on every rung still finishes the ladder without anybody
         ///   opening the app again.
         ///
+        /// `build-f295172` then stopped in front of all of that. Its trail has the
+        /// engine failure and then nothing, for the 84 seconds until the next launch,
+        /// and the only code between the start of the walk and its first trail line
+        /// was this file's own I/O: an <c>open</c>, a read, and two appends each ending
+        /// in <c>fsync</c> — the one stretch of the path not under the watchdog,
+        /// because it was ours rather than the set's. Three things follow from that
+        /// and are in here now:
+        ///
+        /// * <b>The ledger's own I/O goes out under <see cref="Deadline"/></b>, like
+        ///   every rung behind it. A ledger that does not open in five seconds is
+        ///   written off — the walk runs without one — and says so on the trail.
+        /// * <b>No <c>fsync</c>.</b> <c>Breadcrumbs</c> has written thousands of lines
+        ///   on that set with a plain flush and never lost one to a crash; the ledger's
+        ///   two syncs bought nothing and sat exactly where the walk went silent.
+        /// * <b>The verdict is on the ledger, and the report reads the ledger without
+        ///   the walk.</b> <see cref="Conclude"/> writes the one line that matters, and
+        ///   <see cref="Peek"/> reads the file for a page served before this launch's
+        ///   walk has begun — which is when every page from that set has been fetched.
+        ///
         /// This is the same idea as <c>Breadcrumbs</c> — write before the call, not
         /// after — carried one step further: the trail says which call died, and the
         /// ledger makes the *next* launch act on that.
@@ -240,6 +268,15 @@ namespace Overscan
 
             private static string _path;
 
+            /// <summary>The verdict a walk reached, this launch or an earlier one. Under <see cref="Book"/>.</summary>
+            private static string _verdict;
+
+            /// <summary>Set once <see cref="Peek"/> has read the file, so a report reads it once.</summary>
+            private static bool _peeked;
+
+            /// <summary>The line the verdict is kept under. Not a step, so never asked.</summary>
+            private const string VerdictKey = "verdict";
+
             /// <summary>True when there is nowhere to keep one, so nothing resumes.</summary>
             public static bool Unavailable
             {
@@ -249,85 +286,183 @@ namespace Overscan
             /// <summary>
             /// Reads whatever previous launches left. A file stamped for a different
             /// build is deleted rather than parsed.
+            ///
+            /// Under the deadline, because on `build-f295172` this is where the walk
+            /// went silent: nothing on the trail after the engine failure, and this was
+            /// the only code in front of the first line the walk writes. A ledger that
+            /// does not open is written off and the walk runs without one — it cannot
+            /// resume and cannot be resumed from, and the trail says so — but it runs.
             /// </summary>
             public static void Open(string directory)
+            {
+                _path = null;
+
+                if (string.IsNullOrEmpty(directory))
+                {
+                    return;
+                }
+
+                string path = Path.Combine(directory, LedgerFile);
+                string outcome = Deadline.Run(delegate
+                {
+                    string[] lines = File.Exists(path) ? File.ReadAllLines(path) : new string[0];
+                    if (lines.Length > 0 && string.Equals(lines[0], LedgerVersion, StringComparison.Ordinal))
+                    {
+                        Parse(lines);
+                        return "ok";
+                    }
+
+                    bool other = lines.Length > 0;
+                    if (other)
+                    {
+                        File.Delete(path);
+                    }
+
+                    Parse(new string[0]);
+                    Append(path, LedgerVersion);
+                    return other ? "from another build, starting over" : "new";
+                });
+
+                if (string.Equals(outcome, "ok", StringComparison.Ordinal) ||
+                    string.Equals(outcome, "new", StringComparison.Ordinal))
+                {
+                    _path = path;
+                    return;
+                }
+
+                if (outcome.StartsWith("from another build", StringComparison.Ordinal))
+                {
+                    Trace("  probe ledger: " + outcome);
+                    _path = path;
+                    return;
+                }
+
+                // Stalled, or threw. Without a ledger the probe still works, it just
+                // cannot resume — and whatever Peek read for an earlier report is left
+                // on the books, so answers already established are still replayed.
+                Trace("  probe ledger unavailable: " + outcome +
+                      " — this launch cannot resume, and cannot be resumed from");
+                _path = null;
+            }
+
+            /// <summary>
+            /// What earlier launches left, for a report served before this launch's
+            /// walk has begun. Read once, under the deadline, and never written: a
+            /// page must not be what starts the ladder, or what stalls the socket
+            /// thread serving it.
+            /// </summary>
+            public static string Peek()
+            {
+                lock (Book)
+                {
+                    if (_peeked)
+                    {
+                        return Order.Count == 0 && _verdict == null ? NotAsked : Progress();
+                    }
+                }
+
+                string directory = DataDirectory();
+                if (string.IsNullOrEmpty(directory))
+                {
+                    // Asked before the application object exists. Not remembered as
+                    // read, so a later page tries again.
+                    return NotAsked;
+                }
+
+                lock (Book)
+                {
+                    _peeked = true;
+                }
+
+                string path = Path.Combine(directory, LedgerFile);
+                string outcome = Deadline.Run(delegate
+                {
+                    if (!File.Exists(path))
+                    {
+                        return "none";
+                    }
+
+                    string[] lines = File.ReadAllLines(path);
+                    if (lines.Length == 0 || !string.Equals(lines[0], LedgerVersion, StringComparison.Ordinal))
+                    {
+                        return "from another build";
+                    }
+
+                    Parse(lines);
+                    return "ok";
+                });
+
+                return string.Equals(outcome, "ok", StringComparison.Ordinal) ? Progress() : NotAsked;
+            }
+
+            /// <summary>
+            /// Replaces the books with what <paramref name="lines"/> say. The first
+            /// line is the version stamp, already checked. Under <see cref="Book"/>.
+            /// </summary>
+            private static void Parse(string[] lines)
             {
                 lock (Book)
                 {
                     Answered.Clear();
                     Abandoned.Clear();
                     Order.Clear();
+                    _verdict = null;
+
+                    // A name on its own is a call that was started; the same name
+                    // with an answer after it retires that. Later lines win, which
+                    // is what makes the file append-only.
+                    for (int i = 1; i < lines.Length; i++)
+                    {
+                        string line = lines[i];
+                        int split = line.IndexOf('\t');
+                        if (split < 0)
+                        {
+                            Abandoned.Add(line);
+                            Remember(line);
+                        }
+                        else
+                        {
+                            string step = line.Substring(0, split);
+                            if (string.Equals(step, VerdictKey, StringComparison.Ordinal))
+                            {
+                                _verdict = line.Substring(split + 1);
+                                continue;
+                            }
+
+                            Abandoned.Remove(step);
+                            Answered[step] = line.Substring(split + 1);
+                            Remember(step);
+                        }
+                    }
+
+                    // Every step that ended a launch is one extra launch this ladder
+                    // has cost, whether it has been retired into an answer already or
+                    // is still sitting there unanswered.
+                    Launches = 1 + Abandoned.Count;
+                    foreach (string answer in Answered.Values)
+                    {
+                        if (string.Equals(answer, Killed, StringComparison.Ordinal))
+                        {
+                            Launches++;
+                        }
+                    }
                 }
+            }
 
-                _path = null;
-
-                try
+            /// <summary>
+            /// Writes the verdict down. It is the one line the whole ladder exists to
+            /// produce, and until `build-f295172` it was the one line that never
+            /// reached the disk: a page loaded on the launch after the walk finished
+            /// read `(not asked)` over a complete ledger.
+            /// </summary>
+            public static void Conclude(string verdict)
+            {
+                lock (Book)
                 {
-                    if (string.IsNullOrEmpty(directory))
-                    {
-                        return;
-                    }
-
-                    string path = Path.Combine(directory, LedgerFile);
-                    string[] lines = File.Exists(path) ? File.ReadAllLines(path) : new string[0];
-
-                    if (lines.Length == 0 || !string.Equals(lines[0], LedgerVersion, StringComparison.Ordinal))
-                    {
-                        if (lines.Length > 0)
-                        {
-                            Trace("  probe ledger: from another build, starting over");
-                            File.Delete(path);
-                        }
-
-                        _path = path;
-                        Append(LedgerVersion);
-                        return;
-                    }
-
-                    lock (Book)
-                    {
-                        // A name on its own is a call that was started; the same name
-                        // with an answer after it retires that. Later lines win, which
-                        // is what makes the file append-only.
-                        for (int i = 1; i < lines.Length; i++)
-                        {
-                            string line = lines[i];
-                            int split = line.IndexOf('\t');
-                            if (split < 0)
-                            {
-                                Abandoned.Add(line);
-                                Remember(line);
-                            }
-                            else
-                            {
-                                string step = line.Substring(0, split);
-                                Abandoned.Remove(step);
-                                Answered[step] = line.Substring(split + 1);
-                                Remember(step);
-                            }
-                        }
-
-                        // Every step that ended a launch is one extra launch this ladder
-                        // has cost, whether it has been retired into an answer already or
-                        // is still sitting there unanswered.
-                        Launches = 1 + Abandoned.Count;
-                        foreach (string answer in Answered.Values)
-                        {
-                            if (string.Equals(answer, Killed, StringComparison.Ordinal))
-                            {
-                                Launches++;
-                            }
-                        }
-                    }
-
-                    _path = path;
+                    _verdict = verdict;
                 }
-                catch (Exception ex)
-                {
-                    // Without a ledger the probe still works, it just cannot resume.
-                    Trace("  probe ledger unavailable: " + ex.GetType().Name + ": " + ex.Message);
-                    _path = null;
-                }
+
+                Append(VerdictKey + "\t" + verdict);
             }
 
             /// <summary>
@@ -376,80 +511,22 @@ namespace Overscan
             }
 
             /// <summary>
-            /// One call, on a thread of its own, with a deadline.
-            ///
-            /// A call that misses it is left running and written off. Nothing else is
-            /// possible: .NET Core has no <c>Thread.Abort</c>, and a thread stopped
-            /// inside a syscall would not honour one anyway. The thread is a background
-            /// thread so a probe still stuck in there cannot hold the process open
-            /// after the user has walked away from the failure screen, and the event it
-            /// signals is deliberately never disposed — disposing it under a thread
-            /// that is still holding it would raise on a thread with nobody to catch
-            /// it, which on this app means the crash this class exists to avoid.
+            /// One call, with a deadline — see <see cref="Deadline"/>, where the
+            /// mechanism lives now that the engine explainer and this ledger's own
+            /// <c>open</c> need it too. A miss is named on the trail here, in the
+            /// walk's own words.
             /// </summary>
             private static string Watched(string step, Func<string> call)
             {
-                string answer = null;
-                Exception failure = null;
-                var finished = new ManualResetEvent(false);
-
-                try
+                string answer = Deadline.Run(call);
+                if (string.Equals(answer, Stalled, StringComparison.Ordinal))
                 {
-                    var thread = new Thread(delegate ()
-                    {
-                        try
-                        {
-                            answer = call();
-                        }
-                        catch (Exception ex)
-                        {
-                            failure = ex;
-                        }
-
-                        try
-                        {
-                            finished.Set();
-                        }
-                        catch (Exception)
-                        {
-                            // Nobody to report it to: the waiter has already given up.
-                        }
-                    });
-
-                    thread.IsBackground = true;
-                    thread.Name = "probe-rung";
-                    thread.Start();
-
-                    if (!finished.WaitOne(CallTimeoutMs))
-                    {
-                        Trace("  " + step + ": nothing back in " +
-                              (CallTimeoutMs / 1000).ToString(CultureInfo.InvariantCulture) +
-                              "s — written off, carrying on");
-                        return Stalled;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // A set that will not give us a thread still gets asked, it just
-                    // gets asked the dangerous way — which is what every build before
-                    // this one did on every rung.
-                    Trace("  " + step + ": no thread (" + ex.GetType().Name + "), asking inline");
-                    try
-                    {
-                        return call();
-                    }
-                    catch (Exception inner)
-                    {
-                        return "threw " + inner.GetType().Name + ": " + inner.Message;
-                    }
+                    Trace("  " + step + ": nothing back in " +
+                          (Deadline.DefaultMs / 1000).ToString(CultureInfo.InvariantCulture) +
+                          "s — written off, carrying on");
                 }
 
-                if (failure != null)
-                {
-                    return "threw " + failure.GetType().Name + ": " + failure.Message;
-                }
-
-                return answer ?? "(the call returned nothing)";
+                return answer;
             }
 
             /// <summary>
@@ -466,6 +543,13 @@ namespace Overscan
             {
                 lock (Book)
                 {
+                    if (_verdict != null)
+                    {
+                        // Reached on this launch or an earlier one; either way it is
+                        // the answer, and a walk re-running behind it only confirms it.
+                        return _verdict;
+                    }
+
                     if (Order.Count == 0)
                     {
                         return "(not asked yet)";
@@ -514,6 +598,11 @@ namespace Overscan
                                       ? answer
                                       : "(began, never answered — the next launch reads this as " +
                                         Killed + ")"));
+                    }
+
+                    if (_verdict != null)
+                    {
+                        text.Add("    " + VerdictKey.PadRight(22) + " = " + _verdict);
                     }
 
                     return string.Join("\n", text.ToArray()) + "\n";
@@ -581,22 +670,34 @@ namespace Overscan
             /// One line, flushed to disk on its own. The whole point is that it is on
             /// the disk before the call it describes, so it is opened and closed each
             /// time rather than held — the same trade <c>Breadcrumbs</c> makes.
+            ///
+            /// A plain flush, not an <c>fsync</c>. The sync was here until
+            /// `build-f295172`, on the theory that a line the kernel had not yet written
+            /// out could be lost to the crash it describes — but <c>Breadcrumbs</c> has
+            /// made the same trade without one on every set this app has run on,
+            /// including issue #17's, and has never lost a line to a crash. What the
+            /// sync did do is sit in the one window on that set where the walk went
+            /// silent before its first line, twice per launch, on a filesystem that
+            /// parks calls it does not like. It bought nothing and may have cost the
+            /// build.
             /// </summary>
             private static void Append(string line)
             {
-                if (_path == null)
+                if (_path != null)
                 {
-                    return;
+                    Append(_path, line);
                 }
+            }
 
+            private static void Append(string path, string line)
+            {
                 try
                 {
-                    using (var file = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                    using (var file = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
                     using (var writer = new StreamWriter(file))
                     {
                         writer.WriteLine(line);
                         writer.Flush();
-                        file.Flush(true);
                     }
                 }
                 catch (Exception)
@@ -635,6 +736,12 @@ namespace Overscan
         {
             try
             {
+                // Before the ledger, which is the first thing here that touches the
+                // disk. On build-f295172 the trail ended on the engine failure and the
+                // walk never wrote a line, and there was no telling a thread that never
+                // ran from one parked in the ledger's own open. Now there is.
+                Trace("native probe: starting");
+
                 Ledger.Open(DataDirectory());
                 if (Ledger.Unavailable)
                 {
@@ -675,6 +782,7 @@ namespace Overscan
 
                 Summary = Verdict(locations, anonymous);
                 Trace("native probe verdict: " + Summary);
+                Ledger.Conclude(Summary);
 
                 // Last, and only for the record: which mount each copy sat on and
                 // what Smack wrote on it. See the note above about ordering.
@@ -705,6 +813,13 @@ namespace Overscan
         /// </summary>
         public static string Dump()
         {
+            // The header has usually been read first and done this already; a page
+            // that asks for the block alone gets the same answer.
+            if (_summary == null)
+            {
+                Ledger.Peek();
+            }
+
             // Read before the trail's lock is taken, never under it: Ledger has a lock
             // of its own, and Ask holds that one while it Traces into this one.
             string kept = Ledger.Recorded();

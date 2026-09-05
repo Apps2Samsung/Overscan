@@ -378,7 +378,7 @@ namespace Overscan
             // long as it likes and cannot cost anything — whereas running it before
             // ewk_init cost #13 and #17 a build each: the app died inside it and the
             // engine was never asked to start at all. See SmackWall.
-            Breadcrumbs.Drop("own code: " + SmackWall.OwnCode());
+            Breadcrumbs.Drop("own code: " + Deadline.Run(SmackWall.OwnCode));
             SmackWall.InvestigateInBackground(ChromiumImpl.Blocked);
 
             _engineFailure =
@@ -392,6 +392,14 @@ namespace Overscan
                 "Engine implementation: " + ChromiumImpl.Summary + "\n" +
                 "Retry with the argument vector set: " + argv;
             Breadcrumbs.Drop("ENGINE FAILURE ewk_init returned 0 twice");
+
+            // A slow beat for as long as the failure screen is likely to be up. The
+            // probe behind it writes to the same trail as it goes, so a trail that has
+            // ticks and no probe lines is a probe parked in its first call, and one
+            // with neither is a process that died drawing this screen. build-f295172
+            // left 84 seconds with no line of either kind, and there was no reading
+            // it. See Heartbeat.
+            Heartbeat.Start("on the failure screen", 10, 180);
             return false;
         }
 
