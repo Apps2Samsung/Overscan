@@ -56,6 +56,12 @@ namespace Overscan.Harness
                 case "version":
                     Version(root);
                     break;
+                case "ledgerhang":
+                    LedgerHang(root, clock);
+                    break;
+                case "peek":
+                    Peek(root);
+                    break;
                 default:
                     Console.Error.WriteLine("unknown scenario: " + scenario);
                     return 2;
@@ -88,6 +94,59 @@ namespace Overscan.Harness
             Expect(ledger.Contains("res/:exec\t"), "so is the executable mapping");
             Expect(ledger.Contains("res/:labels\t"),
                    "and so is getxattr, the call this set has hung on twice");
+            Expect(ledger.Contains("verdict\t" + NativeProbe.Summary),
+                   "and the verdict itself is the last thing on the books");
+            Expect(Breadcrumbs.Trail.StartsWith("native probe: starting"),
+                   "the walk says it started before it touches the disk");
+        }
+
+        /// <summary>
+        /// The shape that stopped `build-f295172`: the ledger's own open never comes
+        /// back. Until then it was the one call on the path not under the deadline,
+        /// and the walk went silent in front of its first line. It is written off
+        /// like any rung, and the walk runs without a ledger rather than not at all.
+        /// </summary>
+        private static void LedgerHang(string root, Stopwatch clock)
+        {
+            NativeProbe.Run();
+
+            string trail = Breadcrumbs.Trail;
+
+            Expect(trail.Contains("probe ledger unavailable: DID NOT RETURN"),
+                   "the ledger that never opened is written off by name");
+            Expect(trail.Contains("probe: mmap PROT_READ|PROT_EXEC res/"),
+                   "and the walk still runs — the rungs do not need the ledger to be asked");
+            Expect(NativeProbe.Summary != "(not asked)" && !NativeProbe.Summary.StartsWith("still asking"),
+                   "and reaches a verdict");
+            Expect(clock.ElapsedMilliseconds < 60000,
+                   "in one evening (" + clock.ElapsedMilliseconds + " ms)");
+        }
+
+        /// <summary>
+        /// A page loaded before the walk has begun — which is every page issue #17's
+        /// set has ever sent. The header and the block have to show what the previous
+        /// launch left on disk, verdict included, without starting the walk.
+        /// </summary>
+        private static void Peek(string root)
+        {
+            string before = NativeProbe.Summary;
+            Expect(before == "REFUSED in res/ — seeded by the harness",
+                   "the header is the verdict an earlier launch reached (" + before + ")");
+            Expect(NativeProbe.Dump().Contains("kept across launches"),
+                   "the block shows the answers that launch wrote down");
+            Expect(NativeProbe.Dump().Contains("= REFUSED in res/ — seeded by the harness"),
+                   "with the verdict as its last line");
+            Expect(!Breadcrumbs.Trail.Contains("native probe: starting"),
+                   "and none of that started the walk");
+
+            NativeProbe.Run();
+
+            Expect(NativeProbe.Summary.Contains("maps executable and dlopen loaded it"),
+                   "a walk behind it replaces the verdict with this box's own");
+            string ledger = Ledger(root);
+            Expect(ledger.IndexOf("verdict\t" + NativeProbe.Summary, StringComparison.Ordinal) >
+                   ledger.IndexOf("verdict\tREFUSED in res/", StringComparison.Ordinal),
+                   "and writes the new one down after the old — later lines win");
         }
 
         /// <summary>

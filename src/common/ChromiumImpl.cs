@@ -193,6 +193,15 @@ namespace Overscan
         /// refusal for a crash. Running it after both init attempts have returned 0
         /// costs nothing, and tells us whether the fault is an unresolved symbol
         /// (fails RTLD_NOW, loads RTLD_LAZY) or the file genuinely not opening.
+        ///
+        /// Every call in here goes out under <see cref="Deadline"/>. This runs on the
+        /// main thread, in front of the failure screen, and on `build-f295172` issue
+        /// #17's set stopped one launch here: the trail ends on `RTLD_LAZY: also
+        /// fails`, the next line would have been the directory listing, and the
+        /// listing is of a directory this same set had listed without complaint on
+        /// five launches before. Nothing about that call was dangerous; nothing about
+        /// this set's stalls is predictable. A miss is a line that says so, and the
+        /// failure screen still goes up behind it.
         /// </summary>
         public static void Explain()
         {
@@ -208,25 +217,36 @@ namespace Overscan
                 Note("LD_LIBRARY_PATH: " +
                           (Environment.GetEnvironmentVariable("LD_LIBRARY_PATH") ?? "(unset)"));
 
-                if (Implementation != null)
+                string implementation = Implementation;
+                if (implementation != null)
                 {
-                    Note("readable by us: " + Readable(Implementation));
+                    Note("readable by us: " + Watched("readable by us",
+                        delegate { return Readable(implementation); }));
 
                     if (!Loaded)
                     {
                         // A bare RTLD_LAZY, without RTLD_GLOBAL: if it does load,
                         // keep it out of the global symbol scope so it cannot be
                         // bound to by anything still running.
-                        string error;
-                        bool lazy = TryOpen(Implementation, RtldLazy, out error);
-                        Note(lazy
-                            ? "RTLD_LAZY: loads — so the fault is a symbol the engine " +
-                              "resolves at bind time, not the file failing to open"
-                            : "RTLD_LAZY: also fails — " + error);
+                        Note(Watched("RTLD_LAZY", delegate
+                        {
+                            string error;
+                            bool lazy = TryOpen(implementation, RtldLazy, out error);
+                            return lazy
+                                ? "RTLD_LAZY: loads — so the fault is a symbol the engine " +
+                                  "resolves at bind time, not the file failing to open"
+                                : "RTLD_LAZY: also fails — " + error;
+                        }));
                     }
                 }
 
-                ListDirectory("/usr/share/chromium-efl/lib");
+                const string engineDirectory = "/usr/share/chromium-efl/lib";
+                string listing = Watched(engineDirectory,
+                    delegate { return ListDirectory(engineDirectory); });
+                foreach (string line in listing.Split('\n'))
+                {
+                    Note(line);
+                }
             }
             catch (Exception ex)
             {
@@ -433,36 +453,56 @@ namespace Overscan
             }
         }
 
-        private static void ListDirectory(string directory)
+        /// <summary>
+        /// One call under the deadline, with a miss named after what was asked — the
+        /// bare <c>DID NOT RETURN</c> on its own would not say which call it was.
+        /// </summary>
+        private static string Watched(string what, Func<string> call)
         {
+            string answer = Deadline.Run(call);
+            return string.Equals(answer, Deadline.Missed, StringComparison.Ordinal)
+                ? what + ": " + Deadline.Missed + " in " + (Deadline.DefaultMs / 1000) +
+                  "s — written off, carrying on"
+                : answer;
+        }
+
+        /// <summary>
+        /// The listing as lines, rather than noted as it goes: it is made on the
+        /// deadline's thread, and a call that is being written off must not still
+        /// be writing into the report from behind the deadline.
+        /// </summary>
+        private static string ListDirectory(string directory)
+        {
+            var lines = new List<string>();
             try
             {
                 if (!Directory.Exists(directory))
                 {
-                    Note(directory + ": not a directory");
-                    return;
+                    return directory + ": not a directory";
                 }
 
                 string[] entries = Directory.GetFiles(directory);
                 Array.Sort(entries, StringComparer.Ordinal);
-                Note(directory + ": " + entries.Length + " files");
+                lines.Add(directory + ": " + entries.Length + " files");
 
                 // Enough to see what the engine ships beside itself, few enough to
                 // read on a TV.
                 for (int i = 0; i < entries.Length && i < 24; i++)
                 {
-                    Note("  " + Path.GetFileName(entries[i]));
+                    lines.Add("  " + Path.GetFileName(entries[i]));
                 }
 
                 if (entries.Length > 24)
                 {
-                    Note("  … and " + (entries.Length - 24) + " more");
+                    lines.Add("  … and " + (entries.Length - 24) + " more");
                 }
             }
             catch (Exception ex)
             {
-                Note(directory + ": " + ex.GetType().Name + ": " + ex.Message);
+                lines.Add(directory + ": " + ex.GetType().Name + ": " + ex.Message);
             }
+
+            return string.Join("\n", lines.ToArray());
         }
 
         private static string Indent(int depth)

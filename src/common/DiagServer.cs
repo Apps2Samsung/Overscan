@@ -96,7 +96,11 @@ namespace Overscan
                 // this page is what a reporter gets when they are quick off the
                 // mark — issue #17's first fetch showed three lines and nothing
                 // else. It is the same trail the full report carries.
+                // The probe's ledger outlives a launch, and the header line is the
+                // one a reporter copies first — so it is here too, on the page they
+                // get when the UI is not up yet.
                 return "Overscan — no report provider yet (UI has not started)\n\n" +
+                       "own native : " + NativeProbe.Summary + "\n\n" +
                        "this run\n" + DiagLog.Dump() +
                        "\nprevious run (last line is where it died)\n" +
                        Breadcrumbs.Previous +

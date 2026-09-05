@@ -543,16 +543,20 @@ So the stub had a cheap prerequisite, and `build-9d856d1` is the build that aske
 it. **The Q80 answered on 2026-08-27 for `res/`, and the answer was no** — see *The
 exec mapping is refused, and where that leaves it* below.
 
-**The other four locations are still unanswered.** Two builds have now been spent
+**The other four locations are still unanswered.** Three builds have now been spent
 on the ladder rather than on the question: `build-85d0e4e` was killed on its first
-rung, and `build-3368aea` stopped between the `open` and the header read on
-2026-09-01 — see *The ladder also has to survive the questions nobody suspected*.
-So the "if every location refuses, close issue 17" branch is **not** reached, and
-saying it is would be a guess: only `res/` has ever answered. Every rung is now
-ledgered and every call has a watchdog, `tools/probeladder/run.sh` holds the walk to
-converging off-device, and **`build-e2914be` is the build that decides it**. What
-each answer means was said on the issue before it shipped, so neither reading is a
-reversal later:
+rung, `build-3368aea` stopped between the `open` and the header read on 2026-09-01
+— see *The ladder also has to survive the questions nobody suspected* — and
+`build-f295172` (the same probe as `build-e2914be`) came back on 2026-09-04 with the
+walk never having written a line, see *The ladder has to start, and the page has to
+show it without the walk*. So the "if every location refuses, close issue 17"
+branch is **not** reached, and saying it is would be a guess: only `res/` has ever
+answered. Every rung is ledgered, every call has a watchdog — the ledger's own
+`open` and the engine explainer included now — the report reads the ledger off the
+disk before the walk has begun, `tools/probeladder/run.sh` holds all of that
+off-device, and **`build-<next>` is the build that decides it**. What each answer
+means was said on the issue before it shipped, so neither reading is a reversal
+later:
 
 - `own native : bin/ maps executable...` (or `lib/`, or `data/`) — there is a place
   in the package this set will run a file of ours from, and the stub is worth
@@ -778,6 +782,88 @@ over. The `hang` scenario is the one that earns it — against `build-3368aea`'s
 it does not fail, it never returns, which is precisely what the Q80 did with
 somebody's evening. Two builds is too many to spend discovering that a ladder does
 not climb.
+
+### The ladder has to start, and the page has to show it without the walk
+
+`build-f295172` shipped that watchdog and the Q80 came back on 2026-09-04 with a
+third shape, one rung in front of the first one. Two launches, 40 seconds apart:
+
+```
+21:38:14    RTLD_LAZY: also fails — libprivileged-service-client.so: …
+                                         (P1 — nothing after, for 40 s)
+21:38:54  own code: yes — /proc/self/fd/37/bin maps executable
+21:38:54  ENGINE FAILURE ewk_init returned 0 twice
+                                         (P2 — nothing after, for 84 s)
+```
+
+P2 is the one that matters. `ENGINE FAILURE` is the line before the failure screen,
+and the probe thread starts on the line before that; with a five-second deadline on
+every rung it should have written twenty lines in those 84 seconds. It wrote none.
+`NativeProbe.Run` traces on every path, and the only code between the start of the
+thread and its first trace was the ledger's own I/O — `File.Exists`, `ReadAllLines`,
+and an append ending in `fsync`, twice — the one stretch of the walk not under the
+deadline, because it was ours rather than the set's. Whether the thread parked
+there or the process died drawing the failure screen the trail cannot say: no line
+of either kind was written for 84 seconds, and there was nothing that would have
+been. P1 is the same fault on the main thread: the line after `RTLD_LAZY` is the
+engine explainer's `Directory.GetFiles` on `/usr/share/chromium-efl/lib`, a
+directory this set had listed without complaint on five launches before, and
+that launch never drew a failure screen at all.
+
+So the stalls on this set are not a property of any one call. `getxattr` on
+`/usr/lib`, an `open` of our own file in `res/`, a directory listing under
+`/usr/share`, and a read-plus-append in our own `data/` — four mounts, both
+threads, and each of them a call that had returned promptly on the launches before.
+Predicting which call is dangerous has now been wrong four times, and the only
+arrangement left is the one with no prediction in it. Six changes, all in the same
+build:
+
+- **The walk's first act is a trail line**, `native probe: starting`, before the
+  ledger is touched. A thread that never ran and one parked in its first call are
+  finally two different trails.
+- **The ledger's own I/O goes under `Deadline`**, the watchdog that used to be
+  `Ledger.Watched` and is now a class of its own in `src/common`, because the engine
+  explainer needs it too. A ledger that does not open in five seconds is written
+  off — the trail says `probe ledger unavailable: DID NOT RETURN` — and the walk runs
+  without one rather than not at all.
+- **No `fsync`.** `Breadcrumbs` has written thousands of lines on this set with a
+  plain flush and has never lost one to a crash. The ledger's two syncs bought
+  nothing and sat exactly where the walk went silent.
+- **The verdict is written to the ledger, and the report reads the ledger from the
+  disk before the walk has begun.** Every report this set has ever sent was a page
+  loaded a second or two after launch — ten builds of asking otherwise have not
+  changed that, and it is a reasonable thing to do — and every one of them showed
+  `own native : (not asked)` over whatever the launch before had put on disk,
+  because `Summary` and `Dump` were in-memory state that only `Run` populated.
+  `Summary` is now a property that reads the ledger (`Ledger.Peek`, once, under the
+  deadline, never writing) until this launch's walk starts, and `Recorded` prints
+  the verdict as its last line. So the launch-time page — the one we will get —
+  carries the previous launch's whole ladder, verdict included, and the reporter's
+  instruction is finally the true one: open it, wait a minute, open it again, send
+  the page.
+- **The engine explainer's three calls go under the same deadline**, on the main
+  thread, with a miss noted by name. The failure screen goes up behind a five-second
+  stall instead of never.
+- **A slow heartbeat on the failure screen**, `still on the failure screen — +10s`,
+  every ten seconds for three minutes, trail-only. A trail with ticks and no probe
+  lines is a parked probe; one with neither is a dead process. 84 seconds of nothing
+  is no longer a shape this trail can produce. Fixing that turned up an old bug in
+  `Heartbeat`: its stop flag was shared, so the retry's `Start` a millisecond after
+  the first call's `Stop` revived the first ticker — the stray
+  `still inside ewk_init — +1s` in the middle of P1's retry is that, not evidence
+  about the retry. It has a generation counter now.
+
+The harness holds two more shapes for it: `ledgerhang`, the ledger file as a FIFO,
+which is `build-f295172`'s silence and against that file does not fail, it sits
+there; and `peek`, a seeded ledger with a verdict read by a page before the walk,
+which asserts the header and the block come off the disk and that reading them does
+not start the walk.
+
+One thing this does **not** explain is why the set stalls, and the honest position
+is that we do not need to know. Every reading the verdict depends on is now made
+under a deadline or replayed from the disk, so the walk converges on a set that
+stalls every call — the harness's `hang` and `ledgerhang` scenarios are exactly that
+set — and a stall is a recorded refusal rather than a missing one.
 
 ### `ELM_ACCEL` has to be set before the window exists
 
