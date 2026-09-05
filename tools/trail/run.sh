@@ -14,7 +14,7 @@
 #     and cannot hide: the report's header says which write is stuck, on what, for
 #     how long, with how many lines behind it.
 #
-# The second was not true before build-<next>. Issue #17's set stopped launch after
+# The second was not true before build-1933ad8. Issue #17's set stopped launch after
 # launch on calls that had returned promptly the launch before — and every one of
 # those calls was immediately followed by a trail write. On 2026-09-05 a launch went
 # silent with a watchdog and a heartbeat both armed on threads of their own, and

@@ -558,7 +558,7 @@ has a watchdog, a rung has to end two launches before it counts as a refusal, th
 trail can no longer hold the thread that writes to it and says in the header when it
 is stuck, the ladder walks ahead of the engine on an install whose disk already says
 the engine fails there, `tools/probeladder/run.sh` and `tools/trail/run.sh` hold all
-of that off-device, and **`build-<next>` is the build that decides it**. What each
+of that off-device, and **`build-1933ad8` is the build that decides it** (shipped 2026-09-05). What each
 answer means was said on the issue before it shipped, so neither reading is a
 reversal later:
 
