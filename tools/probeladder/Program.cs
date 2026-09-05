@@ -260,18 +260,10 @@ namespace Overscan.Harness
             Expect(Breadcrumbs.Trail.Contains("native probe: already walking on another thread"),
                    "the ordinary start behind it is turned away rather than run twice");
 
-            while (NativeProbe.Summary.StartsWith("still asking") || NativeProbe.Summary.StartsWith("(not asked"))
-            {
-                if (clock.ElapsedMilliseconds > 60000)
-                {
-                    break;
-                }
-
-                System.Threading.Thread.Sleep(50);
-            }
-
+            Expect(NativeProbe.WaitForWalk(60000), "the engine can wait for the walk, and it finishes");
             Expect(NativeProbe.Summary.Contains("maps executable and dlopen loaded it"),
                    "and the early walk reaches this box's verdict (" + NativeProbe.Summary + ")");
+            Expect(NativeProbe.WaitForWalk(0), "a wait after the walk returns at once");
             Expect(Occurrences(Breadcrumbs.Trail, "native probe: starting") == 1,
                    "having started exactly once");
         }

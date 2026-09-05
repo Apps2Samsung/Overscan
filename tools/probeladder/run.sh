@@ -25,6 +25,9 @@
 #                  the anonymous-exec control, a rung the set had answered `ok` three
 #                  times before. One ended launch is not a refusal, and a ladder that
 #                  is only reached one launch in three is not a ladder.
+#   build-1933ad8  walked ahead of the engine and answered seven rungs in one launch,
+#                  then lost the launch a second after the engine failed, like every
+#                  launch before it. The engine waits for the walk now.
 #
 # Each round trip is somebody's evening: install, re-sign, launch, copy a page out
 # of a TV browser. That is far too expensive a way to find out that a ladder does
