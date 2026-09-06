@@ -1714,7 +1714,7 @@ name promises and the one it did not have.
 
 There is now no sequence of presses that produces a second tile for something
 already on the screen, and `tools/startpage/run.sh` holds that as a property
-rather than as a list of cases.
+rather than as a list of cases. Shipped in `build-c11d5fe`.
 
 One supporting detail: a tile carries **which grid it is in** (`data-kind`, written
 by `HomePage`, returned by `linkAt` in front of the address). The same page is very
