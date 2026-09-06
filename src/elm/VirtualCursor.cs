@@ -5,15 +5,6 @@ using Tizen.WebView;
 
 namespace Overscan
 {
-    internal enum CursorVisual
-    {
-        /// <summary>Cursor drawn by the injected page script (survives page scroll).</summary>
-        Dom,
-
-        /// <summary>Cursor drawn as an Evas overlay above the web view.</summary>
-        Native,
-    }
-
     /// <summary>
     /// D-pad driven pointer. Position is kept as a fraction of the viewport so the
     /// native side never has to know the page's CSS pixel size, zoom or DPR — the
@@ -40,6 +31,19 @@ namespace Overscan
         private DateTime _lastMove = DateTime.MinValue;
         private int _lastDx;
         private int _lastDy;
+
+        /// <summary>
+        /// A move the page has not been told about yet, flushed on the app's tick.
+        ///
+        /// Issue #78 was reported against the NUI build, and the cause is shared:
+        /// telling the page where the pointer is makes it hit-test and dispatch a
+        /// mousemove, so doing it once per repeat of a held key puts the pointer at
+        /// the mercy of whatever else the page's main thread is doing. Only used
+        /// while the pointer is drawn natively — with the page drawing it, a
+        /// deferred move is a pointer that visibly stops moving, which is worse
+        /// than a slow one. Key 2 is what chooses between those.
+        /// </summary>
+        private bool _movePending;
 
         public VirtualCursor(Window window, WebView web, string bridgeName)
         {
@@ -83,6 +87,10 @@ namespace Overscan
         {
             Eval(PageScript.Install(_bridge));
             Apply();
+
+            // A page that has just been replaced knows nothing about where the
+            // pointer is, so this one telling does not wait for a tick.
+            FlushPending();
         }
 
         public void Move(int dx, int dy)
@@ -110,10 +118,35 @@ namespace Overscan
 
         public void Click()
         {
+            // A pending move rides along in front of the click, in the same script:
+            // click() hit-tests wherever move() last left the page, so a click that
+            // overtook its own move would land where the pointer used to be.
+            string move = string.Empty;
+            if (_movePending)
+            {
+                _movePending = false;
+                move = "window." + PageScript.Namespace + ".move(" + F(_x) + "," + F(_y) + ");";
+            }
+
             // The click result comes back over the message bridge instead of a
             // return value: ewk's script-execute is fire-and-forget on API 5.
-            Eval("try{window." + _bridge + ".postMessage('click\\u0001'+window." +
+            Eval("try{" + move + "window." + _bridge + ".postMessage('click\\u0001'+window." +
                  PageScript.Namespace + ".click());}catch(e){}");
+        }
+
+        /// <summary>
+        /// Tells the page where the pointer is, if it has not been told since the
+        /// last move. Called from the app's 150 ms tick — see <see cref="_movePending"/>.
+        /// </summary>
+        public void FlushPending()
+        {
+            if (!_movePending)
+            {
+                return;
+            }
+
+            _movePending = false;
+            MoveInPage();
         }
 
         public void ScrollPage(int direction)
@@ -136,15 +169,18 @@ namespace Overscan
             {
                 Eval("try{window." + PageScript.Namespace + ".hide();}catch(e){}");
                 PlaceNative();
-                // Still report the position so hover states and the click target
-                // stay in sync with what is drawn.
-                MoveInPage();
+
+                // The position still has to reach the page — hover states and the
+                // click target come from it — but it is drawn already, so the page
+                // can hear about it on the next tick instead of on this key press.
+                _movePending = true;
             }
             else
             {
                 _ring.Hide();
                 _dot.Hide();
                 _core.Hide();
+                _movePending = false;
                 MoveInPage();
             }
         }

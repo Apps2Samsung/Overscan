@@ -1232,6 +1232,55 @@ Details that matter:
   `input`/`change`, otherwise React-style frameworks ignore it. Enter is sent as
   real key events, falling back to `form.requestSubmit()`.
 
+### A pointer inside the page moves at the page's speed
+
+The same reporter again, in #78: "if we load a heavy site cursor start to become
+less responsive, when we load light site it is faster, default browser cursor
+perform same on all sites." It was ours, not the engine's.
+
+Everything above describes a pointer that *lives in the page*, and the bill for
+that had never been read. Each D-pad step was one script evaluation, and the
+script it ran did an `elementFromPoint` and dispatched a `mousemove` — a forced
+layout plus whatever the site's own move handlers do, which on Instagram or
+Spotify is a great deal. So the pointer could only move as fast as the page's main
+thread was willing to run our script, and that thread is the busiest object on the
+television. The TV's own browser draws its pointer in the compositor, which is why
+his comparison holds and why it always would have.
+
+Two halves, and neither is sufficient alone:
+
+- **The app draws the pointer.** DALi views over the web view on NUI, Evas
+  rectangles on ElmSharp, positioned from the same viewport fraction the script
+  was being sent. The ElmSharp build has had this behind key `2` since early on
+  and it was nobody's default; NUI never had it at all, and its old header said an
+  overlay "would need to track scroll and zoom itself". That was simply wrong —
+  the position is a fraction of the *viewport*, and the viewport is the view's own
+  rectangle, which is the entire reason it is kept as a fraction rather than as a
+  document point.
+- **The page hears about it once a tick, not once a key press.** Both builds
+  already run a 150 ms timer, so a move marks itself pending and the tick flushes
+  it. A held key that used to be twenty hover updates is now six, and none of them
+  is in front of the drawing.
+
+The rule the second half must not break is that **the page and the pointer agree at
+the moment of a click**. `PageScript.click()` hit-tests wherever `move()` last left
+it, so a click that overtook its own pending move would land where the pointer used
+to be. Both builds therefore put the pending move *into the click's own script*,
+one evaluation, rather than sending it as a call before — two evaluations are two
+chances for that ordering to be wrong, and the failure would be a click that
+occasionally hits the wrong thing, which is the worst kind to be sent from a sofa.
+
+What this costs is up to 150 ms of hover lag behind the drawn pointer, and the
+arrow: neither toolkit draws a triangle, so the app-drawn pointer is the ringed dot
+the ElmSharp build has always used for its native style, while the page's arrow is
+CSS borders. A dot that keeps up beats an arrow that does not, so **NUI defaults to
+drawing it itself** and a menu row switches back. **The ElmSharp default is
+unchanged**: #78 is a report from a 2025 set, the ewk packages are the ones where a
+change cannot be tested before somebody installs it, and `src/nui` not being able
+to break them is the whole reason the source is split this way. They get the
+coalescing, which is the half that is safe everywhere, and key `2` was already
+there for the rest.
+
 ### The one thing a script cannot click: another origin's frame
 
 `elementFromPoint` stops at an `<iframe>`, and a click dispatched on the frame
@@ -1503,16 +1552,60 @@ issue #15.
 
 ### Where the browser opens
 
-`startupUrl` in `settings.tsv`, set by the keyboard's `start` key: type an address,
-press `start` instead of `GO`, and that is what the app loads at launch. Pressing
-`start` with an empty entry clears it and the generated start screen comes back.
+Three states, and `StartPage` owns which: the generated start screen, one fixed
+address, or wherever the last session got to.
 
-It lives on the keyboard rather than on a remote key because every digit was
-already taken, and because the thing being saved is exactly what you have just
-typed. `Store.Init` therefore has to run **before** the keyboard is constructed —
+The fixed address came from issue #15 and is set by the keyboard's `start` key:
+type an address, press `start` instead of `GO`, and that is what the app loads at
+launch; press `start` with an empty entry and the start screen comes back. It
+lives on the keyboard rather than on a remote key because every digit was already
+taken, and because the thing being saved is exactly what you have just typed.
+`Store.Init` therefore has to run **before** the keyboard is constructed —
 `KeyboardLayouts` resolves its remembered layout the first time it is touched, and
-both builds used to initialise the store afterwards, silently discarding the user's
-layout choice.
+both builds used to initialise the store afterwards, silently discarding the
+user's layout choice.
+
+**"Open where I left off" is issue #79**, and it is one menu row because there was
+no key left. It resolves to the first entry of the history, which is the right
+answer only because of what `Store.RecordVisit` already refuses: this app's own
+generated pages in both shapes (#53) and the sign-in steps a flow passes through
+(#53's follow-up). Without those two guards "where I left off" would be the start
+screen you closed the app from, or the captcha you went through an hour earlier.
+An empty history resolves to the start screen, which is a fresh install saying so
+rather than a blank page.
+
+Three things about the shape of it:
+
+- **The mode is stored beside the address, not inside it.** A sentinel URL meaning
+  "not a URL" reads fine on the day it is written and becomes a site nobody can
+  visit the first time it turns up in somebody's history.
+- **An install from before #79 has no mode key**, so the mode is derived from
+  whether an address was ever set — which is exactly what those builds did. Nobody's
+  start page moves under them on upgrade, and the harness holds that.
+- **Turning "where I left off" off goes back to the address**, if one was ever set,
+  rather than to the start screen. The address is still in the file and making
+  somebody retype it on a remote to get it back would be its own small cruelty.
+
+### Keeping an address you cannot land on
+
+Issue #80: "i like to set `https://www.instagram.com/reel` as favourite but when i
+go to the url it opens a reel so it saves url of reel instead when open it plays
+same reel always."
+
+Key `8` keeps *the page you are on*, which is the whole vocabulary the favourites
+had, and it has no answer for an address that redirects. The fix is a third
+`KeyboardTarget` — `Favourite` — so the same on-screen keyboard can finish into
+`Store.ToggleFavourite` instead of into `Navigate`. It is prefilled with the
+current address, because what somebody wants to keep is usually what they are
+looking at with a few segments taken off the end, and the entry line says
+`Keep as a tile` rather than `Go to`, since the keyboard is otherwise identical
+whichever of the three it was opened for and that is not a mistake anybody should
+make silently.
+
+Two details worth keeping: it **toggles**, exactly as `8` does, and says which of
+the two it just did — from a sofa, "kept" and "removed" are the same screen
+otherwise. And the tile's name is the site's own name (`SiteRules.KeyFor`), because
+there is no page title to take from a page nobody opened.
 
 ## Settings that belong to a site, not to the browser
 
@@ -2443,6 +2536,21 @@ the one its report has to come from. The state is:
   the name his remote actually sends, and that name is the fix; the menu row
   answers #75 either way, so a button that never arrives is not a reason to hold
   the issue open.
+
+- **The pointer, the start page and keeping an address — #78, #79 and #80, built
+  together.** All three arrived the day after `build-d526114`, and all three are
+  what a browser gets asked for once it has stopped breaking. #78 is the one with
+  a fault behind it: the pointer lived in the page, so it moved at the page's
+  speed, and NUI now draws it itself and tells the page where it is once a tick
+  instead of once a key press — see *A pointer inside the page moves at the
+  page's speed* above. #79 adds "open where I left off" beside the fixed address
+  from #15, and #80 lets an address be kept as a tile without going to it, which
+  is the only way to keep one that redirects. **Waiting on:** his report from the
+  build that ships them. The one that decides something is #78 — whether the
+  pointer keeps up on Instagram and Spotify now. If it does not, the `pointer`
+  line on the report says which of the two is drawing it, and the answer that
+  would matter is "drawn by Overscan and still slow", because that is the one
+  saying the lag was never our script.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

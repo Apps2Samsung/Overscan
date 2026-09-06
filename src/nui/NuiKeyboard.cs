@@ -280,6 +280,22 @@ namespace Overscan
         /// The layout key wears the name of the layout it is showing, and the
         /// symbol key wears the page it switches *to*.
         /// </summary>
+        /// <summary>
+        /// What the entry line calls itself. The keyboard looks the same whatever
+        /// it was opened for, so this is the only thing on screen that says which
+        /// of the three it is — and "keep" and "go to" are not a mistake anybody
+        /// should be able to make silently.
+        /// </summary>
+        private static string Prompt(KeyboardTarget target)
+        {
+            switch (target)
+            {
+                case KeyboardTarget.Address: return "Go to";
+                case KeyboardTarget.Favourite: return "Keep as a tile";
+                default: return "Type into page";
+            }
+        }
+
         private static string LabelFor(string key)
         {
             switch (key)
@@ -293,8 +309,7 @@ namespace Overscan
 
         private void Paint()
         {
-            _entry.Text = (Target == KeyboardTarget.Address ? "Go to   " : "Type into page   ") +
-                          (_text.Length == 0 ? "|" : _text + "|");
+            _entry.Text = Prompt(Target) + "   " + (_text.Length == 0 ? "|" : _text + "|");
 
             for (int r = 0; r < _keys.Length; r++)
             {

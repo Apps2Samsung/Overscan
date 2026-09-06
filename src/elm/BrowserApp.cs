@@ -247,7 +247,10 @@ namespace Overscan
 
             _viewportFix = Store.GetBool("viewportFix", false);
             _hintsWanted = Store.GetBool("hints", true);
-            _startupUrl = Store.Get("startupUrl", null);
+
+            // Three states, not two, since issue #79: the start screen, a fixed
+            // address, or wherever the last session got to. StartPage owns which.
+            _startupUrl = StartPage.Resolve(Store.RecentHistory);
             ShowHints(_hintsWanted);
             if (Store.GetInt("cursorVisual", 0) == 1)
             {
@@ -688,6 +691,14 @@ namespace Overscan
                 UpdateStatus();
             }
 
+            // Where a held D-pad key turns into one hover update instead of twenty
+            // — see VirtualCursor and issue #78. Cheap when nothing moved, and a
+            // no-op unless the pointer is the natively drawn one.
+            if (_cursor != null)
+            {
+                _cursor.FlushPending();
+            }
+
             // The menu is on the list because arrowing through it is pointer keys,
             // which no longer keep the bar alive; without this it would time out
             // underneath an open menu.
@@ -834,6 +845,8 @@ namespace Overscan
                 new RemoteMenu.Item(RemoteMenu.ActionSwitchSite, "Switch site", "A"),
                 new RemoteMenu.Item(RemoteMenu.ActionHome, "Start screen", "9"),
                 new RemoteMenu.Item(RemoteMenu.ActionBookmark, "Keep this page", "8"),
+                new RemoteMenu.Item(RemoteMenu.ActionKeepAddress, "Keep an address…", string.Empty),
+                new RemoteMenu.Item(RemoteMenu.ActionResumeLast, "Open where I left off", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionTypeInField, "Type in a field…", "5"),
                 new RemoteMenu.Item(RemoteMenu.ActionIdentity, "Identify as…", "1"),
                 new RemoteMenu.Item(RemoteMenu.ActionKeysToPage, "Send keys to page", "4"),
@@ -993,6 +1006,18 @@ namespace Overscan
 
                 case RemoteMenu.ActionBookmark:
                     ToggleFavourite();
+                    break;
+
+                case RemoteMenu.ActionKeepAddress:
+                    // Prefilled with where we are, because the address somebody
+                    // wants to keep is usually the one they are looking at with a
+                    // few segments taken off the end (issue #80).
+                    _keyboard.Open(KeyboardTarget.Favourite,
+                                   _atHome || _cachedUrl == "-" ? string.Empty : _cachedUrl);
+                    break;
+
+                case RemoteMenu.ActionResumeLast:
+                    ToggleResumeLast();
                     break;
 
                 case RemoteMenu.ActionTypeInField:
@@ -1766,6 +1791,47 @@ namespace Overscan
         }
 
         /// <summary>
+        /// Keeps a typed address as a favourite without going to it — issue #80.
+        ///
+        /// Key 8 keeps <em>the page you are on</em>, which is no help at all when
+        /// the address you want is one that redirects: the reporter wanted
+        /// <c>instagram.com/reel</c> in his tiles, and opening it hands you one
+        /// particular reel, so the tile he could make played the same clip for
+        /// ever. There was no way to keep an address you cannot land on.
+        ///
+        /// It toggles, exactly as key 8 does, so typing one that is already kept
+        /// takes it out again — and says which of the two happened, because
+        /// otherwise the two are indistinguishable from the sofa.
+        /// </summary>
+        private void KeepAddress(string text)
+        {
+            string url = Urls.Normalize(text);
+
+            // No title to take from a page nobody opened, so the site's own name is
+            // the honest one. The tiles are named by this.
+            string title = SiteRules.KeyFor(url) ?? url;
+            bool kept = Store.ToggleFavourite(url, title);
+            DiagLog.Add((kept ? "kept address " : "removed address ") + url);
+            Flash(kept ? "Kept " + title : "Removed " + title + " from favourites");
+        }
+
+        /// <summary>
+        /// Turns "open where I left off" on and off — issue #79. Off goes back to
+        /// the fixed address if one was ever set, so nobody has to type it again to
+        /// get it back; see <see cref="StartPage.ToggleLast"/>.
+        /// </summary>
+        private void ToggleResumeLast()
+        {
+            bool on = StartPage.ToggleLast();
+            DiagLog.Add("start page mode: " + StartPage.Mode());
+            Flash(on
+                ? "Opens where you left off"
+                : "Opens at " + (string.IsNullOrEmpty(StartPage.Address)
+                    ? "the start screen"
+                    : StartPage.Address));
+        }
+
+        /// <summary>
         /// Briefly replaces the status text. There is no notification surface on a TV,
         /// and an action with no feedback feels broken.
         /// </summary>
@@ -1781,6 +1847,12 @@ namespace Overscan
             if (target == KeyboardTarget.Address)
             {
                 Navigate(text);
+                return;
+            }
+
+            if (target == KeyboardTarget.Favourite)
+            {
+                KeepAddress(text);
                 return;
             }
 
@@ -1833,14 +1905,14 @@ namespace Overscan
             if (string.IsNullOrEmpty((text ?? string.Empty).Trim()))
             {
                 _startupUrl = null;
-                Store.Set("startupUrl", string.Empty);
+                StartPage.SetAddress(null);
                 DiagLog.Add("start page cleared");
                 Flash("Start page cleared");
                 return;
             }
 
             _startupUrl = Urls.Normalize(text);
-            Store.Set("startupUrl", _startupUrl);
+            StartPage.SetAddress(_startupUrl);
             DiagLog.Add("start page = " + _startupUrl);
             Flash("Opens here from now on");
             Navigate(_startupUrl);
@@ -2119,7 +2191,7 @@ namespace Overscan
                    "vp fix    : " + (_viewportFix ? "ON" : "off") + "  (key 6)\n" +
                    "last click: " + _lastClick + "\n" +
                    "frame click: " + NativeMouse.LastResult + "\n" +
-                   "start page: " + (string.IsNullOrEmpty(_startupUrl) ? "(start screen)" : _startupUrl) + "\n" +
+                   "opens at  : " + StartPage.Describe(Store.RecentHistory) + "\n" +
                    "site rules: " + (SiteRules.For(_cachedUrl) == null
                        ? "nothing remembered for this site"
                        : "in force for " + SiteRules.For(_cachedUrl).Site) + "\n" +

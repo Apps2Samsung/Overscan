@@ -111,8 +111,9 @@ happens. A probe sent to explain a black screen must not be able to cause one.
 
 ### The start-page harness
 
-Any change to `Store` or `HomePage` — what gets saved as a visit or favourite, and
-the page built from it — is exercised off-device first:
+Any change to `Store`, `HomePage` or `StartPage` — what gets saved as a visit or
+favourite, the page built from it, and which of the three things the browser opens
+at launch — is exercised off-device first:
 
 ```sh
 tools/startpage/run.sh
@@ -123,7 +124,10 @@ a row, recording each the way the NUI engine reports it (a `data:` URL carrying 
 page). Issue #53 was that loop with no guard: the start screen recorded itself as a
 visit on every launch, roughly doubled each time, and after nine launches was past
 the 2 MB Chromium will load — a black screen with no line anywhere, on a view that
-was fine. Needs only the .NET 6 SDK under `~/.dotnet-local`.
+was fine. It also holds `StartPage` (issue #79) to the three states, to "where I
+left off" landing on the last real visit and never on the start screen, and to an
+install made before the mode existed still opening where it always did. Needs only
+the .NET 6 SDK under `~/.dotnet-local`.
 
 ### The site-rules harness
 
