@@ -1607,6 +1607,40 @@ the two it just did — from a sofa, "kept" and "removed" are the same screen
 otherwise. And the tile's name is the site's own name (`SiteRules.KeyFor`), because
 there is no page title to take from a page nobody opened.
 
+**And then it found two older faults, within the hour.** His report on
+`build-afa4ce8`: "pressing 8 again mostly doesn't show anything on favourited
+site. even when app shows unkept this page sometimes the page still shows in
+favourites." Both halves are real and neither was new — keeping an address by
+typing it is simply the first thing that made them easy to hit.
+
+- **Favourites were matched by exact string.** He kept `instagram.com/reel` by
+  typing it; Instagram's own address for that page ends in a slash. Two strings,
+  so pressing `8` on the page did not find his favourite — it added a second one,
+  and both tiles are named after the same site. What he saw was a page he had just
+  been told was removed, still sitting in his favourites, because it was a
+  different entry that looked identical. `Store.SameKey` now folds a trailing
+  slash on the path, and **only** that: a query and a fragment stay significant,
+  because two addresses that differ there are two pages as often as they are one,
+  and a favourite is an explicit act nobody should have quietly widened for them.
+  The fold has a floor at the scheme's own `//`, or every site on earth would be
+  one favourite. `Init` heals a file that already has both spellings in it, the
+  same way #53's generated pages and waypoints are healed, because his set has one
+  now and a fix that only stopped new ones would leave him deleting the old by
+  hand from a page that cannot tell them apart.
+- **Key `8` was reading a cache.** `_cachedUrl` is refreshed by `UpdateStatus`,
+  which runs when a load *finishes* — and a site that moves between reels without
+  finishing another load leaves it several pages behind what is on the screen. So
+  `8` kept, or removed, a page the user was not looking at. It reads the engine
+  now, as everything per-site already did. The bar's star was reading the same
+  cache, so it is refreshed on the tick while the bar is up: a few seconds at a
+  time, and it leaves a flash alone.
+
+A third thing, smaller and the likeliest reading of "doesn't show anything":
+**pressing `8` on the start screen did nothing, silently.** There is no page there
+to keep, which is a fine reason to decline and no reason at all to say nothing —
+and the start screen, where the tiles are, is exactly where somebody goes to get
+rid of one. It now says so, and points at *Keep an address…*.
+
 ## Settings that belong to a site, not to the browser
 
 Issues #74 and #75, from the same reporter, four days apart. Both are the same
@@ -2550,7 +2584,10 @@ the one its report has to come from. The state is:
   pointer keeps up on Instagram and Spotify now. If it does not, the `pointer`
   line on the report says which of the two is drawing it, and the answer that
   would matter is "drawn by Overscan and still slow", because that is the one
-  saying the lag was never our script.
+  saying the lag was never our script. **His first report on it was about #80**,
+  within the hour, and found two older faults behind the new feature — exact-string
+  favourite matching and key `8` reading a stale cache. See *Keeping an address you
+  cannot land on* above; both are fixed and his files are healed on load.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

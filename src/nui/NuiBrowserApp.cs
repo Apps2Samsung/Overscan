@@ -890,6 +890,16 @@ namespace Overscan
 
             CheckSomethingLoaded();
 
+            // The bar is read from a cache that only a finished load refreshes, and
+            // a site that moves between pages without finishing one (a reel, a
+            // playlist) would leave the address and the star showing the page
+            // before. Only while the bar is up, which is a few seconds at a time,
+            // and UpdateStatus leaves a flash alone.
+            if (_chromeVisible)
+            {
+                UpdateStatus();
+            }
+
             // The menu joins the list now that the pointer no longer keeps the bar
             // alive: arrowing through the menu is pointer keys, and without this the
             // chrome would time out underneath an open menu.
@@ -2330,16 +2340,44 @@ namespace Overscan
             return _web == null || _atHome ? null : SafeUrl();
         }
 
+        /// <summary>
+        /// Keeps the page that is open, or takes it out again.
+        ///
+        /// Reads the address from the engine rather than from <c>_cachedUrl</c>,
+        /// and issue #80's reporter is why. That cache is refreshed by
+        /// <c>UpdateStatus</c>, which runs when a load finishes — and a site like
+        /// Instagram moves between reels without ever finishing another load, so
+        /// the cache could be several pages behind what was on the screen. Pressing
+        /// 8 then kept, or removed, a page the user was not looking at.
+        ///
+        /// The start screen has no page of its own to keep, and said so by doing
+        /// nothing at all, which from a sofa is indistinguishable from a key that
+        /// does not work — and the start screen, where the tiles are, is exactly
+        /// where somebody goes to get rid of one.
+        /// </summary>
         private void ToggleFavourite()
         {
-            if (_atHome)
+            string url = PageUrl();
+            if (string.IsNullOrEmpty(url) || url == "-")
             {
+                Flash("Open a page first, or use \u201cKeep an address\u2026\u201d in the menu");
                 return;
             }
 
-            bool kept = Store.ToggleFavourite(_cachedUrl, _cachedTitle);
-            DiagLog.Add((kept ? "kept " : "removed ") + _cachedUrl);
+            bool kept = Store.ToggleFavourite(url, PageTitle());
+            DiagLog.Add((kept ? "kept " : "removed ") + url);
             Flash(kept ? "Kept this page" : "Removed from favourites");
+
+            // The star on the bar is read from the same cache, so it would
+            // otherwise keep showing the answer from before the press.
+            _cachedUrl = url;
+        }
+
+        /// <summary>The page's title now, not as of the last status refresh.</summary>
+        private string PageTitle()
+        {
+            string title = SafeTitle();
+            return string.IsNullOrEmpty(title) ? _cachedTitle : title;
         }
 
         /// <summary>

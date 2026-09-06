@@ -155,6 +155,55 @@ namespace Overscan
             Check(DiagLog.Lines.Exists(l => l.Contains("dropped 2 sign-in")),
                   "the log says how many: " + string.Join(" | ", DiagLog.Lines));
 
+            // 5b. Two spellings of one page are one favourite (issue #80). His
+            //     case exactly: kept by typing instagram.com/reel, pressed 8 on the
+            //     page, whose own address ends in a slash.
+            string dupDir = Path.Combine(dir, "duplicates");
+            Directory.CreateDirectory(dupDir);
+            Store.Init(dupDir);
+            Check(Store.ToggleFavourite("https://www.instagram.com/reel", "instagram.com"),
+                  "an address typed without a trailing slash is kept");
+            Check(Store.IsFavourite("https://www.instagram.com/reel/"),
+                  "and the page's own address, with one, is the same favourite");
+            Check(!Store.ToggleFavourite("https://www.instagram.com/reel/", "Instagram") &&
+                  Store.AllFavourites.Count == 0,
+                  "so pressing 8 there removes it instead of adding a second");
+
+            // The fold is the trailing slash and nothing else. A query and a
+            // fragment still tell two pages apart, because they usually do.
+            Store.ToggleFavourite("https://example.com/a?x=1", "A");
+            Check(!Store.IsFavourite("https://example.com/a?x=2"),
+                  "a different query is a different page");
+            Check(!Store.IsFavourite("https://example.com/b"),
+                  "and so is a different path");
+            Check(Store.IsFavourite("https://example.com/a/?x=1"),
+                  "while a slash before the query is not");
+
+            // The floor: nothing may fold into the scheme's own slashes, or every
+            // site on earth would be one favourite.
+            Store.ToggleFavourite("https://one.test/", "one");
+            Check(!Store.IsFavourite("https://two.test/"), "two sites are never one favourite");
+
+            // 5c. A file an earlier build wrote, with both spellings in it, is
+            //     healed on load — his set has one now.
+            string dupHealDir = Path.Combine(dir, "duplicates-heal");
+            Directory.CreateDirectory(dupHealDir);
+            File.WriteAllLines(Path.Combine(dupHealDir, "favourites.tsv"), new[]
+            {
+                "https://www.instagram.com/reel\tinstagram.com",
+                "https://www.instagram.com/reel/\tInstagram",
+                "https://open.spotify.com/\tSpotify",
+            });
+            DiagLog.Lines.Clear();
+            Store.Init(dupHealDir);
+            Check(Store.AllFavourites.Count == 2, "the look-alike favourite is dropped on load");
+            Check(Store.AllFavourites[0].Url == "https://www.instagram.com/reel",
+                  "keeping the first, which is the more recent");
+            Check(File.ReadAllLines(Path.Combine(dupHealDir, "favourites.tsv")).Length == 2,
+                  "and the file is written back clean");
+            Check(DiagLog.Lines.Exists(l => l.Contains("dropped 1 duplicate")),
+                  "the log says how many: " + string.Join(" | ", DiagLog.Lines));
+
             // 6. Where the browser opens — three states, not two (issue #79).
             //    The one that has to keep working is the upgrade: an install made
             //    before this existed has an address and no mode, and its start page

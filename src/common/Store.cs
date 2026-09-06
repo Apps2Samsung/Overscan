@@ -66,6 +66,15 @@ namespace Overscan
                 DiagLog.Add("store: dropped " + passed + " sign-in page(s) from history");
             }
 
+            // And the same page kept twice under two spellings of its address —
+            // issue #80. See SameKey for how somebody ends up with two.
+            int twice = DropDuplicates(Favourites, "favourites.tsv") +
+                        DropDuplicates(History, "history.tsv");
+            if (twice > 0)
+            {
+                DiagLog.Add("store: dropped " + twice + " duplicate page(s)");
+            }
+
             DiagLog.Add("store: " + Favourites.Count + " favourites, " + History.Count +
                         " history, " + Settings.Count + " settings");
         }
@@ -293,17 +302,103 @@ namespace Overscan
             Set(key, value ? "1" : "0");
         }
 
+        /// <summary>
+        /// The two spellings of one page, reduced to one.
+        ///
+        /// Favourites were matched by exact string, and issue #80's reporter found
+        /// what that costs the moment there are two ways to write the same address:
+        /// he kept <c>instagram.com/reel</c> by typing it, and Instagram's own URL
+        /// for that page is <c>instagram.com/reel/</c>. So pressing 8 there did not
+        /// find his favourite — it added a second one — and both tiles are named
+        /// after the same site, so what he saw was a page he had just been told was
+        /// removed, still sitting in his favourites.
+        ///
+        /// Only the trailing slash is folded, and only on the path. A query and a
+        /// fragment stay significant, because two addresses that differ there are
+        /// two pages as often as they are one, and a favourite is an explicit act
+        /// that nobody should have quietly widened for them.
+        /// </summary>
+        private static string SameKey(string url)
+        {
+            if (string.IsNullOrEmpty(url))
+            {
+                return string.Empty;
+            }
+
+            int cut = url.Length;
+            int query = url.IndexOf('?');
+            if (query >= 0)
+            {
+                cut = query;
+            }
+
+            int fragment = url.IndexOf('#');
+            if (fragment >= 0 && fragment < cut)
+            {
+                cut = fragment;
+            }
+
+            string head = url.Substring(0, cut);
+
+            // Never into the "//" of the scheme: "https://" must not become
+            // "https:/", which would fold every site on earth onto one key.
+            int authority = head.IndexOf("://", StringComparison.Ordinal);
+            int floor = authority < 0 ? 0 : authority + 3;
+            while (head.Length > floor && head[head.Length - 1] == '/')
+            {
+                head = head.Substring(0, head.Length - 1);
+            }
+
+            return head + url.Substring(cut);
+        }
+
         private static int IndexOf(List<Bookmark> list, string url)
         {
+            string key = SameKey(url);
             for (int i = 0; i < list.Count; i++)
             {
-                if (string.Equals(list[i].Url, url, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(SameKey(list[i].Url), key, StringComparison.OrdinalIgnoreCase))
                 {
                     return i;
                 }
             }
 
             return -1;
+        }
+
+        /// <summary>
+        /// Removes entries that are the same page written two ways, keeping the
+        /// first — which in both files is the more recent. Heals a file an earlier
+        /// build wrote, the same way the generated pages and the sign-in waypoints
+        /// are healed: issue #80's reporter has look-alike favourites on his set
+        /// now, and a fix that only stops new ones appearing would leave him
+        /// deleting the old ones by hand from a page that cannot tell them apart.
+        /// </summary>
+        private static int DropDuplicates(List<Bookmark> list, string fileName)
+        {
+            var seen = new List<string>();
+            int dropped = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                string key = SameKey(list[i].Url).ToLowerInvariant();
+                if (seen.Contains(key))
+                {
+                    list.RemoveAt(i);
+                    i--;
+                    dropped++;
+                }
+                else
+                {
+                    seen.Add(key);
+                }
+            }
+
+            if (dropped > 0)
+            {
+                Save(fileName, list);
+            }
+
+            return dropped;
         }
 
         /// <summary>Removes generated pages a previous build let in, and saves if any were.</summary>
