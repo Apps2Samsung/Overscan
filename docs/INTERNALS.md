@@ -1754,9 +1754,10 @@ for it.** `NoteShowing` is called at every load boundary and sets the flag from
 `ShowHome` and `Navigate` still set it optimistically, since the bar should not lag
 a press, but they are no longer the authority.
 
-This had been wrong since the start screen existed. It cost nothing until #74 gave
-the app something important to decide with it, which is the usual shape: the bug
-ships years before the feature that makes it reachable.
+Shipped in `build-b6911d7`. This had been wrong since the start screen existed. It
+cost nothing until #74 gave the app something important to decide with it, which
+is the usual shape: the bug ships years before the feature that makes it
+reachable.
 
 ## Settings that belong to a site, not to the browser
 
