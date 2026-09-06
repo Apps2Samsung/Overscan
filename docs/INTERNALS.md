@@ -2435,12 +2435,14 @@ the one its report has to come from. The state is:
   `src/common`, so all six packages have them, and the ewk builds are the ones
   most likely to notice a mistake in them. See *Settings that belong to a site,
   not to the browser* above for what a site is called and why the reload is
-  counted. **Waiting on:** his report from the build that ships them. The two
-  things worth reading off it are whether a crossing between his two sites now
-  arrives with the right layout without him pressing anything, and whether the
-  red / A button on his remote reaches *Switch site* at all — if it does not, the
-  remote card's footer will be carrying the name his remote actually sends, and
-  that name is the fix.
+  counted. Shipped in `build-d526114`. **Waiting on:** his report from that
+  build. The two things worth reading off it are whether a crossing between his
+  two sites now arrives with the right layout without him pressing anything —
+  which is #74 finished — and whether the red / A button on his remote reaches
+  *Switch site* at all. If it does not, the remote card's footer will be carrying
+  the name his remote actually sends, and that name is the fix; the menu row
+  answers #75 either way, so a button that never arrives is not a reason to hold
+  the issue open.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
