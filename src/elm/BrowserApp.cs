@@ -1208,6 +1208,7 @@ namespace Overscan
                 ApplyViewportFix();
                 ReportMetrics();
                 Store.RecordVisit(_web.Url, _web.Title);
+                NoteShowing(_web.Url);
 
                 // Backstop for UrlChanged, which is where a site's rules normally
                 // land. A page that somehow arrives without one still gets them,
@@ -1235,6 +1236,10 @@ namespace Overscan
                 // early enough for the images and one reload late for the identity.
                 string arrived = e.GetAsString();
                 _urlLabel.Text = Markup(arrived);
+
+                // Before the site rules, which ask whether this page is on a site
+                // at all — and "the start screen" is the answer that means no.
+                NoteShowing(arrived);
                 ApplySiteRules(arrived, true);
                 UpdateStatus();
             };
@@ -1767,6 +1772,34 @@ namespace Overscan
             {
                 DiagLog.Add("reload after " + why + " failed: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Records what the view has actually got on it, which is the only thing
+        /// that may decide whether we are on the start screen.
+        /// </summary>
+        /// <remarks>
+        /// <c>_atHome</c> used to be set by <c>ShowHome</c> and cleared by
+        /// <c>Navigate</c> — that is, by whoever *asked* for a page, which misses
+        /// every navigation the app does not perform itself. **Opening a favourite
+        /// is one of those**: a tile is an ordinary link, so the engine follows it
+        /// and nothing tells the app it left. So the browser sat on Instagram still
+        /// believing it was showing the start screen, and issue #80's reporter found
+        /// what that costs once things started keying off it: the images and
+        /// identity switches wrote the browser-wide setting instead of the site's
+        /// (because "no site" is what the start screen is), key 8 looked for a tile
+        /// under the pointer, the address bar said "start screen", and turning
+        /// images back on flashed them for one frame before the site's own rule
+        /// reloaded them away again. Every one of those is the same wrong bit.
+        ///
+        /// A page is the start screen if it *is* the start screen. Both shapes of
+        /// that are <see cref="Store.IsGenerated"/>, and this is called at every
+        /// load boundary, so a navigation nobody in this app initiated still moves
+        /// the flag.
+        /// </remarks>
+        private void NoteShowing(string url)
+        {
+            _atHome = Store.IsGenerated(url);
         }
 
         /// <summary>
