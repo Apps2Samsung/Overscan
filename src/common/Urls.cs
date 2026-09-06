@@ -31,6 +31,27 @@ namespace Overscan
         }
 
         /// <summary>
+        /// An address as somebody would read it out: no scheme, no trailing slash.
+        ///
+        /// Used to name a favourite that was kept by typing its address rather
+        /// than by being on it, because there is no page title to take and the
+        /// host on its own is not a name — issue #80's reporter had two tiles both
+        /// reading "instagram.com", pointing at different pages, with nothing on
+        /// the screen to tell them apart or to type back in.
+        /// </summary>
+        public static string Readable(string url)
+        {
+            string rest = url ?? string.Empty;
+            int scheme = rest.IndexOf("://", StringComparison.Ordinal);
+            if (scheme > 0)
+            {
+                rest = rest.Substring(scheme + 3);
+            }
+
+            return rest.Length > 1 ? rest.TrimEnd('/') : rest;
+        }
+
+        /// <summary>
         /// Quotes a string for embedding in injected JavaScript. Typed text reaches
         /// the page through a script, so an unescaped quote would break the script
         /// (and be an injection point).

@@ -1210,7 +1210,7 @@ namespace Overscan
             new[] { "5", "video: TV overlay / in page — if black" },
             new[] { "6", "fit page — when the page is cut off" },
             new[] { "7", "hide this card" },
-            new[] { "8", "keep this page as a tile" },
+            new[] { "8", "keep this page — on the start screen, remove a tile" },
             new[] { "9", "start screen" },
             new[] { "Info", "images off — kept for this site" },
         };
@@ -2357,6 +2357,25 @@ namespace Overscan
         /// </summary>
         private void ToggleFavourite()
         {
+            if (_atHome)
+            {
+                // On the start screen the answer is a tile, and the page has to be
+                // asked which one.
+                try
+                {
+                    _web.EvaluateJavaScript(
+                        "String(window." + PageScript.Namespace + " && window." +
+                        PageScript.Namespace + ".linkAt())",
+                        result => ToggleTile(result));
+                }
+                catch (Exception ex)
+                {
+                    DiagLog.Add("asking for the tile failed: " + ex.Message);
+                }
+
+                return;
+            }
+
             string url = PageUrl();
             if (string.IsNullOrEmpty(url) || url == "-")
             {
@@ -2371,6 +2390,56 @@ namespace Overscan
             // The star on the bar is read from the same cache, so it would
             // otherwise keep showing the answer from before the press.
             _cachedUrl = url;
+        }
+
+        /// <summary>
+        /// Keeps or removes the favourite whose tile the pointer is on.
+        ///
+        /// The start screen is where the tiles are, so it is where somebody goes to
+        /// get rid of one — and until this existed there was no way to. Removing a
+        /// favourite meant being on its page and pressing 8, or typing its address
+        /// into "Keep an address…" exactly as it was stored, and issue #80's
+        /// reporter had two tiles reading identically, pointing at different pages,
+        /// stored under addresses the screen never showed him. Pointing at the thing
+        /// you want gone is the one gesture that cannot be spelled wrong.
+        ///
+        /// A recent tile gets kept rather than removed, which is the same key doing
+        /// the same thing it does everywhere else.
+        /// </summary>
+        private void ToggleTile(string url)
+        {
+            if (string.IsNullOrEmpty(url) || url == "null" || Store.IsGenerated(url))
+            {
+                Flash("Point at a tile first, then press 8");
+                return;
+            }
+
+            bool kept = Store.ToggleFavourite(url, TitleForTile(url));
+            DiagLog.Add((kept ? "kept tile " : "removed tile ") + url);
+            Flash((kept ? "Kept " : "Removed ") + Urls.Readable(url));
+
+            // Rebuilt, or the tile just removed is still on the screen — which is
+            // exactly the "it did not work" this whole thread is about.
+            ShowHome();
+        }
+
+        /// <summary>
+        /// The name to keep a tile under: whatever it was already called if we know
+        /// it, and the address otherwise. Never the bare host — two favourites on
+        /// one site would then be one name twice, which is how issue #80's reporter
+        /// ended up unable to tell his apart.
+        /// </summary>
+        private static string TitleForTile(string url)
+        {
+            foreach (Bookmark seen in Store.RecentHistory)
+            {
+                if (string.Equals(seen.Url, url, StringComparison.OrdinalIgnoreCase))
+                {
+                    return seen.Title;
+                }
+            }
+
+            return Urls.Readable(url);
         }
 
         /// <summary>The page's title now, not as of the last status refresh.</summary>
@@ -2397,9 +2466,10 @@ namespace Overscan
         {
             string url = Urls.Normalize(text);
 
-            // No title to take from a page nobody opened, so the site's own name is
-            // the honest one. The tiles are named by this.
-            string title = SiteRules.KeyFor(url) ?? url;
+            // The address, not the bare host. Two favourites on one site would
+            // otherwise be one name twice, and the tiles are all somebody has to
+            // tell them apart by — issue #80's follow-up.
+            string title = Urls.Readable(url);
             bool kept = Store.ToggleFavourite(url, title);
             DiagLog.Add((kept ? "kept address " : "removed address ") + url);
             Flash(kept ? "Kept " + title : "Removed " + title + " from favourites");

@@ -184,6 +184,21 @@ namespace Overscan
             Store.ToggleFavourite("https://one.test/", "one");
             Check(!Store.IsFavourite("https://two.test/"), "two sites are never one favourite");
 
+            // www. is the other half a person never types — the start screen shows
+            // a tile's host with it already stripped, so typing back exactly what
+            // is on the screen has to find the favourite it names.
+            Store.ToggleFavourite("https://www.instagram.com/reels", "instagram.com/reels");
+            Check(Store.IsFavourite("https://instagram.com/reels"),
+                  "the host as the tile shows it is the same favourite");
+            Check(Store.IsFavourite("https://instagram.com/reels/"),
+                  "with or without the slash as well");
+            Check(!Store.IsFavourite("https://wwwinstagram.com/reels"),
+                  "but only a whole www. label at the front of the host");
+            Check(!Store.IsFavourite("https://mail.www.test/reels"),
+                  "and never a www. anywhere else in it");
+            Check(!Store.IsFavourite("https://www.instagram.com/reel"),
+                  "and /reel is still not /reels — the paths are what differ");
+
             // 5c. A file an earlier build wrote, with both spellings in it, is
             //     healed on load — his set has one now.
             string dupHealDir = Path.Combine(dir, "duplicates-heal");
