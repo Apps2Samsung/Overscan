@@ -1721,6 +1721,43 @@ by `HomePage`, returned by `linkAt` in front of the address). The same page is v
 often a favourite and a recent visit both, and removing it from the list the
 pointer was not on is indistinguishable, from a sofa, from a key that did nothing.
 
+### Opening a favourite never told the app it had left the start screen
+
+His fourth report, and the best one:
+
+> when i open site that had images turned on previously from favourites and turn
+> images off it turns off images globally instead for that site … if visit website
+> by typing url turning images on/off changes setting only for that site
+
+`_atHome` was set by `ShowHome` and cleared by `Navigate` — that is, by whoever
+**asked** for a page. That misses every navigation this app does not perform
+itself, and **opening a favourite is one of them**: a tile is an ordinary link
+(which is the whole reason the start screen is a page and not a native screen), so
+the engine follows it and nothing tells the app it left. The browser then sat on
+Instagram still believing it was showing its own start screen.
+
+One wrong bit, and everything keyed to it went wrong in a different way:
+
+- the images and identity switches wrote the **browser-wide** setting instead of
+  the site's, because "no site" is exactly what the start screen is (`PageUrl`
+  returns null there, and `SiteRules.SetImages(null, …)` correctly declines);
+- key `8` looked for a tile under the pointer and found none;
+- the address bar said `start screen` over a page that was plainly not it;
+- and turning images back on flashed them for a single frame before the reload
+  put the site's own rule back — which is the symptom that proves the diagnosis,
+  because it is the global setting and the site rule disagreeing out loud.
+
+The fix is one line in the right place, and the rule behind it is the general one:
+**state that describes the page must be derived from the page, not from who asked
+for it.** `NoteShowing` is called at every load boundary and sets the flag from
+`Store.IsGenerated`, so a navigation nobody in this app initiated still moves it.
+`ShowHome` and `Navigate` still set it optimistically, since the bar should not lag
+a press, but they are no longer the authority.
+
+This had been wrong since the start screen existed. It cost nothing until #74 gave
+the app something important to decide with it, which is the usual shape: the bug
+ships years before the feature that makes it reachable.
+
 ## Settings that belong to a site, not to the browser
 
 Issues #74 and #75, from the same reporter, four days apart. Both are the same
