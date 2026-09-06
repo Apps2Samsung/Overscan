@@ -155,6 +155,70 @@ namespace Overscan
             Check(DiagLog.Lines.Exists(l => l.Contains("dropped 2 sign-in")),
                   "the log says how many: " + string.Join(" | ", DiagLog.Lines));
 
+            // 6. Where the browser opens — three states, not two (issue #79).
+            //    The one that has to keep working is the upgrade: an install made
+            //    before this existed has an address and no mode, and its start page
+            //    must not change under it.
+            string openDir = Path.Combine(dir, "opens-at");
+            Directory.CreateDirectory(openDir);
+            Store.Init(openDir);
+            Check(StartPage.Mode() == StartPage.Home && StartPage.Resolve(Store.RecentHistory) == null,
+                  "a fresh install opens on the start screen");
+
+            StartPage.SetAddress("https://open.spotify.com/");
+            Check(StartPage.Mode() == StartPage.Url &&
+                  StartPage.Resolve(Store.RecentHistory) == "https://open.spotify.com/",
+                  "an address set with the start key is what opens");
+
+            StartPage.SetAddress(null);
+            Check(StartPage.Mode() == StartPage.Home && StartPage.Resolve(Store.RecentHistory) == null,
+                  "clearing it goes back to the start screen");
+
+            // "Open where I left off" with nothing ever visited is the start screen,
+            // not a blank page and not a crash.
+            Check(StartPage.ToggleLast() && StartPage.Resolve(Store.RecentHistory) == null,
+                  "left off with an empty history is still the start screen");
+
+            Store.RecordVisit("https://www.instagram.com/", "Instagram");
+            Store.RecordVisit("https://open.spotify.com/album/1", "Spotify");
+            Check(StartPage.Resolve(Store.RecentHistory) == "https://open.spotify.com/album/1",
+                  "otherwise it is the last page actually visited");
+
+            // The start screen recorded between the two would be the last visit if
+            // Store let it in. It does not (check 1), and this is that guarantee
+            // seen from the other end — #53 and #79 share the same history.
+            Store.RecordVisit(AsEngineUrl(HomePage.Build(Store.AllFavourites, Store.RecentHistory, "https://x/")), "Overscan");
+            Check(StartPage.Resolve(Store.RecentHistory) == "https://open.spotify.com/album/1",
+                  "and never this app's own start screen");
+
+            // Turning it back off returns to the address, which is still there.
+            StartPage.SetAddress("https://example.com/");
+            StartPage.ToggleLast();
+            Check(StartPage.Mode() == StartPage.Last, "the toggle turns back on over an address");
+            Check(!StartPage.ToggleLast() && StartPage.Mode() == StartPage.Url &&
+                  StartPage.Resolve(Store.RecentHistory) == "https://example.com/",
+                  "and off again lands on the address, not the start screen");
+
+            // The upgrade. settings.tsv written by a build that had no mode key.
+            string oldDir = Path.Combine(dir, "upgrade");
+            Directory.CreateDirectory(oldDir);
+            File.WriteAllLines(Path.Combine(oldDir, "settings.tsv"), new[]
+            {
+                "startupUrl\thttps://www.instagram.com/",
+                "images\t1",
+            });
+            Store.Init(oldDir);
+            Check(StartPage.Mode() == StartPage.Url &&
+                  StartPage.Resolve(Store.RecentHistory) == "https://www.instagram.com/",
+                  "an install from before the mode existed still opens on its address");
+
+            string bareDir = Path.Combine(dir, "upgrade-bare");
+            Directory.CreateDirectory(bareDir);
+            File.WriteAllLines(Path.Combine(bareDir, "settings.tsv"), new[] { "images\t0" });
+            Store.Init(bareDir);
+            Check(StartPage.Mode() == StartPage.Home && StartPage.Resolve(Store.RecentHistory) == null,
+                  "and one that never set an address still opens on the start screen");
+
             Console.WriteLine();
             Console.WriteLine(_failures == 0 ? "startpage: all checks passed" : "startpage: FAILED (" + _failures + ")");
             return _failures == 0 ? 0 : 1;

@@ -280,7 +280,10 @@ namespace Overscan
 
             _viewportFix = Store.GetBool("viewportFix", false);
             _hintsWanted = Store.GetBool("hints", true);
-            _startupUrl = Store.Get("startupUrl", null);
+
+            // Three states, not two, since issue #79: the start screen, a fixed
+            // address, or wherever the last session got to. StartPage owns which.
+            _startupUrl = StartPage.Resolve(Store.RecentHistory);
             ShowHints(_hintsWanted);
 
             _defaultPresetIndex = Math.Min(Store.GetInt("uaPreset", 0), _presets.Length - 1);
@@ -540,8 +543,19 @@ namespace Overscan
 
                 WatchTheEngine();
 
-                _cursor = new NuiCursor(_web);
+                // A rebuild brings us here with the previous view's pointer still
+                // parented to the window; without this the set collects one more
+                // pointer per recovery.
+                if (_cursor != null)
+                {
+                    _cursor.Remove();
+                }
+
+                _cursor = new NuiCursor(_window, _web);
                 _cursor.Clicked += OnPageClicked;
+                _cursor.SetVisual(Store.GetInt("cursorVisual", 1) == 1
+                    ? CursorVisual.Native
+                    : CursorVisual.Dom);
                 Breadcrumbs.Drop("engine ready");
 
                 return true;
@@ -855,6 +869,13 @@ namespace Overscan
             {
                 _flashUntil = DateTime.MinValue;
                 UpdateStatus();
+            }
+
+            // Where a held D-pad key turns into one hover update instead of twenty
+            // — see NuiCursor and issue #78. Cheap when nothing moved.
+            if (_cursor != null)
+            {
+                _cursor.FlushPending();
             }
 
             NoteMemory();
@@ -1289,6 +1310,8 @@ namespace Overscan
                 new RemoteMenu.Item(RemoteMenu.ActionSwitchSite, "Switch site", "A"),
                 new RemoteMenu.Item(RemoteMenu.ActionHome, "Start screen", "9"),
                 new RemoteMenu.Item(RemoteMenu.ActionBookmark, "Keep this page", "8"),
+                new RemoteMenu.Item(RemoteMenu.ActionKeepAddress, "Keep an address…", string.Empty),
+                new RemoteMenu.Item(RemoteMenu.ActionResumeLast, "Open where I left off", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionTypeInField, "Type in a field…", "2"),
                 new RemoteMenu.Item(RemoteMenu.ActionIdentity, "Identify as…", "1"),
                 new RemoteMenu.Item(RemoteMenu.ActionKeysToPage, "Send keys to page", "4"),
@@ -1297,6 +1320,7 @@ namespace Overscan
                 new RemoteMenu.Item(RemoteMenu.ActionAdBlock, "Ad blocking on/off", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionForgetSite, "Forget this site's settings", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionVideoPath, "Video: in page / overlay", "5"),
+                new RemoteMenu.Item(RemoteMenu.ActionPointer, "Pointer style", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionHints, "Remote card on/off", "7"),
                 new RemoteMenu.Item(RemoteMenu.ActionDiagnostics, "Diagnostics", "3"),
                 new RemoteMenu.Item(RemoteMenu.ActionQuit, "Close Overscan", string.Empty),
@@ -1441,6 +1465,18 @@ namespace Overscan
                     ToggleFavourite();
                     break;
 
+                case RemoteMenu.ActionKeepAddress:
+                    // Prefilled with where we are, because the address somebody
+                    // wants to keep is usually the one they are looking at with a
+                    // few segments taken off the end (issue #80).
+                    _keyboard.Open(KeyboardTarget.Favourite,
+                                   _atHome || _cachedUrl == "-" ? string.Empty : _cachedUrl);
+                    break;
+
+                case RemoteMenu.ActionResumeLast:
+                    ToggleResumeLast();
+                    break;
+
                 case RemoteMenu.ActionTypeInField:
                     _keyboard.Open(KeyboardTarget.PageField, string.Empty);
                     break;
@@ -1460,8 +1496,32 @@ namespace Overscan
                 case RemoteMenu.ActionKeysToPage:
                     _keysToPage = !_keysToPage;
                     DiagLog.Add(_keysToPage ? "keys -> page" : "keys -> cursor");
+
+                    // The pointer goes with the keys. It used to stay on screen
+                    // under the page's own drawing, where it was merely odd; drawn
+                    // by us it would sit over the page as a thing that no longer
+                    // moves, which reads as a freeze.
+                    if (_keysToPage)
+                    {
+                        _cursor.Hide();
+                    }
+                    else
+                    {
+                        _cursor.Show();
+                    }
+
                     Flash(_keysToPage ? "keys go to the page" : "keys move the pointer");
                     UpdateStatus();
+                    break;
+
+                case RemoteMenu.ActionPointer:
+                    _cursor.SetVisual(_cursor.Visual == CursorVisual.Native
+                        ? CursorVisual.Dom
+                        : CursorVisual.Native);
+                    Store.Set("cursorVisual", _cursor.Visual == CursorVisual.Native ? 1 : 0);
+                    Flash(_cursor.Visual == CursorVisual.Native
+                        ? "Pointer drawn by Overscan — keeps up on heavy pages"
+                        : "Pointer drawn by the page — an arrow, but only as quick as the page");
                     break;
 
                 case RemoteMenu.ActionFitPage:
@@ -1906,14 +1966,14 @@ namespace Overscan
             if (string.IsNullOrEmpty((text ?? string.Empty).Trim()))
             {
                 _startupUrl = null;
-                Store.Set("startupUrl", string.Empty);
+                StartPage.SetAddress(null);
                 DiagLog.Add("start page cleared");
                 Flash("Start page cleared");
                 return;
             }
 
             _startupUrl = Urls.Normalize(text);
-            Store.Set("startupUrl", _startupUrl);
+            StartPage.SetAddress(_startupUrl);
             DiagLog.Add("start page = " + _startupUrl);
             Flash("Opens here from now on");
             Navigate(_startupUrl);
@@ -1924,6 +1984,12 @@ namespace Overscan
             if (target == KeyboardTarget.Address)
             {
                 Navigate(Urls.Normalize(text));
+                return;
+            }
+
+            if (target == KeyboardTarget.Favourite)
+            {
+                KeepAddress(text);
                 return;
             }
 
@@ -2276,6 +2342,47 @@ namespace Overscan
             Flash(kept ? "Kept this page" : "Removed from favourites");
         }
 
+        /// <summary>
+        /// Keeps a typed address as a favourite without going to it — issue #80.
+        ///
+        /// Key 8 keeps <em>the page you are on</em>, which is no help at all when
+        /// the address you want is one that redirects: the reporter wanted
+        /// <c>instagram.com/reel</c> in his tiles, and opening it hands you one
+        /// particular reel, so the tile he could make played the same clip for
+        /// ever. There was no way to keep an address you cannot land on.
+        ///
+        /// It toggles, exactly as key 8 does, so typing one that is already kept
+        /// takes it out again — and says which of the two happened, because
+        /// otherwise the two are indistinguishable from the sofa.
+        /// </summary>
+        private void KeepAddress(string text)
+        {
+            string url = Urls.Normalize(text);
+
+            // No title to take from a page nobody opened, so the site's own name is
+            // the honest one. The tiles are named by this.
+            string title = SiteRules.KeyFor(url) ?? url;
+            bool kept = Store.ToggleFavourite(url, title);
+            DiagLog.Add((kept ? "kept address " : "removed address ") + url);
+            Flash(kept ? "Kept " + title : "Removed " + title + " from favourites");
+        }
+
+        /// <summary>
+        /// Turns "open where I left off" on and off — issue #79. Off goes back to
+        /// the fixed address if one was ever set, so nobody has to type it again to
+        /// get it back; see <see cref="StartPage.ToggleLast"/>.
+        /// </summary>
+        private void ToggleResumeLast()
+        {
+            bool on = StartPage.ToggleLast();
+            DiagLog.Add("start page mode: " + StartPage.Mode());
+            Flash(on
+                ? "Opens where you left off"
+                : "Opens at " + (string.IsNullOrEmpty(StartPage.Address)
+                    ? "the start screen"
+                    : StartPage.Address));
+        }
+
         private void Flash(string message)
         {
             ShowChrome();
@@ -2429,6 +2536,10 @@ namespace Overscan
                   "video rect: " + NuiVideoRect.LastBox + "\n" +
                   "blank view: " + _blankState + "\n" +
                   "start page: " + _startPageState + "\n" +
+                  "opens at  : " + StartPage.Describe(Store.RecentHistory) + "\n" +
+                  "pointer   : " + (_cursor == null
+                      ? "(not built)"
+                      : (_cursor.Visual == CursorVisual.Native ? "drawn by Overscan" : "drawn by the page")) + "\n" +
                   "site rules: " + (SiteRules.For(_cachedUrl) == null
                       ? "nothing remembered for this site"
                       : "in force for " + SiteRules.For(_cachedUrl).Site) + "\n" +

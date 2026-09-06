@@ -43,6 +43,8 @@ namespace Overscan
         public const string ActionAddress = "address";
         public const string ActionHome = "home";
         public const string ActionBookmark = "bookmark";
+        public const string ActionKeepAddress = "keepaddress";
+        public const string ActionResumeLast = "resumelast";
         public const string ActionIdentity = "identity";
         public const string ActionSwitchSite = "switchsite";
         public const string ActionForgetSite = "forgetsite";

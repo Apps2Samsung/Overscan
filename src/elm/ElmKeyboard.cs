@@ -332,7 +332,7 @@ namespace Overscan
 
         private void Paint()
         {
-            string prompt = Target == KeyboardTarget.Address ? "Go to" : "Type into page";
+            string prompt = Prompt(Target);
             _entry.Text =
                 Theme.Text(prompt + "   ", 24, Theme.Accent, true) +
                 Theme.Text(_text.Length == 0 ? "|" : _text + "|", 34, Theme.Ink, true);
@@ -379,6 +379,22 @@ namespace Overscan
         /// symbol key wears the page it switches *to* — the phone idiom, so it is
         /// never ambiguous which way it goes.
         /// </summary>
+        /// <summary>
+        /// What the entry line calls itself. The keyboard looks the same whatever
+        /// it was opened for, so this is the only thing on screen that says which
+        /// of the three it is — and "keep" and "go to" are not a mistake anybody
+        /// should be able to make silently.
+        /// </summary>
+        private static string Prompt(KeyboardTarget target)
+        {
+            switch (target)
+            {
+                case KeyboardTarget.Address: return "Go to";
+                case KeyboardTarget.Favourite: return "Keep as a tile";
+                default: return "Type into page";
+            }
+        }
+
         private static string Label(string key, bool selected)
         {
             string text = KeyText(key);

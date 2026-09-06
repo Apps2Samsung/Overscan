@@ -89,6 +89,43 @@ browser simply won't start. Newer sets don't have this restriction.
 Not every remote sends the colour buttons, and the slim ones have none. **Switch
 site** is the second row of the menu, so hold OK and it is one press away.
 
+Every digit is spoken for, so these live in the menu only (**hold OK**):
+
+| Menu row | What it does |
+| --- | --- |
+| **Keep an address…** | Type a URL and keep *that* as a tile, without going to it |
+| **Open where I left off** | Launch straight back into the last page you were on |
+| **Forget this site's settings** | Take a site back to your everywhere settings |
+| **Pointer style** | Who draws the pointer — Overscan (keeps up) or the page (an arrow) |
+| **Ad blocking on/off** | 2025+ package only |
+
+### Keeping a page you can't land on
+
+**Keep an address…** in the menu is for URLs that redirect. `https://www.instagram.com/reel`
+sends you to one particular reel, so pressing `8` there would save that clip
+for ever; type the address instead and the tile is the address. It's prefilled
+with wherever you are, so it's usually a matter of deleting the end of it.
+
+### Where it opens
+
+By default, the start screen. Two ways to change that:
+
+- **Open where I left off** in the menu — it launches back into the last page you
+  were on.
+- On the keyboard, **start** makes whatever you typed the fixed opening page. Press
+  it with nothing typed to go back to the start screen.
+
+Turning "where I left off" off again returns to your fixed address if you set one,
+so you never have to type it twice.
+
+### The pointer
+
+On a heavy site the pointer used to slow down, because it was drawn *by the page*
+and could only move as fast as the page would let it. Overscan now draws it itself
+on the 2025+ package, so it keeps up whatever the site is doing. **Pointer style**
+in the menu (key **2** on the older packages) switches back to the page-drawn
+arrow, which looks nicer and is only as quick as the page.
+
 ### Each site keeps its own settings
 
 Images and identity are remembered **for the site you set them on**. Turn images

@@ -22,7 +22,11 @@
 #   4. a sign-in waypoint (a captcha, a code entry, an OAuth step, a URL too long
 #      to be anything but a token) is passed through and not recorded, while a
 #      host or a fragment that merely contains one of those words is kept;
-#   5. a history file with waypoints in it is healed on load, favourites untouched.
+#   5. a history file with waypoints in it is healed on load, favourites untouched;
+#   6. where the browser opens (issue #79): the three states, "where I left off"
+#      landing on the last real visit and never on this app's own start screen,
+#      the toggle going back to the address somebody set rather than losing it,
+#      and an install made before the mode existed still opening where it did.
 # Number 3 is the bug itself: against the Store.cs before this fix it fails on
 # the second screen. Numbers 4 and 5 are the same reporter's next report: six
 # recent tiles, two of them 3 KB recaptcha pages nobody can go back to.
@@ -52,6 +56,8 @@ cat > "$work/startpage.csproj" <<CSPROJ
     <Compile Include="Program.cs" />
     <Compile Include="$PWD/../../src/common/Store.cs" />
     <Compile Include="$PWD/../../src/common/HomePage.cs" />
+    <Compile Include="$PWD/../../src/common/SiteRules.cs" />
+    <Compile Include="$PWD/../../src/common/StartPage.cs" />
   </ItemGroup>
 </Project>
 CSPROJ
