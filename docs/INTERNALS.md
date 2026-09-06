@@ -2587,7 +2587,8 @@ the one its report has to come from. The state is:
   saying the lag was never our script. **His first report on it was about #80**,
   within the hour, and found two older faults behind the new feature — exact-string
   favourite matching and key `8` reading a stale cache. See *Keeping an address you
-  cannot land on* above; both are fixed and his files are healed on load.
+  cannot land on* above; both are fixed in `build-42ed14f` and his files are healed
+  on load.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
