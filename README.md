@@ -99,12 +99,24 @@ Every digit is spoken for, so these live in the menu only (**hold OK**):
 | **Pointer style** | Who draws the pointer — Overscan (keeps up) or the page (an arrow) |
 | **Ad blocking on/off** | 2025+ package only |
 
-### Keeping a page you can't land on
+### Favourites
 
-**Keep an address…** in the menu is for URLs that redirect. `https://www.instagram.com/reel`
-sends you to one particular reel, so pressing `8` there would save that clip
-for ever; type the address instead and the tile is the address. It's prefilled
-with wherever you are, so it's usually a matter of deleting the end of it.
+Three gestures, one meaning each:
+
+| | |
+| --- | --- |
+| **8** on a page | Keep it, or drop it |
+| **8** on a tile | Remove that tile — point at it on the start screen |
+| **Keep an address…** | Keep a URL you can't land on |
+
+**Keep an address…** is for URLs that redirect. `https://www.instagram.com/reel`
+sends you to one particular reel, so pressing `8` there would save that clip for
+ever; type the address instead and the tile is the address. It's prefilled with
+wherever you are, so it's usually a matter of deleting the end of it.
+
+To get rid of anything, point at its tile on the start screen and press **8** —
+you never have to remember how it got there or what it was called. That works on
+**Recent** tiles too, if you'd rather a page wasn't listed.
 
 ### Where it opens
 

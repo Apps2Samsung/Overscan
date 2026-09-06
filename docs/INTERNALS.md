@@ -1677,6 +1677,50 @@ Shipped in `build-a77a661`. The rule this leaves behind: **anything the app will
 act on by name must be displayed under that name, or be reachable without one.**
 Favourites were neither.
 
+### One gesture, one meaning
+
+And then he reported it a third time, within the hour, and the third report is the
+one that names the actual fault:
+
+> app allows two duplicates url to be added when used both 8 button & keep page
+> menu together, if we point at the tile added using kept menu and press 8 it
+> duplicates that site.
+
+Pointing at a tile and pressing `8` **added a second copy of it** — in the build
+that had just been shipped to let him remove tiles by pointing at them. That is
+three reports in one afternoon, and every one of them was fixed by a better rule
+for matching addresses. The rule was never the problem.
+
+**The fault is that `8` meant two opposite things depending on state the screen did
+not show.** On a page it kept-or-removed depending on an address the tile never
+displayed. On the start screen it kept-or-removed depending on which of two grids
+the pointer was over — and the two grids are the same tiles, drawn the same way,
+one above the other, very often containing the same page. Point at something you
+already kept, press the key that removes things, get another copy. Each fix that
+preserved the toggle bought exactly one more shape of the same report.
+
+So the gestures are separated by meaning rather than by state, and each has one:
+
+| Gesture | Means | Never |
+| --- | --- | --- |
+| `8` on a page | keep this page, or drop it | — |
+| `8` on a tile | get rid of this tile | adds |
+| *Keep an address…* | keep this address | removes, or adds a second copy |
+
+`8` stays a toggle **on a page** because you are looking at the thing itself, so
+both outcomes are legible before you press. Nowhere else is that true. And a menu
+row with the word *keep* in it must not sometimes delete, which is the reading its
+name promises and the one it did not have.
+
+There is now no sequence of presses that produces a second tile for something
+already on the screen, and `tools/startpage/run.sh` holds that as a property
+rather than as a list of cases.
+
+One supporting detail: a tile carries **which grid it is in** (`data-kind`, written
+by `HomePage`, returned by `linkAt` in front of the address). The same page is very
+often a favourite and a recent visit both, and removing it from the list the
+pointer was not on is indistinguishable, from a sofa, from a key that did nothing.
+
 ## Settings that belong to a site, not to the browser
 
 Issues #74 and #75, from the same reporter, four days apart. Both are the same

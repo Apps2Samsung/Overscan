@@ -219,6 +219,50 @@ namespace Overscan
             Check(DiagLog.Lines.Exists(l => l.Contains("dropped 1 duplicate")),
                   "the log says how many: " + string.Join(" | ", DiagLog.Lines));
 
+            // 5d. One meaning per gesture (issue #80, third report). The property
+            //     that has to hold is that no sequence of presses can make a second
+            //     tile for something already on the screen.
+            string gestureDir = Path.Combine(dir, "gestures");
+            Directory.CreateDirectory(gestureDir);
+            Store.Init(gestureDir);
+
+            Check(Store.Keep("https://instagram.com/reels", "instagram.com/reels"),
+                  "Keep an address... keeps");
+            Check(!Store.Keep("https://instagram.com/reels", "instagram.com/reels") &&
+                  Store.AllFavourites.Count == 1,
+                  "keeping the same address again says so and adds nothing");
+            Check(!Store.Keep("https://www.instagram.com/reels/", "again") &&
+                  Store.AllFavourites.Count == 1,
+                  "nor does keeping another spelling of it");
+
+            // His report: point at the tile of an address kept from the menu, press
+            // 8, and it duplicated. Removing is now all that press can do.
+            Check(Store.RemoveFavourite("https://instagram.com/reels") &&
+                  Store.AllFavourites.Count == 0,
+                  "8 on that tile removes it");
+            Check(!Store.RemoveFavourite("https://instagram.com/reels"),
+                  "and says so when there is nothing to remove");
+
+            // The same page is very often in both grids. Each press must act on the
+            // list the tile was in and leave the other alone.
+            Store.RecordVisit("https://www.instagram.com/reels", "Instagram");
+            Store.Keep("https://www.instagram.com/reels", "instagram.com/reels");
+            Check(Store.AllFavourites.Count == 1 && Store.RecentHistory.Count == 1,
+                  "a page can be a favourite and a recent visit at once");
+            Check(Store.ForgetVisit("https://www.instagram.com/reels") &&
+                  Store.RecentHistory.Count == 0 && Store.AllFavourites.Count == 1,
+                  "8 on the recent tile forgets the visit and keeps the favourite");
+            Check(Store.RemoveFavourite("https://www.instagram.com/reels") &&
+                  Store.AllFavourites.Count == 0,
+                  "and 8 on the favourite tile removes the favourite");
+
+            // 8 on the page itself is still a toggle — you are looking at the thing —
+            // and it must find a favourite kept under any spelling of the address.
+            Store.Keep("https://instagram.com/reels", "instagram.com/reels");
+            Check(!Store.ToggleFavourite("https://www.instagram.com/reels/", "Instagram") &&
+                  Store.AllFavourites.Count == 0,
+                  "8 on the page removes what Keep an address... put there");
+
             // 6. Where the browser opens — three states, not two (issue #79).
             //    The one that has to keep working is the upgrade: an install made
             //    before this existed has an address and no mode, and its start page
