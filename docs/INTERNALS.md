@@ -1673,8 +1673,9 @@ Three changes, and the first is the one that matters:
   parts of an address a person neither sees nor types. Without it, typing back
   exactly what the tile shows still missed the favourite that tile names.
 
-The rule this leaves behind: **anything the app will act on by name must be
-displayed under that name, or be reachable without one.** Favourites were neither.
+Shipped in `build-a77a661`. The rule this leaves behind: **anything the app will
+act on by name must be displayed under that name, or be reachable without one.**
+Favourites were neither.
 
 ## Settings that belong to a site, not to the browser
 
