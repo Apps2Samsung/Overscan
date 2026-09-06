@@ -234,6 +234,54 @@ namespace Overscan
             return true;
         }
 
+        /// <summary>
+        /// Keeps a page, and says whether it was already kept. Never removes.
+        ///
+        /// The add-only half of <see cref="ToggleFavourite"/>, for "Keep an
+        /// address…" — a menu row with the word *keep* in it must not sometimes
+        /// delete, and the reporter on issue #80 spent an afternoon in the gap
+        /// between those two readings.
+        /// </summary>
+        public static bool Keep(string url, string title)
+        {
+            if (string.IsNullOrEmpty(url) || url == "-" || IsGenerated(url) || IndexOf(Favourites, url) >= 0)
+            {
+                return false;
+            }
+
+            Favourites.Insert(0, new Bookmark(url, string.IsNullOrEmpty(title) ? url : title));
+            Save("favourites.tsv", Favourites);
+            return true;
+        }
+
+        /// <summary>Drops a favourite. True when there was one to drop.</summary>
+        public static bool RemoveFavourite(string url)
+        {
+            int at = IndexOf(Favourites, url);
+            if (at < 0)
+            {
+                return false;
+            }
+
+            Favourites.RemoveAt(at);
+            Save("favourites.tsv", Favourites);
+            return true;
+        }
+
+        /// <summary>Drops a visit. True when there was one to drop.</summary>
+        public static bool ForgetVisit(string url)
+        {
+            int at = IndexOf(History, url);
+            if (at < 0)
+            {
+                return false;
+            }
+
+            History.RemoveAt(at);
+            Save("history.tsv", History);
+            return true;
+        }
+
         public static void RecordVisit(string url, string title)
         {
             if (string.IsNullOrEmpty(url) || url == "-" || url.StartsWith("about:", StringComparison.Ordinal))

@@ -220,10 +220,17 @@ namespace Overscan
       var n = at();
       for (var depth = 0; n && depth < 8; depth++) {
         if (n.tagName === 'A' && n.getAttribute && n.getAttribute('href')) {
-          /* .href is resolved against the page's base, which is what the app
+          /* Which list the tile is in, then the address. The same page is very
+             often a favourite *and* a recent visit, so a caller told only the
+             address cannot know which of the two tiles the pointer was on — and
+             taking a page out of the wrong list is indistinguishable, from a sofa,
+             from a key that did nothing.
+
+             .href is resolved against the page's base, which is what the app
              stored; the attribute is the fallback for engines that do not give a
-             resolved one on a detached node. */
-          return String(n.href || n.getAttribute('href'));
+             resolved one. */
+          return String(n.getAttribute('data-kind') || 'link') + ' ' +
+                 String(n.href || n.getAttribute('href'));
         }
 
         n = n.parentElement || n.parentNode;

@@ -61,13 +61,13 @@ namespace Overscan
             }
             else
             {
-                AppendGrid(html, favourites, 12);
+                AppendGrid(html, favourites, 12, "fav");
             }
 
             if (history.Count > 0)
             {
                 html.Append("<h2>Recent</h2>");
-                AppendGrid(html, history, 8);
+                AppendGrid(html, history, 8, "recent");
             }
 
             // Four things that get somebody unstuck on their first evening, and
@@ -76,6 +76,7 @@ namespace Overscan
             html.Append(@"<div class='hint'>
 <b>0</b> type an address &nbsp;·&nbsp; <b>7</b> the remote card — every key, and what it is for &nbsp;·&nbsp;
 <b>9</b> back to this screen &nbsp;·&nbsp; <b>channel up/down</b> scrolls, on every remote<br/>
+<b>8</b> on a tile removes it &nbsp;·&nbsp; on a page, keeps it here.<br/>
 Move the pointer with the D-pad and press OK to click. On the keyboard, <b>start</b>
 makes what you typed the page this browser opens on; press it with nothing typed
 to get this screen back.
@@ -83,13 +84,20 @@ to get this screen back.
             return html.ToString();
         }
 
-        private static void AppendGrid(StringBuilder html, IList<Bookmark> items, int limit)
+        /// <summary>
+        /// One grid of tiles. <paramref name="kind"/> is written onto each tile so
+        /// that pressing 8 on one knows which list it is looking at: the same page
+        /// is very often in both grids, and taking it out of the wrong one is
+        /// indistinguishable, from a sofa, from a key that did nothing.
+        /// </summary>
+        private static void AppendGrid(StringBuilder html, IList<Bookmark> items, int limit, string kind)
         {
             html.Append("<div class='grid'>");
             for (int i = 0; i < items.Count && i < limit; i++)
             {
                 Bookmark item = items[i];
-                html.Append("<a class='tile' href='").Append(Escape(item.Url)).Append("'>")
+                html.Append("<a class='tile' data-kind='").Append(kind)
+                    .Append("' href='").Append(Escape(item.Url)).Append("'>")
                     .Append("<span class='host'>").Append(Escape(HostOf(item.Url))).Append("</span>")
                     .Append("<span class='name'>").Append(Escape(item.Title)).Append("</span>")
                     .Append("</a>");
