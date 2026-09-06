@@ -73,6 +73,26 @@ namespace Overscan
             PlayBack, AudioPlay, AudioPause, AudioPlayPause,
         };
 
+        // ---------------------------------------------------------- switch site
+        //
+        // The red / A button, which is the only button left on a Samsung remote
+        // that this app has no use for — every digit and Info are spoken for, and
+        // issue #75 asked for a way between two sites that is faster than typing
+        // an address or going through the start screen.
+        //
+        // Which name it arrives under is undocumented and differs by remote
+        // generation (the TV web runtime calls it ColorF0Red; the X keysym is
+        // XF86Red), so this answers to every plausible spelling, exactly as
+        // MenuKeys does. None of them is verified on hardware — a slim remote has
+        // no colour buttons at all — so this is an accelerator and never the only
+        // way in: "Switch site" sits second in the menu, which every remote can
+        // reach. A name we guessed wrong prints itself on the remote card like any
+        // other unknown button, which is how we would find out.
+        public static readonly string[] SwitchKeys =
+        {
+            "XF86Red", "XF86ColorF0Red", "ColorF0Red",
+        };
+
         public const string ChannelUp = "XF86RaiseChannel";
         public const string ChannelDown = "XF86LowerChannel";
 
@@ -98,6 +118,7 @@ namespace Overscan
             Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
             Tools, SimpleMenu, SysMenu,
             PlayBack, AudioPlay, AudioPause, AudioPlayPause,
+            "XF86Red", "XF86ColorF0Red", "ColorF0Red",
         };
 
         /// <summary>
@@ -114,6 +135,12 @@ namespace Overscan
         public static bool IsMediaKey(string key)
         {
             return Contains(MediaKeys, key);
+        }
+
+        /// <summary>True for the red / A button — see <see cref="SwitchKeys"/>.</summary>
+        public static bool IsSwitchKey(string key)
+        {
+            return Contains(SwitchKeys, key);
         }
 
         /// <summary>
@@ -146,7 +173,8 @@ namespace Overscan
                 return true;
             }
 
-            return Contains(MenuKeys, key) || Contains(MediaKeys, key);
+            return Contains(MenuKeys, key) || Contains(MediaKeys, key) ||
+                   Contains(SwitchKeys, key);
         }
 
         private static bool Contains(string[] keys, string key)

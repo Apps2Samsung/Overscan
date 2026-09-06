@@ -100,6 +100,33 @@ namespace Overscan
         private bool _hintsWanted = true;
         private bool _imagesOn = true;
         private bool _adBlockOn = true;
+
+        /// <summary>
+        /// The browser-wide answers, i.e. what a site with no rule of its own
+        /// gets. <see cref="_imagesOn"/> and <see cref="_presetIndex"/> are what
+        /// the view has actually been told, which on a site with a rule is not the
+        /// same thing (issue #74).
+        /// </summary>
+        private bool _defaultImagesOn = true;
+        private int _defaultPresetIndex;
+
+        /// <summary>
+        /// The site whose rules are on the view, or null while nothing but our own
+        /// generated pages has been shown. Compared against the site of each load
+        /// to decide whether anything has to change at all — without it every page
+        /// of a site would re-apply and re-reload the same settings.
+        /// </summary>
+        private string _siteKey;
+
+        /// <summary>
+        /// Reloads asked for by a site rule since the last load that settled, and
+        /// whether this load asked for one. See <see cref="ApplySiteRules"/>: two
+        /// sites whose rules disagree and which redirect to each other would
+        /// otherwise reload one another for ever.
+        /// </summary>
+        private int _ruleReloads;
+        private bool _ruleReloadIssued;
+        private const int RuleReloadLimit = 3;
         private bool _videoOverlay = true;
 
         /// <summary>
@@ -227,6 +254,7 @@ namespace Overscan
             // first time KeyboardLayouts is touched, so initialising the store
             // afterwards silently threw the user's layout choice away.
             Store.Init(DirectoryInfo.Data);
+            SiteRules.Init(DirectoryInfo.Data);
 
             BuildChrome();
             BuildOverlay();
@@ -255,7 +283,8 @@ namespace Overscan
             _startupUrl = Store.Get("startupUrl", null);
             ShowHints(_hintsWanted);
 
-            ApplyPreset(Math.Min(Store.GetInt("uaPreset", 0), _presets.Length - 1));
+            _defaultPresetIndex = Math.Min(Store.GetInt("uaPreset", 0), _presets.Length - 1);
+            ApplyPreset(_defaultPresetIndex);
 
             // A start page, if one was set with the keyboard's `start` key (issue
             // #15): otherwise the same address gets typed on a remote every launch.
@@ -396,7 +425,7 @@ namespace Overscan
                     // fit" behaviour, i.e. the suspected cause of the stretched
                     // rendering on older sets. We want 1:1.
                     _web.Settings.AutoFittingEnabled = false;
-                    _imagesOn = Store.GetBool("images", true);
+                    _imagesOn = _defaultImagesOn = Store.GetBool("images", true);
                     _web.Settings.AutomaticImageLoadingAllowed = _imagesOn;
 
                     // Nothing this browser does is worth a private window, and the
@@ -444,6 +473,17 @@ namespace Overscan
                     Breadcrumbs.Drop("load started: " + SafeUrl());
                     _loading = true;
 
+                    // Cleared here rather than after a reload is asked for: what
+                    // the limit counts is loads that could not settle, and a load
+                    // nobody had to reload is what settling looks like.
+                    _ruleReloadIssued = false;
+
+                    // The engine reports the destination here, which is where a
+                    // site's own settings go on the view — see ApplySiteRules for
+                    // why that is early enough for the images and one reload late
+                    // for the identity.
+                    ApplySiteRules(SafeUrl(), true);
+
                     // The engine answered, so the view is not the dead kind.
                     _loadAskedAt = DateTime.MinValue;
                     if (_blankRecoveries > 0)
@@ -478,6 +518,15 @@ namespace Overscan
                     Probe();
                     ApplyViewportFix();
                     Store.RecordVisit(SafeUrl(), SafeTitle());
+
+                    // Backstop, for a load whose start we somehow missed. Normally
+                    // a no-op: the site is already the applied one by now.
+                    ApplySiteRules(SafeUrl(), true);
+                    if (!_ruleReloadIssued)
+                    {
+                        _ruleReloads = 0;
+                    }
+
                     UpdateStatus();
                 };
 
@@ -1112,6 +1161,30 @@ namespace Overscan
         }
 
         /// <summary>
+        /// Every key this build answers to, one line each. "hold OK" comes first
+        /// and is not a number, deliberately: on a slim remote it is the only row
+        /// here the user can act on, and a list that opens with nine things they
+        /// cannot do reads as "this app is not for your remote" (issue #27).
+        /// </summary>
+        private static readonly string[][] RemoteRows =
+        {
+            new[] { "hold OK", "menu — every action, on any remote" },
+            new[] { "Ch up/down", "scroll a page" },
+            new[] { "0", "type an address" },
+            new[] { "A / red", "switch to the site you were just on" },
+            new[] { "1", "identify as… — kept for this site" },
+            new[] { "2", "type in the field you clicked" },
+            new[] { "3", "diagnostics — the report at :8081" },
+            new[] { "4", "keys to page — when a search box is dead" },
+            new[] { "5", "video: TV overlay / in page — if black" },
+            new[] { "6", "fit page — when the page is cut off" },
+            new[] { "7", "hide this card" },
+            new[] { "8", "keep this page as a tile" },
+            new[] { "9", "start screen" },
+            new[] { "Info", "images off — kept for this site" },
+        };
+
+        /// <summary>
         /// The remote card is the surface that teaches the keys (issue #38): every
         /// key this build answers to, each with the one line that says what it is
         /// for, because it is the only surface visible while a page is open, which
@@ -1122,7 +1195,12 @@ namespace Overscan
         {
             Size2D screen = _window.WindowSize;
             int width = 640;
-            int height = 688;
+
+            // Title, one 42px row per key, then a row's worth of clearance for the
+            // unrecognised-button line that sits on the bottom edge. Derived rather
+            // than a constant, because a card that grows by a key and not by a row
+            // draws the last key on top of that line.
+            int height = NuiTheme.Pad + 52 + ((RemoteRows.Length + 1) * 42) + NuiTheme.Pad;
 
             _hints = new View
             {
@@ -1142,26 +1220,7 @@ namespace Overscan
             };
             _hints.Add(title);
 
-            // "hold OK" comes first and is not a number, deliberately. On a slim
-            // remote it is the only row on this card the user can act on, and a
-            // list that opens with nine things they cannot do reads as "this app
-            // is not for your remote" (issue #27).
-            string[][] rows =
-            {
-                new[] { "hold OK", "menu — every action, on any remote" },
-                new[] { "Ch up/down", "scroll a page" },
-                new[] { "0", "type an address" },
-                new[] { "1", "identify as… — a lighter site, or desktop" },
-                new[] { "2", "type in the field you clicked" },
-                new[] { "3", "diagnostics — the report at :8081" },
-                new[] { "4", "keys to page — when a search box is dead" },
-                new[] { "5", "video: TV overlay / in page — if black" },
-                new[] { "6", "fit page — when the page is cut off" },
-                new[] { "7", "hide this card" },
-                new[] { "8", "keep this page as a tile" },
-                new[] { "9", "start screen" },
-                new[] { "Info", "images off — the one real speed-up" },
-            };
+            string[][] rows = RemoteRows;
 
             for (int i = 0; i < rows.Length; i++)
             {
@@ -1227,6 +1286,7 @@ namespace Overscan
             _menu = new RemoteMenu(new[]
             {
                 new RemoteMenu.Item(RemoteMenu.ActionAddress, "Go to address…", "0"),
+                new RemoteMenu.Item(RemoteMenu.ActionSwitchSite, "Switch site", "A"),
                 new RemoteMenu.Item(RemoteMenu.ActionHome, "Start screen", "9"),
                 new RemoteMenu.Item(RemoteMenu.ActionBookmark, "Keep this page", "8"),
                 new RemoteMenu.Item(RemoteMenu.ActionTypeInField, "Type in a field…", "2"),
@@ -1235,6 +1295,7 @@ namespace Overscan
                 new RemoteMenu.Item(RemoteMenu.ActionFitPage, "Fit page to screen", "6"),
                 new RemoteMenu.Item(RemoteMenu.ActionImages, "Images on/off", "Info"),
                 new RemoteMenu.Item(RemoteMenu.ActionAdBlock, "Ad blocking on/off", string.Empty),
+                new RemoteMenu.Item(RemoteMenu.ActionForgetSite, "Forget this site's settings", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionVideoPath, "Video: in page / overlay", "5"),
                 new RemoteMenu.Item(RemoteMenu.ActionHints, "Remote card on/off", "7"),
                 new RemoteMenu.Item(RemoteMenu.ActionDiagnostics, "Diagnostics", "3"),
@@ -1385,9 +1446,15 @@ namespace Overscan
                     break;
 
                 case RemoteMenu.ActionIdentity:
-                    ApplyPreset((_presetIndex + 1) % _presets.Length);
-                    Store.Set("uaPreset", _presetIndex);
-                    _web.Reload();
+                    CycleIdentity();
+                    break;
+
+                case RemoteMenu.ActionSwitchSite:
+                    SwitchSite();
+                    break;
+
+                case RemoteMenu.ActionForgetSite:
+                    ForgetSite();
                     break;
 
                 case RemoteMenu.ActionKeysToPage:
@@ -1636,7 +1703,15 @@ namespace Overscan
                     break;
 
                 default:
-                    NoteUnknownKey(key);
+                    if (RemoteKeys.IsSwitchKey(key))
+                    {
+                        RunAction(RemoteMenu.ActionSwitchSite);
+                    }
+                    else
+                    {
+                        NoteUnknownKey(key);
+                    }
+
                     break;
             }
         }
@@ -1918,6 +1993,10 @@ namespace Overscan
             _loadAskedAt = DateTime.UtcNow;
             _loadAskedFor = url;
             Breadcrumbs.Drop("navigate: " + url);
+
+            // Before the request, so a site we are opening ourselves is asked with
+            // its own identity the first time and needs no reload at all.
+            ApplySiteRules(url, false);
             _web.LoadUrl(url);
             _cursor.Center();
             UpdateStatus();
@@ -1950,25 +2029,239 @@ namespace Overscan
         /// <summary>
         /// The one real speed-up available: the engine cannot be made faster, but it
         /// can be given much less to do.
+        ///
+        /// Remembered for the site it was pressed on, not for the browser (issue
+        /// #74): the reporter turns images off on Instagram and needs them on for
+        /// Spotify, which will not play without them, and one switch for both means
+        /// flipping it by hand on every crossing. Pressed on the start screen —
+        /// which is on no site — it moves the browser-wide setting instead, so
+        /// there is still a way to say "everywhere".
         /// </summary>
         private void ToggleImages()
         {
-            _imagesOn = !_imagesOn;
-            Store.Set("images", _imagesOn);
+            bool on = !_imagesOn;
+            SiteRule rule = SiteRules.SetImages(PageUrl(), on);
+            if (rule == null)
+            {
+                _defaultImagesOn = on;
+                Store.Set("images", on);
+
+                // The browser-wide answer moved, so what is on the view is no
+                // longer what any site was last worked out to want. Forgetting
+                // which site that was is what makes the next load work it out
+                // again — otherwise a site with a rule, left through the start
+                // screen and come back to, keeps the setting made while away.
+                _siteKey = null;
+                Flash(on ? "Images on" : "Images off — faster");
+            }
+            else
+            {
+                Flash((on ? "Images on for " : "Images off for ") + rule.Site);
+            }
+
+            ApplyImages(on);
+            Reload("images");
+        }
+
+        /// <summary>
+        /// The next identity in the list, remembered for this site. Same split as
+        /// the images switch: on a site it is that site's answer, on the start
+        /// screen it is the browser's.
+        /// </summary>
+        private void CycleIdentity()
+        {
+            int next = (_presetIndex + 1) % _presets.Length;
+            ApplyPreset(next);
+
+            SiteRule rule = SiteRules.SetUa(PageUrl(), next);
+            if (rule == null)
+            {
+                _defaultPresetIndex = next;
+                Store.Set("uaPreset", next);
+
+                // See ToggleImages: a moved browser-wide answer invalidates the
+                // site the view was last set up for.
+                _siteKey = null;
+                Flash(ShortPreset(_presets[next].Label));
+            }
+            else
+            {
+                Flash(ShortPreset(_presets[next].Label) + " for " + rule.Site);
+            }
+
+            Reload("identity");
+        }
+
+        /// <summary>
+        /// Opens the most recent page that is not on this site — issue #75. From a
+        /// page on B that is where the user came from, and from there it is B
+        /// again, so the one action goes back and forth between the two sites
+        /// somebody is actually using.
+        /// </summary>
+        private void SwitchSite()
+        {
+            Bookmark other = SiteRules.OtherSite(Store.RecentHistory, PageUrl());
+            if (other == null)
+            {
+                Flash("No other site to switch to yet");
+                return;
+            }
+
+            Flash("\u2192 " + SiteRules.KeyFor(other.Url));
+            Navigate(other.Url);
+        }
+
+        /// <summary>
+        /// Takes this site back to the browser-wide answers. Without it a rule can
+        /// only be undone by flipping it back to whatever the default happens to
+        /// be, which is not the same thing and leaves the site on the report as
+        /// remembered.
+        /// </summary>
+        private void ForgetSite()
+        {
+            string url = PageUrl();
+            SiteRule rule = SiteRules.Forget(url);
+            if (rule == null)
+            {
+                Flash(url == null ? "Open a site first" : "Nothing is remembered for this site");
+                return;
+            }
+
+            DiagLog.Add("site rules: forgot " + rule.Site);
+            Flash("Forgot the settings for " + rule.Site);
+
+            // A change of settings like any other, so it is applied and reloaded
+            // like any other. The forgotten site is no longer the applied one.
+            _siteKey = null;
+            ApplySiteRules(url, true);
+        }
+
+        /// <summary>
+        /// Puts a site's own answers on the view when the load is for a different
+        /// site from the one already applied.
+        ///
+        /// The images switch takes effect from here on, which at the start of a
+        /// load is nearly all of the page. The identity cannot: the document was
+        /// already asked for with whatever was applied before, and a site serves
+        /// its mobile or desktop layout off that request. So a crossing into a site
+        /// whose identity differs costs one reload — which is exactly the reload
+        /// the user was doing by hand, once per crossing, before this existed.
+        ///
+        /// <paramref name="mayReload"/> is false on our own navigations, where the
+        /// load has not gone out yet and the settings are simply right from the
+        /// first request.
+        /// </summary>
+        private void ApplySiteRules(string url, bool mayReload)
+        {
+            // Our own generated pages are on no site (KeyFor returns null for them)
+            // and leave the settings alone, so a trip through the start screen does
+            // not reset the site on either side of it.
+            string site = SiteRules.KeyFor(url);
+            if (site == null || site == _siteKey)
+            {
+                return;
+            }
+
+            _siteKey = site;
+
+            int ua;
+            bool images;
+            SiteRules.Effective(url, _defaultPresetIndex, _defaultImagesOn, out ua, out images);
+            if (ua < 0 || ua >= _presets.Length)
+            {
+                // A rule written by a build with more presets than this one.
+                ua = _defaultPresetIndex;
+            }
+
+            bool uaChanged = ua != _presetIndex;
+            bool imagesChanged = images != _imagesOn;
+            if (!uaChanged && !imagesChanged)
+            {
+                return;
+            }
+
+            if (uaChanged)
+            {
+                ApplyPreset(ua);
+            }
+
+            if (imagesChanged)
+            {
+                ApplyImages(images);
+            }
+
+            DiagLog.Add("site rules for " + site + ": " + ShortPreset(_presets[ua].Label) +
+                        ", images " + (images ? "on" : "off"));
+
+            if (!mayReload)
+            {
+                return;
+            }
+
+            // Two sites whose rules disagree and which redirect to each other would
+            // reload one another for ever, and an unusable browser is a far worse
+            // outcome than a page carrying the wrong identity. The limit is per run
+            // of loads that never settle: an ordinary crossing reloads once and the
+            // load after it resets the count.
+            if (_ruleReloads >= RuleReloadLimit)
+            {
+                DiagLog.Add("site rules: not reloading again for " + site +
+                            " — " + _ruleReloads + " reloads without a page settling");
+                return;
+            }
+
+            _ruleReloads++;
+            _ruleReloadIssued = true;
+
+            // Not from here: this is normally reached from inside the engine's own
+            // PageLoadStarted notification, and asking a web engine to start a new
+            // load while it is telling us about the one it just started is the kind
+            // of re-entry this platform does not forgive. A tick of the main loop
+            // later is still long before any of the page has been painted. If no
+            // timer can be armed the reload is worth more than the caution.
+            if (!NuiLater.Once(1, delegate { Reload("site rules"); }))
+            {
+                Reload("site rules");
+            }
+        }
+
+        /// <summary>Tells the view about the images switch. Best-effort, like everything past it.</summary>
+        private void ApplyImages(bool on)
+        {
+            _imagesOn = on;
             try
             {
                 if (_web.Settings != null)
                 {
-                    _web.Settings.AutomaticImageLoadingAllowed = _imagesOn;
+                    _web.Settings.AutomaticImageLoadingAllowed = on;
                 }
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("image switch failed: " + ex.Message);
+            }
+        }
 
-                Flash(_imagesOn ? "Images on" : "Images off — faster");
+        private void Reload(string why)
+        {
+            try
+            {
                 _web.Reload();
             }
             catch (Exception ex)
             {
-                DiagLog.Add("image toggle failed: " + ex.Message);
+                DiagLog.Add("reload after " + why + " failed: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// The address the page is on, or null when it is one of ours. Everything
+        /// per-site keys off this, and "no site" is a real answer rather than a
+        /// missing one — see <see cref="SiteRules.KeyFor"/>.
+        /// </summary>
+        private string PageUrl()
+        {
+            return _web == null || _atHome ? null : SafeUrl();
         }
 
         private void ToggleFavourite()
@@ -2111,7 +2404,8 @@ namespace Overscan
                            "   ·   " + (_keysToPage ? "page keys" : "cursor") +
                            (_viewportFix ? "   ·   fit" : string.Empty) +
                            (_imagesOn ? string.Empty : "   ·   no images") +
-                           (_adBlockOn ? string.Empty : "   ·   ads allowed");
+                           (_adBlockOn ? string.Empty : "   ·   ads allowed") +
+                           (SiteRules.For(_cachedUrl) == null ? string.Empty : "   ·   for this site");
         }
 
         private string Report()
@@ -2135,6 +2429,9 @@ namespace Overscan
                   "video rect: " + NuiVideoRect.LastBox + "\n" +
                   "blank view: " + _blankState + "\n" +
                   "start page: " + _startPageState + "\n" +
+                  "site rules: " + (SiteRules.For(_cachedUrl) == null
+                      ? "nothing remembered for this site"
+                      : "in force for " + SiteRules.For(_cachedUrl).Site) + "\n" +
                   "ad block  : " + NuiAdBlock.Summary() + "\n" +
                   "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
                   "last words: " + NuiDeathWatch.LastWord + "\n" +
@@ -2155,6 +2452,7 @@ namespace Overscan
                    // and Range both are. The column stays because it costs nothing
                    // and a firmware that starts sending it would be worth knowing
                    // about; the section itself is what found the ad's host.
+                   "sites remembered (issue 74)\n" + SiteRules.Dump() + "\n" +
                    "requests this run (one line per host and first path segment, most first)\n" +
                    RequestTrail.Dump() + "\n\n" +
                    "previous run (last line is where it died)\n" + Breadcrumbs.Previous + "\n\n" +
