@@ -2545,8 +2545,8 @@ the one its report has to come from. The state is:
   instead of once a key press — see *A pointer inside the page moves at the
   page's speed* above. #79 adds "open where I left off" beside the fixed address
   from #15, and #80 lets an address be kept as a tile without going to it, which
-  is the only way to keep one that redirects. **Waiting on:** his report from the
-  build that ships them. The one that decides something is #78 — whether the
+  is the only way to keep one that redirects. Shipped in `build-afa4ce8`.
+  **Waiting on:** his report from that build. The one that decides something is #78 — whether the
   pointer keeps up on Instagram and Spotify now. If it does not, the `pointer`
   line on the report says which of the two is drawing it, and the answer that
   would matter is "drawn by Overscan and still slow", because that is the one
