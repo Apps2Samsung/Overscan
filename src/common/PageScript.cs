@@ -204,6 +204,35 @@ namespace Overscan
 
     hide: function () { if (st.el) { st.el.style.display = 'none'; } },
 
+    /* The address of the link under the pointer, or ''. The start screen's tiles
+       are plain links (see HomePage), and this is how the app acts on the tile
+       somebody is pointing at without following it.
+
+       Issue #80 is why it exists. A favourite kept by typing its address could be
+       added and never taken away: removing one meant typing the same address
+       again, and the tile does not show an address — it shows a host and a title,
+       neither of which is what the favourite is stored as. So the reporter had two
+       tiles that read identically, pointed at different pages, and could not be
+       removed by any spelling he could see. Pointing at the thing you want gone is
+       the gesture that cannot go wrong, and the pointer already knows how to
+       hit-test. */
+    linkAt: function () {
+      var n = at();
+      for (var depth = 0; n && depth < 8; depth++) {
+        if (n.tagName === 'A' && n.getAttribute && n.getAttribute('href')) {
+          /* .href is resolved against the page's base, which is what the app
+             stored; the attribute is the fallback for engines that do not give a
+             resolved one on a detached node. */
+          return String(n.href || n.getAttribute('href'));
+        }
+
+        n = n.parentElement || n.parentNode;
+        if (n && n.nodeType !== 1) { return ''; }
+      }
+
+      return '';
+    },
+
     /* fx, fy are fractions of the viewport, so the native side never needs to
        know the page's CSS pixel size or zoom level. */
     move: function (fx, fy) {

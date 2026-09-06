@@ -1639,7 +1639,42 @@ A third thing, smaller and the likeliest reading of "doesn't show anything":
 **pressing `8` on the start screen did nothing, silently.** There is no page there
 to keep, which is a fine reason to decline and no reason at all to say nothing —
 and the start screen, where the tiles are, is exactly where somebody goes to get
-rid of one. It now says so, and points at *Keep an address…*.
+rid of one.
+
+### A favourite you can add and cannot remove
+
+That message — "open a page first, or use *Keep an address…*" — was the correct
+thing to say and useless advice, and his next report said so within the hour: two
+tiles both reading `instagram.com`, both kept by typing, neither removable by any
+spelling he could see.
+
+The hole is worth naming plainly, because it had been there since favourites
+existed and only #80 made it reachable: **removal required knowing the string.**
+Being on the page and pressing `8` worked because the engine handed us the exact
+address; anything else meant typing it back. And what the start screen shows is a
+*host* with the `www.` stripped and a *title* — neither of which is what the
+favourite is stored as. Two kept addresses on one site therefore render as the
+same two lines, and the thing you would type is nowhere on the screen. Adding was
+one press; removing was a guess.
+
+Three changes, and the first is the one that matters:
+
+- **`8` on the start screen removes the tile the pointer is on.** `PageScript.linkAt()`
+  climbs from the hit-test to the nearest anchor and returns its `href`, which for
+  a tile is the stored address exactly, because `HomePage` wrote it there. Pointing
+  at the thing you want gone is the one gesture that cannot be spelled wrong, and
+  the pointer already knew how to hit-test — the whole addition is fifteen lines of
+  script and a bridge message. A *recent* tile gets kept instead, which is the same
+  key doing what it does everywhere else.
+- **A kept address is named by its address.** It was named by `SiteRules.KeyFor`,
+  i.e. the bare host, which is why his two tiles read identically. `Urls.Readable`
+  drops the scheme and a trailing slash and keeps the rest.
+- **`SameKey` folds a leading `www.` as well as the trailing slash** — the two
+  parts of an address a person neither sees nor types. Without it, typing back
+  exactly what the tile shows still missed the favourite that tile names.
+
+The rule this leaves behind: **anything the app will act on by name must be
+displayed under that name, or be reachable without one.** Favourites were neither.
 
 ## Settings that belong to a site, not to the browser
 

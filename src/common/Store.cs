@@ -313,10 +313,15 @@ namespace Overscan
         /// after the same site, so what he saw was a page he had just been told was
         /// removed, still sitting in his favourites.
         ///
-        /// Only the trailing slash is folded, and only on the path. A query and a
-        /// fragment stay significant, because two addresses that differ there are
-        /// two pages as often as they are one, and a favourite is an explicit act
-        /// that nobody should have quietly widened for them.
+        /// The trailing slash on the path is folded, and a leading <c>www.</c> on
+        /// the host — the two parts of an address a person neither sees nor types.
+        /// The start screen shows a tile's host with the <c>www.</c> already
+        /// stripped, so without that half, typing back exactly what is on the
+        /// screen still failed to find the favourite it names.
+        ///
+        /// A query and a fragment stay significant, because two addresses that
+        /// differ there are two pages as often as they are one, and a favourite is
+        /// an explicit act that nobody should have quietly widened for them.
         /// </summary>
         private static string SameKey(string url)
         {
@@ -347,6 +352,15 @@ namespace Overscan
             while (head.Length > floor && head[head.Length - 1] == '/')
             {
                 head = head.Substring(0, head.Length - 1);
+            }
+
+            // And the www. the tile does not show. Only at the start of the host,
+            // never anywhere else in the address.
+            if (authority >= 0 &&
+                head.Length > floor + 4 &&
+                string.Compare(head, floor, "www.", 0, 4, StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                head = head.Substring(0, floor) + head.Substring(floor + 4);
             }
 
             return head + url.Substring(cut);
