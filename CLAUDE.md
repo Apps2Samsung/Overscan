@@ -125,6 +125,26 @@ visit on every launch, roughly doubled each time, and after nine launches was pa
 the 2 MB Chromium will load — a black screen with no line anywhere, on a view that
 was fine. Needs only the .NET 6 SDK under `~/.dotnet-local`.
 
+### The site-rules harness
+
+Any change to `SiteRules` — the per-site images/identity rules, and the "which
+site did I come from" walk behind the switch key — is exercised off-device first:
+
+```sh
+tools/siterules/run.sh
+```
+
+The whole risk in that file is one word: what counts as **one site**. It is in
+`src/common`, so it is in all six packages, and both ways of getting it wrong are
+silent from a TV — too narrow and a rule stops applying the moment a site hands
+you to another of its own hosts, too wide and a suffix test lets
+`notinstagram.com` wear `instagram.com`'s settings. The harness holds the shipping
+file to the name a site is remembered under, what a rule covers and what it must
+not, the third state (a field nobody set follows the browser-wide switch rather
+than meaning "off"), a round trip through the disk, a hand-edited file that cannot
+stop the browser starting, and the alternation the switch key depends on. Needs
+only the .NET 6 SDK under `~/.dotnet-local`.
+
 ### The ad-block harness
 
 Any change to `AdHosts`, to `src/nui/adhosts.txt` — the host list the NUI

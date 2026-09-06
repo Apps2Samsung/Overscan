@@ -44,6 +44,8 @@ namespace Overscan
         public const string ActionHome = "home";
         public const string ActionBookmark = "bookmark";
         public const string ActionIdentity = "identity";
+        public const string ActionSwitchSite = "switchsite";
+        public const string ActionForgetSite = "forgetsite";
         public const string ActionTypeInField = "typefield";
         public const string ActionKeysToPage = "keystopage";
         public const string ActionFitPage = "fitpage";

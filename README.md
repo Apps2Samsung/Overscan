@@ -74,7 +74,8 @@ browser simply won't start. Newer sets don't have this restriction.
 | **Back** | Close overlay → back a page → exit |
 | **CH ▲ / ▼** | Page up / page down |
 | **0** | Address bar |
-| **1** | Switch how the browser identifies itself, and reload |
+| **A / red** | Switch to the site you were just on |
+| **1** | Switch how the browser identifies itself, and reload — remembered for this site |
 | **2** | Pointer style |
 | **3** | Diagnostics (what the page thinks it's talking to) |
 | **4** | Give the keys to the page, for its own navigation |
@@ -83,7 +84,25 @@ browser simply won't start. Newer sets don't have this restriction.
 | **7** | Show/hide the key hints |
 | **8** | Keep this page in favourites (press again to remove) |
 | **9** | Back to the start screen |
-| **Info** | Images on/off — the biggest speed-up on an old set |
+| **Info** | Images on/off — the biggest speed-up on an old set — remembered for this site |
+
+Not every remote sends the colour buttons, and the slim ones have none. **Switch
+site** is the second row of the menu, so hold OK and it is one press away.
+
+### Each site keeps its own settings
+
+Images and identity are remembered **for the site you set them on**. Turn images
+off on Instagram and identify it as a desktop; Spotify keeps its images and stays
+whatever you set it to. Nothing to configure — press the key on the site you mean
+it for, and the message on screen names the site it was saved for.
+
+Press the same keys on the **start screen** — which is on no site — and you are
+setting them for every site that has no answer of its own. *Forget this site's
+settings* in the menu takes a site back to those.
+
+A rule saved on `www.instagram.com` covers `instagram.com` and anything under it.
+`open.spotify.com` and `accounts.spotify.com` are two different sites, so a
+setting made on one doesn't reach the other.
 
 ### No number keys on your remote?
 

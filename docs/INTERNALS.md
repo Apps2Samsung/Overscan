@@ -1514,6 +1514,123 @@ typed. `Store.Init` therefore has to run **before** the keyboard is constructed 
 both builds used to initialise the store afterwards, silently discarding the user's
 layout choice.
 
+## Settings that belong to a site, not to the browser
+
+Issues #74 and #75, from the same reporter, four days apart. Both are the same
+question wearing different clothes: **what counts as one site?**
+
+#74: he wants images off on Instagram and on for Spotify, which will not play
+without them, and he wants Instagram identified as a desktop because its mobile
+layout is unusable on a television while other sites are better off as mobile.
+Two switches, opposite answers, and one switch each — so he was flipping both by
+hand on every crossing between the two sites he actually uses. A setting that has
+to be redone every time is one the user is maintaining on our behalf.
+
+#75: "is there any way to switch between two sites fast without typing its url or
+going to the start page?" — the same two sites, and the same crossing.
+
+`src/common/SiteRules.cs` answers both, so all six packages have it.
+
+### What a site is called
+
+`SiteRules.KeyFor` is the whole design, and everything else is bookkeeping around
+it. A site is its **host**, lower-cased, without the port, the credentials or a
+leading `www.`, and a rule saved under that name answers for that host **and
+anything under it**: one set on `www.instagram.com` is stored as `instagram.com`
+and also covers `i.instagram.com`. The match is on whole labels, so
+`notinstagram.com` and `instagram.com.evil.test` are different sites and get
+nothing — a plain suffix test would look identical right up until it handed a
+stranger's site the settings meant for this one. Where two rules cover the same
+host the more specific one wins.
+
+It is deliberately **not** the registrable domain. There is no public suffix list
+in this app and no way to get one onto a 2018 television, and a rule of thumb like
+"the last two labels" turns `www.bbc.co.uk` into `co.uk`, which is not a site, it
+is a country. So `open.spotify.com` is remembered as itself and
+`accounts.spotify.com` is a different site; if that ever needs to be one site, the
+answer is a suffix list, not a guess. The screen never leaves this ambiguous —
+every message names the site it just saved something for.
+
+**`KeyFor` returns null for an address that is on no site**, and that half matters
+as much as the other. This app's own start screen is one such address, in both of
+its shapes (`Store.IsGenerated` knows the marker and the `data:` URL; issue #53 is
+what it cost the last time only one of them was recognised), as are `about:` and
+`file:`. Null means *leave whatever is applied alone*, so a trip through the start
+screen does not reset the settings of the page on either side of it.
+
+### Unset is not "off"
+
+A rule holds one field per switch and each may be unset, which is a third state
+and not a synonym for the default. A site remembered only for its identity still
+follows the browser-wide images switch when that is flipped later. Freezing every
+other setting at the moment somebody pressed one key is how a preferences system
+starts lying to its user.
+
+The browser-wide values are still `images` and `uaPreset` in `settings.tsv`, and
+they are still what an unremembered site gets. Which one a key press moves is
+decided by where it was pressed: **on a page it writes the site's rule, on the
+start screen — which is on no site — it moves the browser-wide setting.** That is
+the whole of the rule, it needs no extra key, and the flash says which happened
+("Images off for instagram.com" against "Images off — faster"). A menu row
+forgets a site's rule outright, because otherwise the only way to undo one is to
+flip it back to whatever the default happens to be, which leaves the site on the
+report as remembered and is not the same thing at all.
+
+### Applying them costs exactly one reload, and cannot cost two
+
+Rules go on the view at the start of every load whose site differs from the one
+already applied (`ApplySiteRules`), and on our own navigations they go on *before*
+the request, so anything this browser opens itself is asked with the right
+identity the first time.
+
+A link followed into another site cannot have that: the engine only reports the
+destination once the document has been asked for, and a site serves its mobile or
+desktop layout off that request. So a crossing into a site whose identity differs
+reloads once — which is exactly the reload the user was doing by hand, once per
+crossing, before this existed. The images switch needs no reload of its own; it
+takes effect from the point it is set, which at the start of a load is nearly all
+of the page.
+
+The one thing that must not happen is the reload that never stops. Two sites whose
+rules disagree and which redirect to each other would reload one another for ever,
+and there is no version of that a reporter could describe as anything but "the
+browser is broken". So a rule-driven reload is counted, the count resets on any
+load that settles without one, and after three the settings are applied without a
+reload and the log says so. A page carrying the wrong identity is a bad outcome; a
+television that will not stop reloading is a different order of bad.
+
+### Switching sites
+
+`SiteRules.OtherSite` walks the history — which is kept most-recent-first — and
+returns the first entry that is not on this site. From a page on B that is the
+page on A the user came from, and from A it is the page on B they just left, so
+one action alternates between the two sites somebody is going back and forth
+between. That is #75 as it was asked, and it needs no new screen: a list of recent
+sites is what the start screen already is, and the reporter had said he did not
+want to go there.
+
+**It is a menu row before it is a key.** Every digit and `Info` were already spoken
+for, so the only button left on a Samsung remote is the red / A one — and which
+name that arrives under is undocumented, differs by remote generation, and cannot
+be verified here at all, since the slim remotes this app already bends over
+backwards for have no colour buttons. `RemoteKeys.SwitchKeys` therefore answers to
+every plausible spelling, exactly as `MenuKeys` does, and "Switch site" sits second
+in the menu, which every remote can reach. If we guessed the name wrong the button
+prints itself on the remote card like any other unrecognised key, which is how we
+would find out.
+
+### What the report says
+
+`site rules:` names the rule in force on the page in hand, or says nothing is; the
+full report at `:8081` lists every remembered site. Both are there because a
+setting that follows you around invisibly is the kind that gets reported as "the
+browser changed on its own".
+
+`tools/siterules/run.sh` compiles the shipping file and holds it to all of the
+above off-device — the names, what a rule covers and what it must not, the unset
+field, the round trip through the disk, a hand-edited file that cannot stop the
+browser starting, and the alternation.
+
 ## What the NUI build never asked the engine for
 
 The two builds share `src/common` and nothing else, and everything the ElmSharp
@@ -2158,11 +2275,13 @@ Issue #20's reporter is on a Tizen 10 set running the NUI package, and is the on
 person testing that half of this app in anger. **#20 and #53 are closed** as of
 2026-09-04: the captcha #20 is named for works (his words, 30 August), the black
 screen of #53 is fixed and confirmed from his report. This section stays the
-state of the 2025 sets across the issues that followed — #37's ad blocking is
-the one open thread (his `build-6b29b8e` report is in, `build-f295172`, the
-request-trail build that answers it, is the one waiting now), and anything he sends about
-`build-df14af8`'s address bar or `build-e9ef92f`'s remote card lands here too. Four builds went out on 2026-09-04 alone; the tag each bullet names is the
-one its report has to come from. The state is:
+state of the 2025 sets across the issues that followed. **#37's ad blocking is
+closed too** — "Ad-block works now", 2026-09-04 — and the open threads are now
+#74 and #75, the two things he asked for once the browser stopped breaking:
+settings that stay with a site, and a fast way between two of them. Anything he
+sends about `build-df14af8`'s address bar or `build-e9ef92f`'s remote card lands
+here too. Four builds went out on 2026-09-04 alone; the tag each bullet names is
+the one its report has to come from. The state is:
 
 - **The session not surviving a restart — fixed.** Shipped in `build-9d856d1`.
   Nothing pending.
@@ -2302,9 +2421,26 @@ one its report has to come from. The state is:
   (2026-09-04) answered both**, and the second answer stopped mattering when the
   first one came in. The fix built on it is `AdSilence`: the ad's own host,
   answered with a second of decodable silence instead of a refusal. Shipped in
-  `build-2f3862d`. **Waiting on:** his report from that build, taken after an ad
-  would have played. What each answer decides is under *The ad is on its own host
-  after all*.
+  `build-2f3862d`, and **confirmed from the set**: "Ad-block works now"
+  (2026-09-04). #37 is closed. What the silence has to be, and why it is served
+  rather than refused, is under *The ad is on its own host after all*.
+
+- **Settings that stay with a site, and a fast way between two — #74 and #75,
+  built together.** He wants images off on Instagram and on for Spotify (which
+  will not play without them), Instagram identified as a desktop and other sites
+  as mobile, and a way between the two that is not the address bar or the start
+  screen. `SiteRules` remembers the images and identity switches for the site
+  they were pressed on and applies them at each crossing; the same notion of "one
+  site" gives the switch action the site you were just on. Both are in
+  `src/common`, so all six packages have them, and the ewk builds are the ones
+  most likely to notice a mistake in them. See *Settings that belong to a site,
+  not to the browser* above for what a site is called and why the reload is
+  counted. **Waiting on:** his report from the build that ships them. The two
+  things worth reading off it are whether a crossing between his two sites now
+  arrives with the right layout without him pressing anything, and whether the
+  red / A button on his remote reaches *Switch site* at all — if it does not, the
+  remote card's footer will be carrying the name his remote actually sends, and
+  that name is the fix.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
