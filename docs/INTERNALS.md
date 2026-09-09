@@ -1307,6 +1307,35 @@ to break them is the whole reason the source is split this way. They get the
 coalescing, which is the half that is safe everywhere, and key `2` was already
 there for the rest.
 
+### The page's arrow has to remember it was told to go away
+
+Issue #91, from the same set once NUI was drawing the pointer itself: "sometimes
+when load app where it shows two cursor one on top of other". Two pointers, one
+exactly under the other, is the app's dot and the page's arrow both showing at
+the same viewport fraction — and the app had asked the page to hide the arrow,
+so the question was who put it back.
+
+The page script did, on its own. Its `visibilitychange` listener re-runs
+`install()`, which is there because a single-page navigation wipes the overlay
+out of the DOM; `install()` set the arrow `display:block` unconditionally, and
+nothing in the script remembered that `hide()` had been called. `visibilitychange`
+fires on a great deal more than a navigation — the app coming to the front at
+launch, the set's own menus going over it, the screen blanking — which is the
+"sometimes" and the "when load app". The ElmSharp builds had the same fault
+behind key `2` and nobody had used it long enough to see it.
+
+So `hide()` is remembered (`st.hidden`), `install()` honours it, and `show()` is
+the only call that clears it. Both cursor classes ask for the arrow by name when
+they switch to the page-drawn pointer, rather than relying on a re-install to
+bring it back — which on the ElmSharp build it never reliably did: toggling to
+the page's arrow after the native one had hidden it left it hidden until the next
+page load. On NUI, `Reinstall` also sends the install and the hide in **one**
+evaluation, so there is no ordering between them to be wrong. The shape of the
+page script's contract is now: install puts the arrow in the DOM, hide and show
+decide whether it is seen, and the two are independent. `tools/pointer/run.sh`
+runs the shipping script in desktop chromium and fails on the old file at the
+third check.
+
 ### The one thing a script cannot click: another origin's frame
 
 `elementFromPoint` stops at an `<iframe>`, and a click dispatched on the frame
@@ -1559,7 +1588,7 @@ Shift releases itself after one letter, as on a phone: one capital is what a nam
 or a password rule usually wants, and leaving it latched turns the rest of the word
 into shouting.
 
-Every grid is deliberately the same shape (rows of 10, 10, 10, 10, 14): the
+Every grid is deliberately the same shape (rows of 10, 10, 10, 10, 16): the
 keyboards build their cells once in the constructor and only swap the labels when
 the grid changes, so a grid with different row lengths would leave cells pointing
 at keys that are no longer there. That is also why the shifted variants and the
@@ -1567,14 +1596,43 @@ symbol page are built to the same rows-of-ten shape rather than being packed
 tighter. Whatever letters a layout leaves over, the row is padded out with `-`,
 `_`, `?`, `=` so every key exists in every layout.
 
-The action row grew from 11 keys to 14 (`@`, `shift`, `sym`, `start`), which is why
-a key is 104px wide rather than 116 — fourteen of the old ones overflow a 1080p
-panel. Rows are centred rather than left-aligned, or a 10-key letter row leaves a
-ragged hole beside a 14-key action row.
+The action row grew from 11 keys to 14 (`@`, `shift`, `sym`, `start`) and then to
+16 (the two caret arrows, below), which is why a key is 100px wide rather than
+116 — fourteen of the old ones already overflowed a 1080p panel, and sixteen of
+the new ones plus their gaps are the 1736px fourteen old ones were. Rows are
+centred rather than left-aligned, or a 10-key letter row leaves a ragged hole
+beside a 16-key action row.
 
 `@` sits on the action row and not on the symbol page: signing in to anything needs
 it constantly, and having to find a second page for it was the substance of
 issue #15.
+
+### The selector follows the screen, not the index
+
+Issue #92, from the 2025 set: "when we move selector from last 2nd row to last
+row in keyboard it moves 2 character back and moves 2 character forward when
+move from last to 1st row". Both keyboards moved between rows by keeping the
+column index and clamping it to the new row's length. With the rows centred and
+the action row four keys wider than the letter rows, the same index is two keys
+to the left on the way down and two to the right on the way up — exactly his
+numbers, and it had been so since the action row first outgrew the letters.
+
+`KeyboardLayouts.ColumnAcross` does the move by position: the keys sit on one
+pitch whatever the row, so a key's centre in key units is its column plus half
+the difference between the widest row and its own, and the key in the other row
+whose centre that falls in is the one the selector lands on. It is in key units
+and not pixels so the two keyboards, which draw at different sizes, agree, and it
+is in `src/common` so the ewk builds get the same fix untested — the maths has
+no toolkit in it, which is what makes that acceptable.
+
+The same report asked for arrow keys, and it meant the entry, which was
+append-only: a typo three characters back in an address meant deleting
+everything after it and typing it again on a D-pad. `KeyboardEntry` holds the
+text and a caret for both keyboards, and `←`/`→` on the action row move it;
+typing, `.com`, `space` and `back` act at the caret. The keys are *named*
+`left`/`right` in the grid and wear the arrows as labels, because `<` and `>` are
+characters on the symbol page and a key's name is what `Press` switches on.
+`tools/keyboard/run.sh` holds all of this off-device.
 
 ### Where the browser opens
 
@@ -2733,6 +2791,23 @@ the one its report has to come from. The state is:
   favourite matching and key `8` reading a stale cache. See *Keeping an address you
   cannot land on* above; both are fixed in `build-42ed14f` and his files are healed
   on load.
+
+- **The keyboard's selector jumping between rows, arrow keys in the entry, and
+  two pointers at launch — #92 and #91, built together.** Both are things a
+  browser gets asked for once it stops breaking, and both had a fault behind
+  them. #92's jump was the column index kept across rows of different widths on a
+  centred grid; the selector now moves by position, and the entry has a caret
+  with `←`/`→` on the action row. #91's second pointer was the page's arrow
+  coming back on a `visibilitychange` after the app had hidden it to draw its
+  own; the hide is remembered now. See *The selector follows the screen, not the
+  index* and *The page's arrow has to remember it was told to go away* above.
+  Both fixes are in `src/common`, so the ewk builds get them too. **Waiting on:**
+  his report from the build. Neither needs a question answered — the keyboard
+  either lands under the key or it does not, and either one pointer shows at
+  launch or two do. If two still do, the `pointer` line on the report says who is
+  drawing the one we mean, and the next thing to look for is a second
+  `__ovs_cursor` element in the DOM rather than a shown one: that would be a
+  frame or a second document, not this.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

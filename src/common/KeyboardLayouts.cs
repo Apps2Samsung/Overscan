@@ -17,6 +17,10 @@ namespace Overscan
     /// because the keyboards build their cells once and only swap the labels when
     /// the grid changes. A grid of a different shape would leave those cells
     /// pointing at keys that are no longer there.
+    ///
+    /// The rows are not the same width, and they are centred, so a column index
+    /// is not a position on the screen: <see cref="ColumnAcross"/> is how the
+    /// selector moves between rows without appearing to jump (issue #92).
     /// </summary>
     internal static class KeyboardLayouts
     {
@@ -31,6 +35,17 @@ namespace Overscan
 
         /// <summary>Saves what was typed as the page to open at start-up.</summary>
         public const string StartPageKey = "start";
+
+        /// <summary>
+        /// Moves the caret in the entry one character back or forward, so a typo
+        /// in the middle of an address can be reached without deleting everything
+        /// after it (issue #92). Named rather than drawn: the arrows the keys wear
+        /// are labels, and `&lt;` and `&gt;` are characters on the symbol page.
+        /// </summary>
+        public const string CaretLeftKey = "left";
+
+        /// <summary>See <see cref="CaretLeftKey"/>.</summary>
+        public const string CaretRightKey = "right";
 
         private const string SettingKey = "keyboardLayout";
 
@@ -157,6 +172,45 @@ namespace Overscan
         }
 
         /// <summary>
+        /// The column in row <paramref name="toRow"/> that sits nearest, on the
+        /// screen, to column <paramref name="fromColumn"/> of row
+        /// <paramref name="fromRow"/>.
+        ///
+        /// Rows are centred and not all the same length: the letter rows are 10
+        /// keys and the action row is 16, so the action row starts three keys to
+        /// the left of the letters above it. Carrying the column index across
+        /// unchanged, which is what both keyboards did, moved the selector three
+        /// keys back on the way down and three forward on the way up — issue #92,
+        /// reported as "2 characters" when the row was 14 wide. The keys are laid
+        /// out on one pitch (a key plus a gap) whatever the row, so a key's centre
+        /// in units of that pitch is its column plus half, plus half the difference
+        /// between the widest row and its own; the nearest key in the other row is
+        /// the one whose centre that lands in. The maths is in key units and not
+        /// pixels so the two keyboards, which draw at different sizes, agree.
+        /// </summary>
+        public static int ColumnAcross(string[][] rows, int fromRow, int fromColumn, int toRow)
+        {
+            int widest = 0;
+            foreach (string[] row in rows)
+            {
+                widest = System.Math.Max(widest, row.Length);
+            }
+
+            int fromLength = rows[fromRow].Length;
+            int toLength = rows[toRow].Length;
+
+            // Twice the centre, to stay in integers: 2 * (offset + column + 0.5).
+            int centre2 = (widest - fromLength) + (2 * fromColumn) + 1;
+            int target = (centre2 - (widest - toLength) - 1) / 2;
+            if (target < 0)
+            {
+                return 0;
+            }
+
+            return target >= toLength ? toLength - 1 : target;
+        }
+
+        /// <summary>
         /// Builds a grid from its three letter rows. The digits and the action row
         /// are the same whatever the letters do, so they are not repeated per layout.
         /// </summary>
@@ -209,13 +263,14 @@ namespace Overscan
         /// The bottom row, identical on every grid. `@` sits here rather than on the
         /// symbol page because signing in to anything needs it; `shift` and `sym`
         /// are next to each other so the two ways of reaching a different character
-        /// are in one place.
+        /// are in one place; the caret arrows sit beside `back`, which is the key
+        /// they are most often used with.
         /// </summary>
         private static string[] ActionRow()
         {
             return new[]
             {
-                ".", "/", ":", "@", "space", ".com", "back", "clear",
+                ".", "/", ":", "@", "space", ".com", CaretLeftKey, CaretRightKey, "back", "clear",
                 ShiftKey, SymbolsKey, StartPageKey, "GO", "close", CycleKey,
             };
         }
