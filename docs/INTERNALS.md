@@ -535,6 +535,36 @@ on the latest firmware, since a software update is the only thing that could shi
 different engine and change this — if it pulls one, reinstall `build-9f4a87a`, resend
 the page, and reopen. The rest of this section is the road that got here.
 
+**The same wall on a 2021 set, and the second close (issue #95, 2026-09-09).** A
+QE65Q70AA on Tizen 6.0 sent the whole diagnostics page for the tizen6 package
+(`build-481d83c`), and it is the Q80's trail line for line: engine preloaded, nine
+EFL subsystems up, `ewk_init` returning 0 twice, `libchromium-impl.so` refused on
+`libprivileged-service-client.so: Operation not permitted`, `RTLD_LAZY` refused the
+same way, anonymous exec allowed, the app's own PE assembly mapping executable. So the
+gate is not a 5.5 thing — it is Samsung's retail firmware from at least 5.5 through
+6.0, and 5.0 clearing it is the exception. Two things are worth knowing before the
+next one of these arrives:
+
+- **The ladder did not run on that set, and could not have.** `libovprobe.so` is
+  wired into `Overscan5.csproj` only, so the tizen4, tizen6 and tizen8 packages print
+  `native probe: not shipped in this package` and the header's `own native : still
+  asking` is noise there. The five-location exec-mapping answer for #95 is therefore
+  *inferred* from the Q80, not measured. Patrick's decision on 2026-09-09 was to close
+  #95 on that inference rather than spend the reporter's evenings re-measuring a gate
+  that has the same shape on a newer firmware; the reply says so in as many words and
+  names the firmware update as the only lever. If a future 6.x or 7.0 reporter is
+  willing to run builds, copying the three probe items from `Overscan5.csproj` into
+  the other csprojs is the whole change, and the two answers are the ones written for
+  #17.
+- **The report does not name its build.** Neither the `:8081` page nor the key-`3`
+  screen prints a release tag, so which asset a reporter ran is read off the release
+  timestamps. Worth adding to the header the next time either file is touched.
+
+That trail's previous run ended on `probe: locate libprivileged-service-client.so`
+with the next launch 69 s later and the trail writer healthy — the `Find` in
+`SmackWall` walking its search directories, or a relaunch; not separable, and with the
+issue closed on the wall above it, not chased.
+
 Both questions this was waiting on were answered by the report on `build-d8563ab`,
 and the section above is what came back. Written down here rather than carried in
 somebody's head, because the next person to work on it may be a different person at
