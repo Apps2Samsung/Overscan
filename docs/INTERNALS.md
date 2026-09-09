@@ -2801,8 +2801,8 @@ the one its report has to come from. The state is:
   coming back on a `visibilitychange` after the app had hidden it to draw its
   own; the hide is remembered now. See *The selector follows the screen, not the
   index* and *The page's arrow has to remember it was told to go away* above.
-  Both fixes are in `src/common`, so the ewk builds get them too. **Waiting on:**
-  his report from the build. Neither needs a question answered — the keyboard
+  Both fixes are in `src/common`, so the ewk builds get them too. Shipped in
+  `build-481d83c`. **Waiting on:** his report from that build. Neither needs a question answered — the keyboard
   either lands under the key or it does not, and either one pointer shows at
   launch or two do. If two still do, the `pointer` line on the report says who is
   drawing the one we mean, and the next thing to look for is a second
