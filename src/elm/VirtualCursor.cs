@@ -181,7 +181,13 @@ namespace Overscan
                 _dot.Hide();
                 _core.Hide();
                 _movePending = false;
-                MoveInPage();
+
+                // show() and not just move(): the page script remembers hide(), so
+                // an arrow put away while the pointer was drawn natively stays
+                // away until it is asked for by name (issue #91). Same evaluation
+                // as the move so the arrow never appears somewhere it is not.
+                Eval("try{window." + PageScript.Namespace + ".show();window." +
+                     PageScript.Namespace + ".move(" + F(_x) + "," + F(_y) + ");}catch(e){}");
             }
         }
 

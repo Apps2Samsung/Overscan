@@ -143,18 +143,38 @@ namespace Overscan
         /// </summary>
         private void Apply()
         {
+            Apply(false);
+        }
+
+        /// <summary>
+        /// <see cref="Apply()"/>, installing the page script first when
+        /// <paramref name="reinstall"/> is set — in the same evaluation as the
+        /// show-or-hide, so that putting the arrow in the page and taking it off
+        /// again is one call and not two that could land apart.
+        /// </summary>
+        private void Apply(bool reinstall)
+        {
             if (Visual == CursorVisual.Native)
             {
-                Eval("try{window." + PageScript.Namespace + ".hide();}catch(e){}");
+                // hide() is remembered by the page script: install(), which the
+                // page re-runs on its own on every visibilitychange, keeps the
+                // arrow off until show() is asked for. Before it was remembered,
+                // the arrow came back on the first visibilitychange after a load
+                // — the app coming to the front at launch is one — and sat under
+                // our dot at the same spot (issue #91).
+                Eval((reinstall ? PageScript.Install("sbnative") : string.Empty) +
+                     "try{window." + PageScript.Namespace + ".hide();}catch(e){}");
                 Place();
             }
             else
             {
                 ShowViews(false);
 
-                // The page's arrow is put back by install(), which is idempotent
-                // and is the only call that sets it visible again.
-                Eval(PageScript.Install("sbnative"));
+                // show() is the only call that brings the arrow back; install()
+                // alone would leave it hidden if the app had hidden it earlier.
+                // The install is idempotent, so it is simply always sent here.
+                Eval(PageScript.Install("sbnative") +
+                     "try{window." + PageScript.Namespace + ".show();}catch(e){}");
             }
 
             MoveInPage();
@@ -184,17 +204,19 @@ namespace Overscan
 
         public void Reinstall()
         {
+            // A load put the page's own arrow back. Two pointers on one screen is
+            // worse than either, and the page's is the one that lags — so the
+            // script is installed and the arrow hidden (or shown) in ONE evaluation.
+            // As two, a hide that somehow ran ahead of its install would be undone
+            // by it, and the result is exactly issue #91's screen.
+            // Not deferred: the page has just been replaced and knows nothing about
+            // where the pointer is, so the first telling is worth a call of its own.
+            //
             // The ElmSharp build needs a bridge name for click feedback; NUI gets
             // results back through EvaluateJavaScript callbacks, so the name is
             // only used for the (unused) postMessage path.
-            Eval(PageScript.Install("sbnative"));
-
-            // A load put the page's own arrow back. Two pointers on one screen is
-            // worse than either, and the page's is the one that lags.
-            // Not deferred: the page has just been replaced and knows nothing about
-            // where the pointer is, so the first telling is worth a call of its own.
             _movePending = false;
-            Apply();
+            Apply(true);
         }
 
         public void Move(int dx, int dy)

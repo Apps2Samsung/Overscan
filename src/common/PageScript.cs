@@ -55,7 +55,11 @@ namespace Overscan
 (function(){
   if (window.__ovs) { window.__ovs.install(); return; }
 
-  var st = { x: 0, y: 0, over: null, trusted: null, frameFocus: null };
+  /* hidden is whether the app has asked for the arrow to stay off the screen
+     because it is drawing the pointer itself. install() has to honour it, or
+     every re-install puts the arrow back — see the visibilitychange hook at the
+     bottom and issue #91. */
+  var st = { x: 0, y: 0, over: null, trusted: null, frameFocus: null, hidden: false };
 
   function clamp(v, hi) { return v < 0 ? 0 : (v > hi ? hi : v); }
 
@@ -193,16 +197,33 @@ namespace Overscan
   }
 
   window.__ovs = {
+    /* Puts the arrow in the DOM, or back in it. It does NOT decide whether the
+       arrow is showing: that is hide()/show()'s, and it is remembered, because
+       install() is re-run by whatever wipes the overlay out of the document
+       (single-page navigations, and the visibilitychange hook below) and none of
+       those callers know who is drawing the pointer. Issue #91 was the arrow
+       coming back on a visibilitychange while the app was drawing its own dot on
+       the same spot: two pointers, one on top of the other, on a set where
+       nothing had gone wrong. */
     install: function () {
       if (!st.el) { st.el = makeCursor(); }
       if (!st.el.parentNode && root()) { root().appendChild(st.el); }
       if (!st.x && !st.y) { st.x = window.innerWidth / 2; st.y = window.innerHeight / 2; }
-      st.el.style.display = 'block';
+      st.el.style.display = st.hidden ? 'none' : 'block';
       place();
       return 1;
     },
 
-    hide: function () { if (st.el) { st.el.style.display = 'none'; } },
+    hide: function () {
+      st.hidden = true;
+      if (st.el) { st.el.style.display = 'none'; }
+    },
+
+    /* The only way the arrow comes back once hidden: the app asking for it. */
+    show: function () {
+      st.hidden = false;
+      return window.__ovs.install();
+    },
 
     /* The address of the link under the pointer, or ''. The start screen's tiles
        are plain links (see HomePage), and this is how the app acts on the tile
@@ -523,7 +544,10 @@ namespace Overscan
 
   window.__ovs.install();
   if (document.addEventListener) {
-    /* Single-page navigations wipe the overlay out of the DOM. */
+    /* Single-page navigations wipe the overlay out of the DOM. This fires on a
+       great deal more than that — the app coming to the front at launch, the
+       set's own menus going over it, the screen blanking — which is why install()
+       must not be the thing that decides whether the arrow shows. */
     document.addEventListener('visibilitychange', function () { window.__ovs.install(); }, false);
   }
 })();

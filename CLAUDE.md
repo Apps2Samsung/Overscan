@@ -129,6 +129,43 @@ left off" landing on the last real visit and never on the start screen, and to a
 install made before the mode existed still opening where it always did. Needs only
 the .NET 6 SDK under `~/.dotnet-local`.
 
+### The keyboard harness
+
+Any change to `KeyboardLayouts` or `KeyboardEntry` — the grids the on-screen
+keyboard shows, the move between rows, and the text with its caret — is exercised
+off-device first:
+
+```sh
+tools/keyboard/run.sh
+```
+
+It compiles the shipping files against a stub store and log and holds them to the
+shape both keyboards build their cells for, to a move between rows landing on the
+key underneath rather than the key with the same index (issue #92: the rows are
+centred and the action row is wider, so the same index is two keys away), and to
+the caret typing, deleting and stopping where it should. Both files are in
+`src/common`, so a mistake is in all six packages, and the ewk ones cannot be
+tried before somebody installs them. Needs only the .NET 6 SDK under
+`~/.dotnet-local`.
+
+### The pointer harness
+
+Any change to the pointer half of `PageScript` — `install`, `hide`, `show`, `move`
+and the `visibilitychange` hook — is exercised against desktop chromium first:
+
+```sh
+tools/pointer/run.sh
+```
+
+It lifts the shipping script out of the `.cs` and holds it to one contract: install
+puts the arrow in the DOM, hide and show decide whether it is seen, and nothing the
+page does on its own (a visibilitychange, a re-install, a move, a single-page
+navigation wiping the overlay, the whole script run again) changes that decision.
+Issue #91 was that contract not existing: the app hid the arrow to draw its own
+pointer, the page brought it back on the first visibilitychange, and the reporter
+saw two pointers one on top of the other. From a TV that is indistinguishable
+from the app having drawn two.
+
 ### The site-rules harness
 
 Any change to `SiteRules` — the per-site images/identity rules, and the "which

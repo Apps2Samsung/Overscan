@@ -15,9 +15,11 @@ namespace Overscan
     /// </summary>
     internal sealed class NuiKeyboard
     {
-        // 14 keys on the action row (shift, sym and start joined it) at 116px each
-        // overflow a 1080p panel, so the key is narrower than it was.
-        private const int KeyWidth = 104;
+        // 16 keys on the action row (shift, sym, start and the two caret arrows
+        // joined it) at the original 116px overflow a 1080p panel, so the key has
+        // narrowed twice: to 104 at 14 keys, to 100 at 16. Sixteen of these plus
+        // the gaps is 1736px, the width the 14-key row had at 116.
+        private const int KeyWidth = 100;
         private const int KeyHeight = 74;
         private const int Gap = 8;
 
@@ -34,7 +36,7 @@ namespace Overscan
 
         private int _row;
         private int _column;
-        private string _text = string.Empty;
+        private readonly KeyboardEntry _text = new KeyboardEntry();
 
         public NuiKeyboard(Window window)
         {
@@ -74,7 +76,7 @@ namespace Overscan
             {
                 _keys[r] = new TextLabel[_rows[r].Length];
                 // Centred, not left-aligned: the letter rows are 10 keys and the
-                // action row is 14, so left alignment leaves a hole on the right.
+                // action row is 16, so left alignment leaves a hole on the right.
                 int rowWidth = (KeyWidth * _rows[r].Length) + (Gap * (_rows[r].Length - 1));
                 int rowLeft = (width - rowWidth) / 2;
 
@@ -115,7 +117,7 @@ namespace Overscan
         public void Open(KeyboardTarget target, string initialText)
         {
             Target = target;
-            _text = initialText ?? string.Empty;
+            _text.Reset(initialText);
             IsVisible = true;
             _rows = KeyboardLayouts.Reset();
             _root.Show();
@@ -143,12 +145,23 @@ namespace Overscan
                     _column = (_column + 1) % _rows[_row].Length;
                     break;
                 case RemoteKeys.Up:
-                    _row = _row > 0 ? _row - 1 : _rows.Length - 1;
-                    _column = Math.Min(_column, _rows[_row].Length - 1);
+                    // By position, not by index: the rows are centred and the
+                    // action row is wider, so the same index is a different place
+                    // on the screen (issue #92).
+                    {
+                        int above = _row > 0 ? _row - 1 : _rows.Length - 1;
+                        _column = KeyboardLayouts.ColumnAcross(_rows, _row, _column, above);
+                        _row = above;
+                    }
+
                     break;
                 case RemoteKeys.Down:
-                    _row = (_row + 1) % _rows.Length;
-                    _column = Math.Min(_column, _rows[_row].Length - 1);
+                    {
+                        int below = (_row + 1) % _rows.Length;
+                        _column = KeyboardLayouts.ColumnAcross(_rows, _row, _column, below);
+                        _row = below;
+                    }
+
                     break;
 
                 case RemoteKeys.Ok:
@@ -157,11 +170,7 @@ namespace Overscan
                     return true;
 
                 case RemoteKeys.Back:
-                    if (_text.Length > 0)
-                    {
-                        _text = _text.Substring(0, _text.Length - 1);
-                    }
-                    else
+                    if (!_text.Backspace())
                     {
                         Close();
                     }
@@ -181,20 +190,22 @@ namespace Overscan
             switch (label)
             {
                 case "space":
-                    _text += " ";
+                    _text.Insert(" ");
                     break;
                 case ".com":
-                    _text += ".com";
+                    _text.Insert(".com");
                     break;
                 case "back":
-                    if (_text.Length > 0)
-                    {
-                        _text = _text.Substring(0, _text.Length - 1);
-                    }
-
+                    _text.Backspace();
                     break;
                 case "clear":
-                    _text = string.Empty;
+                    _text.Clear();
+                    break;
+                case KeyboardLayouts.CaretLeftKey:
+                    _text.Left();
+                    break;
+                case KeyboardLayouts.CaretRightKey:
+                    _text.Right();
                     break;
                 case KeyboardLayouts.CycleKey:
                     _rows = KeyboardLayouts.Next();
@@ -213,7 +224,7 @@ namespace Overscan
                         break;
                     }
 
-                    string wanted = _text;
+                    string wanted = _text.Text;
                     Close();
                     Action<string> startHandler = StartPageSet;
                     if (startHandler != null)
@@ -226,7 +237,7 @@ namespace Overscan
                     Close();
                     return;
                 case "GO":
-                    string committed = _text;
+                    string committed = _text.Text;
                     Close();
                     Action<string, KeyboardTarget> handler = Committed;
                     if (handler != null)
@@ -236,7 +247,7 @@ namespace Overscan
 
                     return;
                 default:
-                    _text += label;
+                    _text.Insert(label);
 
                     // Shift applies to the next character only, as on a phone.
                     string[][] released = KeyboardLayouts.ReleaseShift();
@@ -271,6 +282,8 @@ namespace Overscan
                 case "space":
                 case KeyboardLayouts.CycleKey:
                 case KeyboardLayouts.StartPageKey:
+                case KeyboardLayouts.CaretLeftKey:
+                case KeyboardLayouts.CaretRightKey:
                 case ".com": return NuiTheme.KeyFillAlt;
                 default: return NuiTheme.KeyFill;
             }
@@ -303,13 +316,15 @@ namespace Overscan
                 case KeyboardLayouts.CycleKey: return KeyboardLayouts.Name;
                 case KeyboardLayouts.SymbolsKey: return KeyboardLayouts.Symbols ? "abc" : "sym";
                 case KeyboardLayouts.ShiftKey: return KeyboardLayouts.Shift ? "SHIFT" : "shift";
+                case KeyboardLayouts.CaretLeftKey: return "\u2190";
+                case KeyboardLayouts.CaretRightKey: return "\u2192";
                 default: return key;
             }
         }
 
         private void Paint()
         {
-            _entry.Text = Prompt(Target) + "   " + (_text.Length == 0 ? "|" : _text + "|");
+            _entry.Text = Prompt(Target) + "   " + _text.Display;
 
             for (int r = 0; r < _keys.Length; r++)
             {
