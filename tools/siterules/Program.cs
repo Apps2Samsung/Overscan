@@ -233,6 +233,78 @@ namespace Overscan
                   }, "https://a.test/").Url == "https://b.test/",
                   "a generated page in the history is skipped, not switched to");
 
+            // ------------------------------------------------------- 6. the proxy
+            //
+            // Issue #97. The third field, held to the same promises as the other
+            // two: unset follows the browser-wide switch, a set answer wins, it
+            // survives the disk, and it is what keeps a rule alive on its own.
+            string proxied = Path.Combine(root, "proxy");
+            Directory.CreateDirectory(proxied);
+            SiteRules.Init(proxied);
+            SiteRules.SetUa("https://www.bbc.co.uk/", 1);
+            Check(!SiteRules.ProxyFor("https://www.bbc.co.uk/iplayer", false) &&
+                  SiteRules.ProxyFor("https://www.bbc.co.uk/iplayer", true),
+                  "a rule that says nothing about the proxy follows the browser-wide switch");
+            SiteRules.SetProxy("https://www.bbc.co.uk/", true);
+            Check(SiteRules.ProxyFor("https://www.bbc.co.uk/iplayer", false),
+                  "once set, the site's proxy wins over the browser's");
+            Check(SiteRules.ProxyFor("https://ichef.bbc.co.uk/x.jpg", false),
+                  "and covers the site's other hosts");
+            Check(!SiteRules.ProxyFor("https://notbbc.co.uk/", false),
+                  "but not a look-alike");
+            Check(!SiteRules.ProxyFor(HomePage.BaseUrl, false) && SiteRules.ProxyFor(HomePage.BaseUrl, true),
+                  "an address on no site gets the browser's answer");
+            SiteRules.SetProxy("https://example.com/", false);
+            Check(!SiteRules.ProxyFor("https://example.com/", true),
+                  "a site switched off stays direct with the proxy on by default");
+            SiteRules.SetUa("https://www.bbc.co.uk/", SiteRule.Unset);
+            SiteRules.Init(proxied);
+            SiteRule bbc = SiteRules.For("https://www.bbc.co.uk/");
+            Check(bbc != null && bbc.Proxy == 1 && bbc.Ua == SiteRule.Unset,
+                  "the proxy field survives the disk, and keeps a rule alive on its own");
+            Check(SiteRules.For("https://example.com/") != null && SiteRules.For("https://example.com/").Proxy == 0,
+                  "and so does a proxy switched off");
+            Check(File.ReadAllText(Path.Combine(proxied, "sites.tsv")).Contains("bbc.co.uk\tproxy=1"),
+                  "written as proxy=1 in the file");
+            File.WriteAllLines(Path.Combine(proxied, "sites.tsv"), new[] { "a.test\tproxy=2", "b.test\tproxy=1\timages=0" });
+            SiteRules.Init(proxied);
+            Check(SiteRules.For("https://a.test/") == null && SiteRules.For("https://b.test/").Proxy == 1,
+                  "a proxy value this build did not write is not an answer");
+            Check(SiteRules.Dump().Contains("b.test   images off   proxy on"), "the report shows it");
+
+            // The typed address. The whole risk is the login: it must reach the
+            // engine's login call and nowhere else, because the diagnostics page
+            // is open to anything on the LAN.
+            string problem;
+            ProxyAddress full = ProxyAddress.Parse("  HTTP://me:p@ss:w@Proxy.Example.com:8080/ ", out problem);
+            Check(full != null && full.EngineUri == "http://proxy.example.com:8080",
+                  "the engine is told scheme://host:port, lower-cased (" + (full == null ? problem : full.EngineUri) + ")");
+            Check(full != null && full.User == "me" && full.Password == "p@ss:w",
+                  "the login is lifted out, the password split at the first colon and the host at the last @");
+            Check(full != null && !full.Display.Contains("p@ss") && full.Display.Contains("login set"),
+                  "what is shown never has the password in it");
+            Check(full != null && full.Entry == "http://me:p@ss:w@proxy.example.com:8080" &&
+                  ProxyAddress.Parse(full.Entry, out problem).Entry == full.Entry,
+                  "what is stored reads back as itself");
+            ProxyAddress bare = ProxyAddress.Parse("10.0.0.2:3128", out problem);
+            Check(bare != null && bare.EngineUri == "http://10.0.0.2:3128" && !bare.HasLogin,
+                  "no scheme means http, and no login means none");
+            ProxyAddress socks = ProxyAddress.Parse("socks://10.0.0.2:1080", out problem);
+            Check(socks != null && socks.EngineUri == "socks5://10.0.0.2:1080",
+                  "socks means SOCKS 5, not Chromium's SOCKS 4");
+            ProxyAddress v6 = ProxyAddress.Parse("https://[fd00::1]:443", out problem);
+            Check(v6 != null && v6.EngineUri == "https://[fd00::1]:443", "an IPv6 proxy keeps its brackets");
+            Check(ProxyAddress.Parse("proxy.example.com", out problem) == null && problem.Contains("port"),
+                  "a missing port is refused, not guessed");
+            Check(ProxyAddress.Parse("socks5://u:p@10.0.0.2:1080", out problem) == null && problem.Contains("SOCKS"),
+                  "a SOCKS login is refused: the engine would drop it without a word");
+            Check(ProxyAddress.Parse("ftp://10.0.0.2:21", out problem) == null, "an unknown scheme is refused");
+            Check(ProxyAddress.Parse("10.0.0.2:99999", out problem) == null, "a port past 65535 is refused");
+            Check(ProxyAddress.Parse("10.0.0.2:80/path", out problem) == null, "a path is refused");
+            Check(ProxyAddress.Parse("bad host:80", out problem) == null, "a space is refused");
+            Check(ProxyAddress.Parse("@10.0.0.2:80", out problem) == null, "a login with no user is refused");
+            Check(ProxyAddress.Parse("-x.test:80", out problem) == null, "a host starting with - is refused");
+
             Console.WriteLine();
             Console.WriteLine(_failures == 0 ? "siterules: all checks passed" : "siterules: FAILED (" + _failures + ")");
             return _failures == 0 ? 0 : 1;

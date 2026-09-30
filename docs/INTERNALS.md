@@ -1990,6 +1990,56 @@ above off-device — the names, what a rule covers and what it must not, the uns
 field, the round trip through the disk, a hand-edited file that cannot stop the
 browser starting, and the alternation.
 
+### A proxy for one site
+
+Issue #97, from the NUI tester: a proxy "that works on just that site", to reach
+sites his region blocks. It is the third per-site switch, and it follows every
+rule above: `proxy=1`/`proxy=0` in `sites.tsv`, unset follows the browser-wide
+`proxyAll` in `settings.tsv`, pressed on the start screen it moves that
+browser-wide answer, and "Forget this site's settings" drops it with the rest.
+Only the NUI build acts on it; the ewk builds read and write the field untouched.
+
+**The engine has one proxy for the whole process, not one per site.**
+`WebContext.ProxyUrl` is `ewk_context_proxy_uri_set` underneath (dali-extension's
+`tizen-web-engine-context.cpp`). There is also `SetProxyBypassRule`
+(`ewk_context_proxy_set`, no public C# setter), but a bypass rule is a list of
+hosts that *skip* the proxy, and Chromium's grammar for it has no way to say
+"only these". So a site's proxy switch is applied the same way its identity is:
+at the site boundary, in `ApplySiteRules`, and on a link followed into the site it
+costs the one reload the identity already costs, because the document was asked
+for over whichever route was in force, and for a blocked site that is the
+refusal. While a proxied site is open, everything it pulls in goes through the
+proxy too. For a region block that is the point: the video CDN is usually the
+part that checks.
+
+**The address is one string and the login never reaches the engine's.** A
+provider writes a proxy as `http://user:pass@host:port`; `ProxyAddress` lifts the
+login out and hands it to `SetDefaultProxyAuth`, because Chromium's proxy string
+has no place for it. The port is required (the engine's default for a missing one
+is not written down anywhere), `socks://` means SOCKS 5 (to Chromium it means
+SOCKS 4, and nobody typing it does), and **a SOCKS proxy with a login is refused
+at the keyboard**: Chromium speaks SOCKS 5 without authentication only, so the
+login would be dropped silently and every connection refused. The password is in
+`settings.tsv` and the keyboard, and nowhere else: the status bar, the log and the
+`:8081` report (open to anything on the LAN) show `Display`, which says
+`(login set)` instead.
+
+A view rebuilt by the blank-view ladder may or may not share the old one's
+context, so once the engine has been told anything in a process, a new view is
+told again what we believe it has.
+
+The two things only a TV can answer are in *What is left on the 2025 sets*:
+whether a change reaches requests while the process runs, and whether the empty
+string really means direct. Chromium reads `""` as "no proxy" when it reaches its
+own `ProxyRules::ParseFromString`, but nothing in the toolkit says it arrives there
+unchanged. The `proxy:` report line shows what the engine read back after every
+change.
+
+The menu grew two rows with this (19 and 20), and at 62 pixels a row the list had
+already stopped fitting a 1080-line window, so rows now shrink to fit (never below
+40). The harness is `tools/siterules/run.sh`, which also holds `ProxyAddress` to
+keeping the login out of everything shown.
+
 ## What the NUI build never asked the engine for
 
 The two builds share `src/common` and nothing else, and everything the ElmSharp
@@ -2838,6 +2888,19 @@ the one its report has to come from. The state is:
   drawing the one we mean, and the next thing to look for is a second
   `__ovs_cursor` element in the DOM rather than a shown one: that would be a
   frame or a second document, not this.
+- **A proxy for one site: #97, built.** He asked for a proxy setting that
+  applies only to a site he names, to reach region-blocked sites. It is a third
+  per-site switch (`proxy=` in `sites.tsv`) plus one proxy address typed on the
+  keyboard, and because the engine has a single proxy for the whole process it
+  is done by switching that proxy at the site boundary. See *A proxy for one
+  site* above. Shipped in the build that the follow-up docs PR names.
+  **Waiting on:** his report from it, which answers two questions nothing here
+  can: (1) does the proxy take effect while the app is running, and (2) does
+  leaving a proxied site really go direct again. A what-is-my-IP page opened
+  once on a site with the proxy on and once on one without answers both. If (1)
+  fails, the fallback is setting the proxy and restarting the view; if (2)
+  fails, the clear becomes `direct://` rather than the empty string. The
+  `proxy:` report line shows what the engine read back after each change.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

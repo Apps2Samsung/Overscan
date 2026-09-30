@@ -111,6 +111,28 @@ namespace Overscan
         private int _defaultPresetIndex;
 
         /// <summary>
+        /// Issue #97. The proxy typed in, or null when there is none; whether a
+        /// site with no proxy rule of its own goes through it; and whether the
+        /// engine has been told to use it right now. Unlike images and identity
+        /// the proxy is one setting for the whole process, so <see cref="_proxyOn"/>
+        /// is the engine's state and not only this view's.
+        /// </summary>
+        private ProxyAddress _proxy;
+        private bool _defaultProxyOn;
+        private bool _proxyOn;
+
+        /// <summary>
+        /// Set when the proxy switch was pressed before any proxy was typed: the
+        /// keyboard opens for one, and the press it interrupted is carried out once
+        /// it is entered. <see cref="_proxyPendingUrl"/> is null for the start
+        /// screen, where the switch is the browser-wide one.
+        /// </summary>
+        private bool _proxyPending;
+        private string _proxyPendingUrl;
+
+        private int _menuRowHeight = 62;
+
+        /// <summary>
         /// The site whose rules are on the view, or null while nothing but our own
         /// generated pages has been shown. Compared against the site of each load
         /// to decide whether anything has to change at all — without it every page
@@ -440,6 +462,7 @@ namespace Overscan
                 }
 
                 ConfigureCookies();
+                ConfigureProxy();
 
                 // Before the first load, so the start screen's tiles are the first
                 // requests it sees. Default on: a feature that is off by default is
@@ -1332,6 +1355,8 @@ namespace Overscan
                 new RemoteMenu.Item(RemoteMenu.ActionFitPage, "Fit page to screen", "6"),
                 new RemoteMenu.Item(RemoteMenu.ActionImages, "Images on/off", "Info"),
                 new RemoteMenu.Item(RemoteMenu.ActionAdBlock, "Ad blocking on/off", string.Empty),
+                new RemoteMenu.Item(RemoteMenu.ActionProxy, "Proxy on/off", string.Empty),
+                new RemoteMenu.Item(RemoteMenu.ActionProxyAddress, "Proxy address…", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionForgetSite, "Forget this site's settings", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionVideoPath, "Video: in page / overlay", "5"),
                 new RemoteMenu.Item(RemoteMenu.ActionPointer, "Pointer style", string.Empty),
@@ -1341,9 +1366,17 @@ namespace Overscan
             });
 
             Size2D screen = _window.WindowSize;
-            const int RowHeight = 62;
+
+            // Rows shrink rather than run off the screen. At 62 the list stopped
+            // fitting a 1080-line window somewhere around the sixteenth entry, and
+            // a row past the bottom edge is still picked out by the highlight, so
+            // the menu would have been choosing things nobody could read.
+            int room = screen.Height - (NuiTheme.Pad * 4) - 56 - 44;
+            _menuRowHeight = Math.Max(40, Math.Min(62, room / _menu.Count));
+            int rowHeight = _menuRowHeight;
+            int labelSize = rowHeight >= 56 ? 15 : 13;
             int width = 720;
-            int height = (NuiTheme.Pad * 2) + 56 + (_menu.Count * RowHeight) + 44;
+            int height = (NuiTheme.Pad * 2) + 56 + (_menu.Count * rowHeight) + 44;
 
             _menuPanel = new View
             {
@@ -1366,7 +1399,7 @@ namespace Overscan
             _menuHighlight = new View
             {
                 Position2D = new Position2D(NuiTheme.Pad - 8, NuiTheme.Pad + 56),
-                Size2D = new Size2D(width - (NuiTheme.Pad * 2) + 16, RowHeight - 6),
+                Size2D = new Size2D(width - (NuiTheme.Pad * 2) + 16, rowHeight - 6),
                 BackgroundColor = NuiTheme.Accent,
                 CornerRadius = 8f,
             };
@@ -1378,13 +1411,13 @@ namespace Overscan
             for (int i = 0; i < _menu.Count; i++)
             {
                 RemoteMenu.Item item = _menu.ItemAt(i);
-                int y = NuiTheme.Pad + 56 + (i * RowHeight);
+                int y = NuiTheme.Pad + 56 + (i * rowHeight);
 
                 _menuLabels[i] = new TextLabel
                 {
-                    Position2D = new Position2D(NuiTheme.Pad, y + 6),
+                    Position2D = new Position2D(NuiTheme.Pad, y + ((rowHeight - 6 - 42) / 2)),
                     Size2D = new Size2D(width - (NuiTheme.Pad * 2) - 140, 42),
-                    PointSize = 15,
+                    PointSize = labelSize,
                     TextColor = NuiTheme.Ink,
                     Text = item.Label,
                 };
@@ -1392,7 +1425,7 @@ namespace Overscan
 
                 _menuShortcuts[i] = new TextLabel
                 {
-                    Position2D = new Position2D(width - NuiTheme.Pad - 140, y + 10),
+                    Position2D = new Position2D(width - NuiTheme.Pad - 140, y + ((rowHeight - 6 - 38) / 2)),
                     Size2D = new Size2D(140, 38),
                     PointSize = 11,
                     HorizontalAlignment = HorizontalAlignment.End,
@@ -1434,10 +1467,10 @@ namespace Overscan
 
         private void DrawMenuSelection()
         {
-            const int RowHeight = 62;
+            int rowHeight = _menuRowHeight;
             _menuHighlight.Position2D = new Position2D(
                 _menuHighlight.Position2D.X,
-                NuiTheme.Pad + 56 + (_menu.SelectedIndex * RowHeight));
+                NuiTheme.Pad + 56 + (_menu.SelectedIndex * rowHeight));
 
             for (int i = 0; i < _menuLabels.Length; i++)
             {
@@ -1552,6 +1585,15 @@ namespace Overscan
 
                 case RemoteMenu.ActionAdBlock:
                     ToggleAdBlock();
+                    break;
+
+                case RemoteMenu.ActionProxy:
+                    ToggleProxy();
+                    break;
+
+                case RemoteMenu.ActionProxyAddress:
+                    _proxyPending = false;
+                    _keyboard.Open(KeyboardTarget.Proxy, _proxy == null ? string.Empty : _proxy.Entry);
                     break;
 
                 case RemoteMenu.ActionVideoPath:
@@ -2007,6 +2049,12 @@ namespace Overscan
                 return;
             }
 
+            if (target == KeyboardTarget.Proxy)
+            {
+                OnProxyEntered(text);
+                return;
+            }
+
             // One evaluation, not two: NUI keeps a single pending result handler, so
             // overlapping calls deliver both replies to the last one registered.
             try
@@ -2231,7 +2279,7 @@ namespace Overscan
         /// load has not gone out yet and the settings are simply right from the
         /// first request.
         /// </summary>
-        private void ApplySiteRules(string url, bool mayReload)
+        private bool ApplySiteRules(string url, bool mayReload)
         {
             // Our own generated pages are on no site (KeyFor returns null for them)
             // and leave the settings alone, so a trip through the start screen does
@@ -2239,7 +2287,7 @@ namespace Overscan
             string site = SiteRules.KeyFor(url);
             if (site == null || site == _siteKey)
             {
-                return;
+                return false;
             }
 
             _siteKey = site;
@@ -2253,11 +2301,16 @@ namespace Overscan
                 ua = _defaultPresetIndex;
             }
 
+            // With no proxy typed there is nothing to go through, whatever the
+            // rules say; a rule made before the address was cleared waits for one.
+            bool proxy = _proxy != null && SiteRules.ProxyFor(url, _defaultProxyOn);
+
             bool uaChanged = ua != _presetIndex;
             bool imagesChanged = images != _imagesOn;
-            if (!uaChanged && !imagesChanged)
+            bool proxyChanged = proxy != _proxyOn;
+            if (!uaChanged && !imagesChanged && !proxyChanged)
             {
-                return;
+                return false;
             }
 
             if (uaChanged)
@@ -2270,12 +2323,22 @@ namespace Overscan
                 ApplyImages(images);
             }
 
+            // Like the identity, and for the same reason, one reload late on a
+            // load the engine started by itself: the document was asked for over
+            // whichever route was in force, and for a region-blocked site that is
+            // the refusal the proxy is there to get past.
+            if (proxyChanged)
+            {
+                ApplyProxy(proxy);
+            }
+
             DiagLog.Add("site rules for " + site + ": " + ShortPreset(_presets[ua].Label) +
-                        ", images " + (images ? "on" : "off"));
+                        ", images " + (images ? "on" : "off") +
+                        ", proxy " + (proxy ? "on" : "off"));
 
             if (!mayReload)
             {
-                return;
+                return true;
             }
 
             // Two sites whose rules disagree and which redirect to each other would
@@ -2287,7 +2350,7 @@ namespace Overscan
             {
                 DiagLog.Add("site rules: not reloading again for " + site +
                             " — " + _ruleReloads + " reloads without a page settling");
-                return;
+                return true;
             }
 
             _ruleReloads++;
@@ -2303,6 +2366,165 @@ namespace Overscan
             {
                 Reload("site rules");
             }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Reads the proxy settings when a view is built. A view rebuilt by the
+        /// blank-view ladder may or may not share the old one's context, so an
+        /// engine that has been told anything in this process is told again what
+        /// we believe it has, rather than left to agree with us by luck.
+        /// </summary>
+        private void ConfigureProxy()
+        {
+            string entry = Store.Get("proxy", string.Empty);
+            string problem = null;
+            _proxy = entry.Length == 0 ? null : ProxyAddress.Parse(entry, out problem);
+            _defaultProxyOn = Store.GetBool("proxyAll", false);
+            if (problem != null)
+            {
+                DiagLog.Add("proxy: the stored address does not read (" + problem + "), ignored");
+            }
+
+            DiagLog.Add("proxy: " + (_proxy == null ? "none set" : _proxy.Display) +
+                        ", " + (_defaultProxyOn ? "on" : "off") + " by default");
+
+            if (NuiProxy.EverSet)
+            {
+                ApplyProxy(_proxyOn && _proxy != null);
+            }
+        }
+
+        /// <summary>
+        /// The proxy switch, remembered for the site it was pressed on (issue #97),
+        /// or on the start screen for every site without a rule of its own, the
+        /// same split as images and identity. Pressed before any proxy has been
+        /// typed, it asks for one first and then does what was pressed.
+        /// </summary>
+        private void ToggleProxy()
+        {
+            string url = PageUrl();
+            bool on = url == null ? !_defaultProxyOn : !(_proxy != null && SiteRules.ProxyFor(url, _defaultProxyOn));
+
+            if (on && _proxy == null)
+            {
+                _proxyPending = true;
+                _proxyPendingUrl = url;
+                _keyboard.Open(KeyboardTarget.Proxy, string.Empty);
+                Flash("Type the proxy first, like http://1.2.3.4:8080");
+                return;
+            }
+
+            SetProxySwitch(url, on);
+        }
+
+        private void SetProxySwitch(string url, bool on)
+        {
+            SiteRule rule = SiteRules.SetProxy(url, on);
+            if (rule == null)
+            {
+                _defaultProxyOn = on;
+                Store.Set("proxyAll", on);
+                Flash(on ? "Proxy on for every site" : "Proxy off, except sites you turned it on for");
+            }
+            else
+            {
+                Flash((on ? "Proxy on for " : "Proxy off for ") + rule.Site);
+            }
+
+            DiagLog.Add("proxy " + (on ? "ON" : "OFF") + " for " + (rule == null ? "every site" : rule.Site));
+
+            // A change like forgetting a site: the applied site is no longer
+            // what its rules say, so it is worked out again and reloaded.
+            _siteKey = null;
+            ApplySiteRules(url, true);
+            UpdateStatus();
+        }
+
+        /// <summary>
+        /// A typed proxy. Empty clears it; one that does not read reopens the
+        /// keyboard on what was typed, since the mistake is usually one character.
+        /// </summary>
+        private void OnProxyEntered(string text)
+        {
+            bool pending = _proxyPending;
+            string pendingUrl = _proxyPendingUrl;
+            _proxyPending = false;
+            _proxyPendingUrl = null;
+            bool wasOn = _proxyOn;
+
+            if ((text ?? string.Empty).Trim().Length == 0)
+            {
+                _proxy = null;
+                Store.Set("proxy", string.Empty);
+                DiagLog.Add("proxy cleared");
+                Flash("Proxy cleared, every site goes direct");
+                if (wasOn)
+                {
+                    ApplyProxy(false);
+                    Reload("proxy cleared");
+                }
+
+                UpdateStatus();
+                return;
+            }
+
+            string problem;
+            ProxyAddress address = ProxyAddress.Parse(text, out problem);
+            if (address == null)
+            {
+                Flash(problem);
+                _proxyPending = pending;
+                _proxyPendingUrl = pendingUrl;
+                _keyboard.Open(KeyboardTarget.Proxy, text);
+                return;
+            }
+
+            _proxy = address;
+            Store.Set("proxy", address.Entry);
+            DiagLog.Add("proxy set: " + address.Display);
+
+            if (pending)
+            {
+                SetProxySwitch(pendingUrl, true);
+                return;
+            }
+
+            Flash("Proxy " + address.EngineUri);
+
+            // The switches did not move, so if the proxy was in use it still is,
+            // just at the new address, and the page is reloaded to go through it.
+            if (wasOn)
+            {
+                ApplyProxy(true);
+                Reload("proxy address");
+            }
+            else
+            {
+                // A site already switched on, or proxy-by-default, may have been
+                // waiting for an address.
+                _siteKey = null;
+                ApplySiteRules(PageUrl(), true);
+            }
+
+            UpdateStatus();
+        }
+
+        /// <summary>Tells the engine to go through the proxy or direct.</summary>
+        private void ApplyProxy(bool on)
+        {
+            _proxyOn = on && _proxy != null;
+            NuiProxy.Apply(_web, _proxyOn ? _proxy : null);
+            DiagLog.Add("proxy: " + NuiProxy.LastResult);
+        }
+
+        private string ProxyLine()
+        {
+            return (_proxy == null ? "none set" : _proxy.Display) +
+                   "   ·   " + (_defaultProxyOn ? "on" : "off") + " by default" +
+                   "   ·   this page " + (_proxyOn ? "through it" : "direct") + "\n" +
+                   "            engine: " + NuiProxy.LastResult;
         }
 
         /// <summary>Tells the view about the images switch. Best-effort, like everything past it.</summary>
@@ -2682,6 +2904,7 @@ namespace Overscan
                            (_viewportFix ? "   ·   fit" : string.Empty) +
                            (_imagesOn ? string.Empty : "   ·   no images") +
                            (_adBlockOn ? string.Empty : "   ·   ads allowed") +
+                           (_proxyOn ? "   ·   via proxy" : string.Empty) +
                            (SiteRules.For(_cachedUrl) == null ? string.Empty : "   ·   for this site");
         }
 
@@ -2714,6 +2937,7 @@ namespace Overscan
                       ? "nothing remembered for this site"
                       : "in force for " + SiteRules.For(_cachedUrl).Site) + "\n" +
                   "ad block  : " + NuiAdBlock.Summary() + "\n" +
+                  "proxy     : " + ProxyLine() + "\n" +
                   "memory    : " + ProcessMemory.Summary() + ", peak " + _peakMemoryMb + " MB\n" +
                   "last words: " + NuiDeathWatch.LastWord + "\n" +
                   "stderr    : " + NativeStdErr.SessionState + "\n" +
