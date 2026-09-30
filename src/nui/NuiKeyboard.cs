@@ -305,6 +305,7 @@ namespace Overscan
             {
                 case KeyboardTarget.Address: return "Go to";
                 case KeyboardTarget.Favourite: return "Keep as a tile";
+                case KeyboardTarget.Proxy: return "Proxy";
                 default: return "Type into page";
             }
         }

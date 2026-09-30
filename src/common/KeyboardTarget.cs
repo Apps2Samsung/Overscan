@@ -17,5 +17,11 @@ namespace Overscan
         /// for ever. An address you cannot land on has no other way in.
         /// </summary>
         Favourite,
+
+        /// <summary>
+        /// The proxy sites are sent through when their proxy switch is on (issue
+        /// #97). NUI build only; the others never open the keyboard for it.
+        /// </summary>
+        Proxy,
     }
 }

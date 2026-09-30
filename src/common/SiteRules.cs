@@ -24,6 +24,7 @@ namespace Overscan
             Site = site;
             Ua = Unset;
             Images = Unset;
+            Proxy = Unset;
         }
 
         /// <summary>
@@ -38,9 +39,16 @@ namespace Overscan
         /// <summary>1 for on, 0 for off, or <see cref="Unset"/>.</summary>
         public int Images { get; set; }
 
+        /// <summary>
+        /// 1 to go through the proxy, 0 to go direct, or <see cref="Unset"/>.
+        /// Issue #97; only the NUI build acts on it, the others carry it through
+        /// the file untouched.
+        /// </summary>
+        public int Proxy { get; set; }
+
         public bool IsEmpty
         {
-            get { return Ua == Unset && Images == Unset; }
+            get { return Ua == Unset && Images == Unset && Proxy == Unset; }
         }
     }
 
@@ -55,12 +63,17 @@ namespace Overscan
     /// both by hand on every switch between them. A setting that has to be redone
     /// every time is one the user is maintaining for us.
     ///
+    /// Issue #97 added a third: whether the site goes through a proxy. A proxy is
+    /// wanted for the one site a region blocks and is a cost (a slower, remote
+    /// hop) everywhere else, which is the same shape as the other two.
+    ///
     /// Stored in <c>sites.tsv</c>, one line per site, in the same shape as
     /// everything else <see cref="Store"/> keeps and for the same reason: the
     /// tizen50 build has no JSON in its framework.
     ///
     ///     open.spotify.com &lt;TAB&gt; images=1
     ///     instagram.com    &lt;TAB&gt; ua=1 &lt;TAB&gt; images=0
+    ///     bbc.co.uk        &lt;TAB&gt; proxy=1
     ///
     /// Failures are swallowed and logged. A browser that will not start because a
     /// preference file is unreadable is a worse browser than one that forgets a
@@ -226,6 +239,17 @@ namespace Overscan
             }
         }
 
+        /// <summary>
+        /// Whether this address goes through the proxy: the site's own answer where
+        /// it has one, the browser-wide switch everywhere else. Separate from
+        /// <see cref="Effective"/> because only one of the six builds can ask it.
+        /// </summary>
+        public static bool ProxyFor(string url, bool defaultProxy)
+        {
+            SiteRule rule = For(url);
+            return rule == null || rule.Proxy == SiteRule.Unset ? defaultProxy : rule.Proxy == 1;
+        }
+
         /// <summary>Remembers a UA preset for this site. Returns the rule it landed on.</summary>
         public static SiteRule SetUa(string url, int preset)
         {
@@ -246,6 +270,19 @@ namespace Overscan
             if (rule != null)
             {
                 rule.Images = on ? 1 : 0;
+                Save();
+            }
+
+            return rule;
+        }
+
+        /// <summary>Remembers the proxy switch for this site. Returns the rule it landed on.</summary>
+        public static SiteRule SetProxy(string url, bool on)
+        {
+            SiteRule rule = Claim(url);
+            if (rule != null)
+            {
+                rule.Proxy = on ? 1 : 0;
                 Save();
             }
 
@@ -313,7 +350,7 @@ namespace Overscan
         {
             if (Rules.Count == 0)
             {
-                return "(none — images and identity are remembered per site once you set them)";
+                return "(none — images, identity and proxy are remembered per site once you set them)";
             }
 
             var text = new System.Text.StringBuilder();
@@ -329,6 +366,11 @@ namespace Overscan
                 if (rule.Images != SiteRule.Unset)
                 {
                     text.Append("   images ").Append(rule.Images == 1 ? "on" : "off");
+                }
+
+                if (rule.Proxy != SiteRule.Unset)
+                {
+                    text.Append("   proxy ").Append(rule.Proxy == 1 ? "on" : "off");
                 }
 
                 text.Append("\n");
@@ -419,6 +461,10 @@ namespace Overscan
                             // answer for it.
                             rule.Images = value == 0 || value == 1 ? value : SiteRule.Unset;
                         }
+                        else if (name == "proxy")
+                        {
+                            rule.Proxy = value == 0 || value == 1 ? value : SiteRule.Unset;
+                        }
                     }
 
                     // A line that says nothing is a rule that does nothing, and
@@ -442,7 +488,7 @@ namespace Overscan
                 return;
             }
 
-            // A rule emptied by hand (both fields taken back to the default) is not
+            // A rule emptied by hand (every field taken back to the default) is not
             // a rule; dropping it here is what stops the file, and the report, from
             // filling up with sites that are remembered as "nothing in particular".
             for (int i = Rules.Count - 1; i >= 0; i--)
@@ -469,6 +515,12 @@ namespace Overscan
                     {
                         line.Append('\t').Append("images=")
                             .Append(rule.Images.ToString(CultureInfo.InvariantCulture));
+                    }
+
+                    if (rule.Proxy != SiteRule.Unset)
+                    {
+                        line.Append('\t').Append("proxy=")
+                            .Append(rule.Proxy.ToString(CultureInfo.InvariantCulture));
                     }
 
                     lines.Add(line.ToString());

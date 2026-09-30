@@ -34,6 +34,10 @@
 #      back and forth between, treats another host of the same site as the same
 #      site, skips this app's own generated pages, and has an answer when there
 #      is nowhere to go.
+#   6. the proxy (issue 97, NUI only): the third field follows the same rules as
+#      the other two, and the typed address is taken apart so the login never
+#      reaches the engine's proxy string or anything shown on screen or on the
+#      diagnostics page.
 # Needs only the .NET 6 SDK under ~/.dotnet-local.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -62,6 +66,7 @@ cat > "$work/siterules.csproj" <<CSPROJ
     <Compile Include="$PWD/../../src/common/SiteRules.cs" />
     <Compile Include="$PWD/../../src/common/Store.cs" />
     <Compile Include="$PWD/../../src/common/HomePage.cs" />
+    <Compile Include="$PWD/../../src/nui/ProxyAddress.cs" />
   </ItemGroup>
 </Project>
 CSPROJ
