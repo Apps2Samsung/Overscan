@@ -2893,7 +2893,7 @@ the one its report has to come from. The state is:
   per-site switch (`proxy=` in `sites.tsv`) plus one proxy address typed on the
   keyboard, and because the engine has a single proxy for the whole process it
   is done by switching that proxy at the site boundary. See *A proxy for one
-  site* above. Shipped in the build that the follow-up docs PR names.
+  site* above. Shipped in `build-032c399`.
   **Waiting on:** his report from it, which answers two questions nothing here
   can: (1) does the proxy take effect while the app is running, and (2) does
   leaving a proxied site really go direct again. A what-is-my-IP page opened
