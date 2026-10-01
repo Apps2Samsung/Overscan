@@ -524,6 +524,7 @@ namespace Overscan
                     NuiMediaWatch.Reset();
                     NuiVideoCap.Reset();
                     NuiVideoRect.Reset();
+                    NuiMseWatch.Reset();
                 };
 
                 _web.PageLoadFinished += (s, e) =>
@@ -639,11 +640,11 @@ namespace Overscan
         }
 
         /// <summary>
-        /// Puts the media census, the decoder cap and the geometry probe into the
-        /// page. Alongside the cursor's own script and for the same reason it is
+        /// Puts the media census, the decoder cap, the geometry probe and the MSE
+        /// probe into the page. Alongside the cursor's own script and for the same reason it is
         /// re-run on every load: a navigation takes the previous page's copy with it.
         ///
-        /// Three evaluations rather than one, so that a page which somehow breaks one
+        /// Separate evaluations rather than one, so that a page which somehow breaks one
         /// of them still gets the others — the census in particular, which is what
         /// would explain the breakage.
         /// </summary>
@@ -674,6 +675,15 @@ namespace Overscan
             catch (Exception ex)
             {
                 DiagLog.Add("video rect failed: " + ex.Message);
+            }
+
+            try
+            {
+                _web.EvaluateJavaScript(NuiMseWatch.Script());
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("mse watch failed: " + ex.Message);
             }
         }
 
@@ -2983,6 +2993,8 @@ namespace Overscan
                   "media     : " + NuiMediaWatch.LastCensus + "\n" +
                   "video cap : " + NuiVideoCap.LastAction + "\n" +
                   "video rect: " + NuiVideoRect.LastBox + "\n" +
+                  "mse format: " + NuiMseWatch.LastFormat + "\n" +
+                  "mse stall : " + NuiMseWatch.LastStall + "\n" +
                   "blank view: " + _blankState + "\n" +
                   "start page: " + _startPageState + "\n" +
                   "opens at  : " + StartPage.Describe(Store.RecentHistory) + "\n" +

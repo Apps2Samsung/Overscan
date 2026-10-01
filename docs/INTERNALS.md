@@ -2086,6 +2086,58 @@ numbers so the line still repeats and is still deduplicated; see *`holding`
 counted sweeps, not videos*. The last position is kept in a `WeakMap`, so the
 script still only reads the page.
 
+### Reels freeze with the data there
+
+The report from `build-7e24138` (a different proxy, and YouTube through it
+playing fine) turned the previous section's reading over. Every reel on TikTok
+went black and silent **two to four seconds after it started**, and the census
+said `rs4 stuck`, never `starved`:
+
+```
+16:10:49  media: playing=1 of 2 — 720x960 rs4
+16:10:52  media: playing=1 of 2 — 720x960 rs4 stuck
+16:11:34  media: playing=1 of 2 — 720x1280 rs4
+16:11:38  media: playing=1 of 2 — 720x1280 rs4 stuck
+          ... stuck every census until 16:13:08
+```
+
+More than a second buffered past a playhead that does not move: the data is
+there and the decoder is not taking it. Pause and resume brings it back, which
+restarts the pipeline. The failed-load fix held (his `Canceled` load errors via
+the proxy set nothing off). The proxy was a red herring for this half; the
+earlier `rs1`/`rs2` lines were a proxy that was also failing.
+
+The native output is complete and has nothing at the freeze. Each reel brings
+up one new pipeline (`omxtzuhdvideodec2`, `3`, `4`, ... one at a time, not two
+at once), always with the same block of `Sticky event misordering` and
+`GST_IS_CAPS` warnings, and then the engine is silent until the next reel's.
+Two candidates are left, and they need different fixes:
+
+- **A quality switch.** An adaptive player starts low and moves up once it has
+  measured the connection, which on MSE is a second init segment into the same
+  SourceBuffer, a few seconds in. A hardware decoder that cannot follow a change
+  of resolution under it would freeze exactly like this. The fix would keep the
+  player on one rendition.
+- **The format.** TikTok sends HEVC (`bytevc1`) to a browser that says it can
+  play it. The fix would be to stop saying yes to HEVC, so it sends H.264.
+
+`NuiMseWatch` is the build that asks which. It wraps `addSourceBuffer`,
+`appendBuffer`, `changeType`, `MediaSource.isTypeSupported` and
+`URL.createObjectURL`, all strictly pass-through (the original's return value
+and exceptions reach the page unchanged; `tools/msewatch/run.sh` holds it to
+that against chromium's real MediaSource), and writes `mse:` lines: the mime
+each SourceBuffer was made with, every init segment with its codec and coded
+size (`init #2 ... after N appends` is a switch), every question the player
+asked and the engine's answer, and when a playing video's playhead has not
+moved for two seconds, a `stall` line with the buffered range, the decoded
+frame count and the state of each feed. `still stalled 8s` and `moving again`
+say whether data kept arriving and frames kept counting during it, and whether
+a pause or a seek ended it.
+
+How to read it: an `init #2` just before every `stall` is the switch. Only
+`init #1`, on `hvc1`, is the format. Frames counting up through a stall with
+neither is the engine decoding and not drawing, which is below the page.
+
 ## What the NUI build never asked the engine for
 
 The two builds share `src/common` and nothing else, and everything the ElmSharp
@@ -2953,10 +3005,15 @@ the one its report has to come from. The state is:
   data (see *A failed load is an answer, not silence* above); that is the
   proxy's throughput, and nothing in the app reaches it. What the app did get
   wrong is fixed: a load the proxy refused set off the blank-view ladder, which
-  cleared his session. Shipped in `build-7e24138`.
-  **Waiting on:** a report from that build, where the
-  census says `starved`/`stuck` and a refused load names its error code, plus
-  whether a video on another site through the same proxy stalls the same way.
+  cleared his session. Shipped in `build-7e24138`. His report from it: every
+  reel freezes `rs4 stuck` a few seconds in with data buffered, YouTube
+  through the same proxy is fine, so it is the player and not the proxy (see
+  *Reels freeze with the data there*). The MSE probe that asks whether it is
+  a quality switch or the HEVC format ships next.
+  **Waiting on:** his report from that build, after a few reels have frozen.
+  `init #2` before each `stall` means keep the player on one rendition; `hvc1`
+  with only `init #1` means stop offering HEVC. Either is a change to what the
+  page is told, so which one ships is Patrick's call.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

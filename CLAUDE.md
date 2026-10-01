@@ -109,6 +109,24 @@ the probe **reads and does nothing else**. The page marks every call it must not
 — `pause`, `load`, `play`, a changed `src`, a changed DOM — and fails the run if one
 happens. A probe sent to explain a black screen must not be able to cause one.
 
+### The MSE harness
+
+Any change to `NuiMseWatch` — the probe that writes down what a page feeds the
+engine's Media Source player (issue #100) — is exercised against desktop
+chromium first:
+
+```sh
+tools/msewatch/run.sh
+```
+
+It wraps the player's own calls (`addSourceBuffer`, `appendBuffer`,
+`changeType`, `isTypeSupported`, `URL.createObjectURL`), which makes it the one
+read-only probe that could break playback by being wrong. The harness drives a
+real MediaSource and holds every wrapper to returning what the original
+returned and letting the original's exceptions through by name, then checks it
+reads an init segment's codec and size, counts a second one as a switch, and
+reports a stall and its end without pausing, playing, loading or seeking.
+
 ### The start-page harness
 
 Any change to `Store`, `HomePage` or `StartPage` — what gets saved as a visit or
