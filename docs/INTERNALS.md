@@ -2040,6 +2040,52 @@ already stopped fitting a 1080-line window, so rows now shrink to fit (never bel
 40). The harness is `tools/siterules/run.sh`, which also holds `ProxyAddress` to
 keeping the login out of everything shown.
 
+### A failed load is an answer, not silence
+
+Issue #100, the first report from a site behind #97's proxy: TikTok through a
+shared proxy, reels stopping after a few seconds, and three times in one evening
+the trail doing this:
+
+```
+navigate: https://www.tiktok.com/about?lang=en
+load error on
+no load began within 6s (attempt 1)
+rebuilding the web view
+...
+no load began within 6s (attempt 2)
+clearing session: cookies
+```
+
+The proxy had stopped answering (TikTok's own script chunks failing to fetch a
+minute earlier, and DuckDuckGo loading at once when the view went direct). The
+engine said so, with `PageLoadError`. But only `PageLoadStarted` disarmed the
+blank-view watchdog, so the silence after a refused load read as a dead view:
+rebuild, then **clear the session**, which signed him out of every site each time
+the proxy hiccuped. The ladder is for a view that says *nothing*; a load that
+failed is a view that tried. `EngineAnswered` now disarms it from started,
+finished (the same trail has a `load finished` with no start before it, followed
+by the watchdog firing on a loaded page) and failed alike.
+
+The `load error on` line was empty because the view's URL is often gone by the
+time the error arrives. It now carries the error's own URL, its
+`WebPageLoadError.ErrorCode` and description, and `(via proxy)` when the proxy
+was in force; with the proxy on, the screen says the proxy may not be answering
+instead of nothing.
+
+**The reels themselves were starved, not refused.** Hardware overlay, the path
+that plays on that set, reporting `playing=1 ... rs2` and `rs1` (the element still
+"playing" with nothing past the playhead) alongside the engine's
+`signal 'underflow' is invalid for instance ... GstTZAppSrc`: the MSE source
+running dry. Everything a proxied site pulls in goes through the one proxy,
+video included, and a shared proxy that cannot keep up with video is not
+something this side can fix. To make the next report say it outright rather than
+by inference, each playing video on the census line now carries `starved` (less
+than a second buffered past the playhead) and `stuck` (the playhead has not
+moved since the last census, two seconds earlier). They are flags and not
+numbers so the line still repeats and is still deduplicated; see *`holding`
+counted sweeps, not videos*. The last position is kept in a `WeakMap`, so the
+script still only reads the page.
+
 ## What the NUI build never asked the engine for
 
 The two builds share `src/common` and nothing else, and everything the ElmSharp
@@ -2901,6 +2947,15 @@ the one its report has to come from. The state is:
   fails, the fallback is setting the proxy and restarting the view; if (2)
   fails, the clear becomes `direct://` rather than the empty string. The
   `proxy:` report line shows what the engine read back after each change.
+
+- **TikTok through the proxy: #100.** Reels stop after a few seconds, and the
+  proxy was failing outright later in the same run. The reels are starved of
+  data (see *A failed load is an answer, not silence* above); that is the
+  proxy's throughput, and nothing in the app reaches it. What the app did get
+  wrong is fixed: a load the proxy refused set off the blank-view ladder, which
+  cleared his session. **Waiting on:** a report from the next build, where the
+  census says `starved`/`stuck` and a refused load names its error code, plus
+  whether a video on another site through the same proxy stalls the same way.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

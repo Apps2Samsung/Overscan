@@ -206,8 +206,32 @@ namespace Overscan
     } catch (e) { return -1; }
   }
 
+  /* Issue #100: a reel that ""stops after a few seconds"" while its element still
+     says playing is either starved (nothing buffered past the playhead) or stuck
+     (the playhead has not moved since the last census). Both are flags rather
+     than numbers on purpose: a currentTime on the line would change every census,
+     and a line that never repeats is never deduplicated (see `holding` in
+     INTERNALS). Kept in a WeakMap, not on the element, so the page is only read. */
+  var lastTime = typeof WeakMap === 'function' ? new WeakMap() : null;
+
+  function ahead(v) {
+    try {
+      var b = v.buffered, t = v.currentTime;
+      for (var i = 0; i < b.length; i++) {
+        if (b.start(i) <= t + 0.1 && t <= b.end(i)) { return b.end(i) - t; }
+      }
+    } catch (e) {}
+    return 0;
+  }
+
   function describe(v) {
     var bits = (v.videoWidth || 0) + 'x' + (v.videoHeight || 0) + ' rs' + v.readyState;
+    if (ahead(v) < 1) { bits += ' starved'; }
+    if (lastTime) {
+      var t = v.currentTime;
+      if (lastTime.get(v) === t) { bits += ' stuck'; }
+      lastTime.set(v, t);
+    }
     var d = dropped(v);
     if (d > 0) { bits += ' dropped ' + d; }
     if (v.error) { bits += ' ERROR ' + v.error.code; }
