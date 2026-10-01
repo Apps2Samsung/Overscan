@@ -2174,7 +2174,7 @@ Two of the three stalls were on an element whose source the probe never saw
 made, and one of those resumed onto an `omxvideodec` + `fakesink` pipeline,
 which is the engine's own demuxer playing a plain URL, not MSE.
 
-Two things in that probe were wrong and are fixed with the next one.
+Two things in that probe were wrong and are fixed in `build-dccb5ad`.
 `format()` started its scan at byte 8 and found `avc1` in the ftyp's list of
 compatible brands, so every init read `avc1 0x0`, the audio one included; it
 now starts past the ftyp and wants a plausible box size in front of the type
@@ -2182,7 +2182,7 @@ now starts past the ftyp and wants a plausible box size in front of the type
 And `totalVideoFrames` is 0 on this engine whether the video moves or not, so
 `frames` says nothing here.
 
-The next build is diagnostics only and asks whether it really is two videos.
+`build-dccb5ad` is diagnostics only and asks whether it really is two videos.
 `NuiMseWatch` names every `<video>` (`v1`, `v2`, ...), writes down each one's
 `loadstart` (with where its media comes from: one of our MediaSources, a blob
 we never saw made, a `srcObject`, which is how a worker's MediaSource arrives,
@@ -3070,7 +3070,7 @@ the one its report has to come from. The state is:
   *Reels freeze with the data there*). The MSE probe from `build-c05e9b9`
   ruled out a quality switch and HEVC; every freeze lines up with a second
   hardware pipeline opening while a reel plays (see *Two videos, one
-  decoder*). The next build names every `<video>` and lists the others at a
+  decoder*). `build-dccb5ad` names every `<video>` and lists the others at a
   stall. **Waiting on:** his report from it, after a few reels have frozen.
   Another element's `loadstart` just before each `stall` means two videos on
   one decoder, and the fix (keeping the off-screen reel from opening a
