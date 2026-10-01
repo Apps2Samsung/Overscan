@@ -2326,6 +2326,7 @@ namespace Overscan
                 bool failed = _engineFailure != null;
                 return "Overscan diagnostics\n" +
                        "\n" +
+                       "build     : " + BuildInfo.Tag + "\n" +
                        "engine    : " + (failed ? "FAILED TO START" : "still starting") + "\n" +
                        "reason    : " + (_engineFailure ?? "(no failure recorded yet)") + "\n" +
                        "engine init: " + _engineInit + "\n" +
@@ -2362,6 +2363,7 @@ namespace Overscan
 
             return "Overscan diagnostics\n" +
                    "\n" +
+                   "build     : " + BuildInfo.Tag + "\n" +
                    "state     : " + (_started ? "running" : "still starting") + "\n" +
                    "engine UA : " + _engineUserAgent + "\n" +
                    "engine init: " + _engineInit + "\n" +

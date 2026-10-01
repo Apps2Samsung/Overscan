@@ -556,9 +556,19 @@ next one of these arrives:
   willing to run builds, copying the three probe items from `Overscan5.csproj` into
   the other csprojs is the whole change, and the two answers are the ones written for
   #17.
-- **The report does not name its build.** Neither the `:8081` page nor the key-`3`
-  screen prints a release tag, so which asset a reporter ran is read off the release
-  timestamps. Worth adding to the header the next time either file is touched.
+  **Issue #105 (2026-10-01)**, an AU7200 on Tizen 6.0, is the same trail again. The
+  reply gave the expected answer and offered a diagnostics build; whatever the
+  reporter says, `Overscan6.csproj` now carries the probe in `res/`, `bin/` and
+  `lib/` (the object referenced from `Overscan5/res/`, not copied), so a Tizen 6 set
+  answers the exec-mapping question itself. Read its `own native :` line exactly as
+  the Q80's: refused in every location is the same wall, and closes it like #95; any
+  location that maps executable reopens the stub route, whose next question is which
+  symbols `libchromium-impl.so` imports from `libprivileged-service-client.so`.
+- **The report names its build now.** Both reports open with `build     :`, the
+  release tag CI stamps into the assembly (`Directory.Build.props`,
+  `-p:OverscanBuildTag`, read back by `BuildInfo`). A PR build says `pr-<n>` and
+  anything built without the flag says `local build`. Until #105 the asset a
+  reporter ran had to be read off the release timestamps.
 
 That trail's previous run ended on `probe: locate libprivileged-service-client.so`
 with the next launch 69 s later and the trail writer healthy — the `Find` in

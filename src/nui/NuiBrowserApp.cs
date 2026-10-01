@@ -3015,6 +3015,7 @@ namespace Overscan
             // A page that closes the app leaves nothing to read in this run: the
             // launch that died is the one with the answer in it.
             return "Overscan diagnostics (NUI build)\n\n" +
+                   "build     : " + BuildInfo.Tag + "\n" +
                    "platform  : NUI WebView, api-version 9.0+\n" +
                    "trail file : " + Breadcrumbs.Location + "\n" +
                    engine + "\n\n" +
