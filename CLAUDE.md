@@ -125,7 +125,10 @@ read-only probe that could break playback by being wrong. The harness drives a
 real MediaSource and holds every wrapper to returning what the original
 returned and letting the original's exceptions through by name, then checks it
 reads an init segment's codec and size, counts a second one as a switch, and
-reports a stall and its end without pausing, playing, loading or seeking.
+reports a stall and its end without pausing, playing, loading or seeking. It
+also holds the per-element half to naming an MSE element and a plain-URL one,
+listing the other elements at a stall, and not reading a sample entry out of
+the ftyp's brand list.
 
 ### The start-page harness
 

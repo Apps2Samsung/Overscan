@@ -40,6 +40,24 @@ namespace Overscan
     /// is the engine drawing nothing while it decodes, which is below anything we can
     /// reach from the page.
     ///
+    /// `build-c05e9b9` answered neither: H.264 only, one init per source, the whole
+    /// reel buffered. What lined up with every freeze was in the native output, a
+    /// second hardware pipeline opening a few seconds into a reel while it played,
+    /// and two of the three stalls were on an element whose source this probe never
+    /// saw made. So it now names every <c>&lt;video&gt;</c> (<c>v1</c>, <c>v2</c>, ...), writes
+    /// down when each one asks for a pipeline and where its media comes from, and
+    /// follows a stall with one <c>with</c> line per other element:
+    ///
+    /// <code>
+    /// mse: v2 loadstart ms4, preload auto, off screen        the next reel asks for a pipeline
+    /// mse: stall v1 ms3 t 2.1 buf 0.1-29.5 | frames 0 | ...  the one on screen stops
+    /// mse: with v2 paused rs1 ns2 ms4, off screen, last loadedmetadata 0.6s ago
+    /// </code>
+    ///
+    /// Another element's <c>loadstart</c>/<c>loadedmetadata</c> a moment before every
+    /// stall is two videos holding the one hardware decoder. A stall with nothing
+    /// else stirring is not that.
+    ///
     /// **This wraps four MSE calls and changes none of them.** Every wrapper calls the
     /// original with the same <c>this</c> and arguments and returns what it returned,
     /// and an exception from the original reaches the page unchanged after the wrapper
@@ -110,7 +128,7 @@ namespace Overscan
   /* A feed appends many times a second for as long as it plays, so appends are
      counted, never reported one by one. What is reported is bounded per page: the
      trail's value is that its last lines are readable. */
-  var BUDGET = 160, spent = 0;
+  var BUDGET = 320, spent = 0;
   function report(line) {
     if (spent >= BUDGET) { return; }
     spent++;
@@ -151,6 +169,10 @@ namespace Overscan
     return String.fromCharCode(u[p], u[p + 1], u[p + 2], u[p + 3]);
   }
 
+  function size(u, p) {
+    return ((u[p] << 24) | (u[p + 1] << 16) | (u[p + 2] << 8) | u[p + 3]) >>> 0;
+  }
+
   /* An init segment is an ftyp (or a bare moov) at the very start, or WebM's EBML
      header. Media segments start with styp/moof or a WebM cluster. */
   function isInit(u) {
@@ -163,14 +185,19 @@ namespace Overscan
   /* The sample entry names the codec, and for video the 24 bytes after its type
      are fixed fields with the coded width and height right behind them. A box
      size in front of the type is what tells it from the same four letters
-     anywhere else in the segment. */
+     anywhere else in the segment, and the scan starts past the ftyp, whose list
+     of compatible brands is where `avc1` sits in nearly every MP4 (build-c05e9b9
+     read TikTok's audio init as `avc1 0x0` off it). */
   var VIDEO = ['avc1', 'avc3', 'hvc1', 'hev1', 'av01', 'vp09', 'dvh1', 'dvhe'];
   var AUDIO = ['mp4a', 'ac-3', 'ec-3', 'Opus', 'fLaC'];
   function format(u) {
     if (u[0] === 0x1A) { return 'webm'; }
     var end = Math.min(u.length - 4, 65536);
-    for (var p = 8; p < end; p++) {
-      var t = fourcc(u, p);
+    var from = 8;
+    if (fourcc(u, 4) === 'ftyp') { from = Math.max(from, size(u, 0) + 4); }
+    for (var p = from; p < end; p++) {
+      var t = fourcc(u, p), n = size(u, p - 4);
+      if (n < 8 || p - 4 + n > u.length) { continue; }
       if (VIDEO.indexOf(t) >= 0 && p + 32 <= u.length) {
         var w = (u[p + 28] << 8) | u[p + 29], h = (u[p + 30] << 8) | u[p + 31];
         return t + ' ' + w + 'x' + h;
@@ -339,6 +366,85 @@ namespace Overscan
     }, true);
   });
 
+  /* --- every video element, by name ---
+
+     build-c05e9b9's native output put every freeze next to a second hardware
+     pipeline opening while a reel was already playing, and two of the three
+     stalls were on an element whose source this probe never saw made. So each
+     <video> gets a name (v1, v2, ...) that stays with it, the moments an element
+     asks the engine for a pipeline are written down against that name, and a
+     stall lists what every other element was doing. Media events do not bubble,
+     but they do pass through a capturing listener on the document. */
+  var tags = new WeakMap();   /* video -> {id, ev, at} */
+  var nextTag = 1;
+
+  function tag(v) {
+    var g = tags.get(v);
+    if (!g) { g = { id: 'v' + (nextTag++), ev: '', at: 0 }; tags.set(v, g); }
+    return g;
+  }
+
+  /* Where an element's media comes from: one of our MediaSources by id, a blob we
+     never saw made, a srcObject (a MediaSource handed over from a worker comes
+     this way, and our wrappers on this window cannot see one), or a plain URL,
+     which the engine plays with its own demuxer instead of the MSE path. */
+  function origin(v) {
+    try {
+      var s = v.currentSrc || v.src || '';
+      if (!s) { return v.srcObject ? 'srcObject' : 'no src'; }
+      var r = byUrl[s];
+      if (r) { return r.id; }
+      if (s.indexOf('blob:') === 0) { return 'blob not ours'; }
+      var a = document.createElement('a');
+      a.href = s;
+      return 'url ' + a.host + '/' + (a.pathname.split('/')[1] || '');
+    } catch (e) { return '?'; }
+  }
+
+  function onScreen(v) {
+    try {
+      var b = v.getBoundingClientRect();
+      var w = window.innerWidth, h = window.innerHeight;
+      if (b.width <= 0 || b.height <= 0) { return 'no box'; }
+      return (b.right > 0 && b.bottom > 0 && b.left < w && b.top < h) ? 'on screen' : 'off screen';
+    } catch (e) { return '?'; }
+  }
+
+  ['loadstart', 'loadedmetadata', 'playing', 'waiting', 'pause', 'emptied'].forEach(function (type) {
+    document.addEventListener(type, function (e) {
+      try {
+        var v = e.target;
+        if (!v || v.tagName !== 'VIDEO') { return; }
+        var g = tag(v);
+        g.ev = type;
+        g.at = Date.now();
+        var what = type === 'loadstart' ? origin(v) + ', preload ' + v.preload + ', ' + onScreen(v)
+                 : type === 'loadedmetadata' ? v.videoWidth + 'x' + v.videoHeight + ', ' + onScreen(v)
+                 : type === 'emptied' ? onScreen(v)
+                 : 't ' + v.currentTime.toFixed(1) + ', ' + onScreen(v);
+        report(g.id + ' ' + type + ' ' + what);
+      } catch (_) {}
+    }, true);
+  });
+
+  /* One line per other element, because a stall line already runs near the
+     trail's line length on its own. */
+  function others(v) {
+    try {
+      var vs = document.getElementsByTagName('video');
+      for (var i = 0, n = 0; i < vs.length && n < 3; i++) {
+        var o = vs[i];
+        if (o === v) { continue; }
+        n++;
+        var g = tag(o);
+        report('with ' + g.id + ' ' + (o.paused ? 'paused' : 'playing') +
+               ' rs' + o.readyState + ' ns' + o.networkState + ' ' + origin(o) + ', ' +
+               onScreen(o) + ', last ' + (g.ev ? g.ev + ' ' + ago(g.at) : 'no event seen'));
+      }
+      if (vs.length > 4) { report('with ' + (vs.length - 4) + ' more not listed'); }
+    } catch (e) {}
+  }
+
   function look() {
     try {
       var vs = document.getElementsByTagName('video');
@@ -354,7 +460,7 @@ namespace Overscan
         if (t !== w.t) {
           if (w.reported) {
             var r0 = sourceFor(v);
-            report('moving again after ' + ((now - w.since) / 1000).toFixed(1) + 's' +
+            report('moving again ' + tag(v).id + ' after ' + ((now - w.since) / 1000).toFixed(1) + 's' +
                    (w.touched ? ' (after a ' + w.touched + ')' : ' (on its own)') +
                    ', frames +' + (frames(v) - w.frames) +
                    ', appends +' + (appendsOf(r0) - w.appends));
@@ -370,11 +476,12 @@ namespace Overscan
           w.frames = frames(v);
           w.appends = appendsOf(r);
           w.touched = '';
-          report('stall ' + (r ? r.id : '-') + ' t ' + t.toFixed(1) + ' buf ' + ranges(v) +
+          report('stall ' + tag(v).id + ' ' + origin(v) + ' t ' + t.toFixed(1) + ' buf ' + ranges(v) +
                  ' | frames ' + w.frames + ' | ' + feeds(r));
+          others(v);
         } else if (w.reported === 1 && held >= 8000) {
           w.reported = 2;
-          report('still stalled 8s: frames +' + (frames(v) - w.frames) +
+          report('still stalled 8s ' + tag(v).id + ': frames +' + (frames(v) - w.frames) +
                  ', appends +' + (appendsOf(r) - w.appends) + ', buf ' + ranges(v));
         }
       }

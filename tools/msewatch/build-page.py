@@ -68,12 +68,23 @@ function entry(codec, w, h){
   return box(codec, p);
 }
 function init(codec, w, h){
-  var ftyp = box('ftyp', new Uint8Array([105,115,111,109, 0,0,2,0, 105,115,111,109]));
+  /* `avc1` in the compatible brands, the way TikTok's audio init carries it: the
+     probe must not read a sample entry out of the brand list. */
+  var ftyp = box('ftyp', new Uint8Array([105,115,111,109, 0,0,2,0, 105,115,111,109, 97,118,99,49]));
   return cat(ftyp, box('free', entry(codec, w, h)));
 }
 
 var real = document.getElementById('real');
 ['pause','play','load'].forEach(function(f){ real[f] = function(){ real.__touched = f; }; });
+
+/* A second element on a plain URL, the shape of the stalls build-c05e9b9 could not
+   name: it must be named, its source written as a URL, and left alone. */
+var plain = document.createElement('video');
+plain.id = 'plain';
+plain.preload = 'auto';
+['pause','play','load'].forEach(function(f){ plain[f] = function(){ plain.__touched = f; }; });
+document.body.appendChild(plain);
+plain.src = 'https://example.invalid/video/reel.mp4';
 
 var ms = new MediaSource();
 var url = URL.createObjectURL(ms);
@@ -150,11 +161,16 @@ function check(){
     fail('changeType not reported');
   }
   if (!has(/^asks mse video\\/mp4; codecs="hvc1.1.6.L93.B0" -> (yes|no)$/)) { fail('isTypeSupported question not reported'); }
-  if (!has(/^stall ms1 t 1.5 buf .* \\| frames 40 \\| video avc1 1280x720 init 2 last /)) { fail('stall not reported with its feed'); }
-  if (!has(/^moving again after \\d+\\.\\ds \\(on its own\\), frames \\+0, appends \\+0$/)) { fail('end of stall not reported'); }
+  if (!has(/^stall v\\d ms1 t 1.5 buf .* \\| frames 40 \\| video avc1 1280x720 init 2 last /)) { fail('stall not reported with its feed'); }
+  if (!has(/^moving again v\\d after \\d+\\.\\ds \\(on its own\\), frames \\+0, appends \\+0$/)) { fail('end of stall not reported'); }
+  if (has(/avc1 0x0/)) { fail('the ftyp brand list was read as a sample entry'); }
+  if (!has(/^v\\d loadstart ms1, preload \\w+, (on|off) screen$/)) { fail('MSE element loadstart not reported with its source'); }
+  if (!has(/^v\\d loadstart url example\\.invalid\\/video, preload auto, (on|off) screen$/)) { fail('plain-URL element loadstart not reported'); }
+  if (!has(/^with v\\d paused rs\\d ns\\d url example\\.invalid\\/video, (on|off) screen|no box, last \\w+ \\d+\\.\\ds ago$/)) { fail('stall does not list the plain-URL element'); }
+  if (!has(/^with v\\d paused rs\\d ns\\d ms1, /)) { fail('stall does not list the other MSE element'); }
   if (has(/^stall/) && mse.filter(function(l){ return /^stall/.test(l); }).length !== 1) { fail('one stall reported more than once'); }
 
-  [real, fake].forEach(function(v){ if (v.__touched) { fail('probe called ' + v.__touched + ' on #' + (v.id || 'fake')); } });
+  [real, fake, plain].forEach(function(v){ if (v.__touched) { fail('probe called ' + v.__touched + ' on #' + (v.id || 'fake')); } });
 
   document.getElementById('out').innerHTML =
     '<div id=RESULTS>RESULTS\\n' + (fails.length ? fails.join('\\n') : 'ok') +

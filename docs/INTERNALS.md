@@ -2138,6 +2138,65 @@ How to read it: an `init #2` just before every `stall` is the switch. Only
 `init #1`, on `hvc1`, is the format. Frames counting up through a stall with
 neither is the engine decoding and not drawing, which is below the page.
 
+### Two videos, one decoder
+
+His report from `build-c05e9b9` answered neither question. Every source was
+H.264 (`avc1.64001f`) with HE-AAC v2 audio (`mp4a.40.29`), one `init #1` each,
+no `init #2` anywhere; HEVC was asked about once and never sent. The whole
+reel was buffered before it froze (`buf 0.1-29.5`, `0.1-36.7`), nothing was
+appended during the freeze, and every stall ended `after a pause`:
+
+```
+16:48:56  mse: ms1 add video video/mp4; codecs="avc1.64001f"
+16:49:00  mse: stall - t 5.6 buf 0.1-29.5 | frames 0 | not an MSE source we saw made
+16:49:05  mse: still stalled 8s: frames +0, appends +0, buf 0.1-29.5
+16:49:15  mse: moving again after 18.3s (after a pause), frames +0, appends +0
+```
+
+The native output did have something this time, read against the trail (its
+clock runs about 1.5 s behind). Each freeze lines up with a **second**
+`GstTZAppSrc` pipeline opening about three seconds after the reel's first one,
+while a video was already playing (`playing=1 of 2`): 16:48:58/59,
+16:50:15.8, 16:51:08.0. The pipelines that play are followed by
+`gst_video_overlay_set_render_rectangle` lines; the one that opens at the
+freeze is not. Pause and play opens a fresh pipeline (16:50:25.1, 16:51:14.6),
+and that one plays. So the earlier reading of one pipeline per reel, one at a
+time, was the cut-off output talking.
+
+The reading this points at: TikTok readies the next reel in a second `<video>`
+while the current one plays, and the TV has one hardware decoder and one
+overlay for the two of them. The newcomer takes it and the reel on screen stops
+until a pause/play takes it back. It fits the two to four seconds (when the
+next reel is readied, not a random point), YouTube being fine (one element),
+and his newer symptom: after a restart the page sits on its spinner until he
+pauses and plays the video. It is a reading of timestamps, not yet a fact.
+Two of the three stalls were on an element whose source the probe never saw
+made, and one of those resumed onto an `omxvideodec` + `fakesink` pipeline,
+which is the engine's own demuxer playing a plain URL, not MSE.
+
+Two things in that probe were wrong and are fixed with the next one.
+`format()` started its scan at byte 8 and found `avc1` in the ftyp's list of
+compatible brands, so every init read `avc1 0x0`, the audio one included; it
+now starts past the ftyp and wants a plausible box size in front of the type
+(`tools/msewatch/run.sh` now carries an `avc1` brand and fails the old code).
+And `totalVideoFrames` is 0 on this engine whether the video moves or not, so
+`frames` says nothing here.
+
+The next build is diagnostics only and asks whether it really is two videos.
+`NuiMseWatch` names every `<video>` (`v1`, `v2`, ...), writes down each one's
+`loadstart` (with where its media comes from: one of our MediaSources, a blob
+we never saw made, a `srcObject`, which is how a worker's MediaSource arrives,
+or a plain URL), `loadedmetadata`, `playing`, `waiting`, `pause` and
+`emptied`, each with whether it is on screen, and follows a `stall` with one
+`with` line per other element: playing or paused, `readyState`,
+`networkState`, its source, on or off screen and its last event and how long
+ago. Another element's `loadstart`/`loadedmetadata` a moment before every
+stall is the two-videos reading, and the fix is to keep the reel that is not on
+screen from opening a pipeline. Nothing stirring next to a stall rules it out.
+Pausing and playing the frozen reel automatically was considered and set
+aside: it recovers after the freeze rather than preventing it, and he would
+still see every reel stop.
+
 ## What the NUI build never asked the engine for
 
 The two builds share `src/common` and nothing else, and everything the ElmSharp
@@ -3008,12 +3067,14 @@ the one its report has to come from. The state is:
   cleared his session. Shipped in `build-7e24138`. His report from it: every
   reel freezes `rs4 stuck` a few seconds in with data buffered, YouTube
   through the same proxy is fine, so it is the player and not the proxy (see
-  *Reels freeze with the data there*). The MSE probe that asks whether it is
-  a quality switch or the HEVC format shipped in `build-c05e9b9`.
-  **Waiting on:** his report from that build, after a few reels have frozen.
-  `init #2` before each `stall` means keep the player on one rendition; `hvc1`
-  with only `init #1` means stop offering HEVC. Either is a change to what the
-  page is told, so which one ships is Patrick's call.
+  *Reels freeze with the data there*). The MSE probe from `build-c05e9b9`
+  ruled out a quality switch and HEVC; every freeze lines up with a second
+  hardware pipeline opening while a reel plays (see *Two videos, one
+  decoder*). The next build names every `<video>` and lists the others at a
+  stall. **Waiting on:** his report from it, after a few reels have frozen.
+  Another element's `loadstart` just before each `stall` means two videos on
+  one decoder, and the fix (keeping the off-screen reel from opening a
+  pipeline) changes the page, so it is Patrick's call.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
