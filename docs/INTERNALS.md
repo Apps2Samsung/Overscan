@@ -558,13 +558,14 @@ next one of these arrives:
   #17.
   **Issue #105 (2026-10-01)**, an AU7200 on Tizen 6.0, is the same trail again. The
   reply gave the expected answer and offered a diagnostics build; whatever the
-  reporter says, `Overscan6.csproj` now carries the probe in `res/`, `bin/` and
-  `lib/` (the object referenced from `Overscan5/res/`, not copied), so a Tizen 6 set
+  reporter says, `Overscan6.csproj` carries the probe from `build-3996334` on, in
+  `res/`, `bin/` and `lib/` (the object referenced from `Overscan5/res/`, not copied), so a Tizen 6 set
   answers the exec-mapping question itself. Read its `own native :` line exactly as
   the Q80's: refused in every location is the same wall, and closes it like #95; any
   location that maps executable reopens the stub route, whose next question is which
   symbols `libchromium-impl.so` imports from `libprivileged-service-client.so`.
-- **The report names its build now.** Both reports open with `build     :`, the
+- **The report names its build from `build-3996334` on.** Both reports open with
+  `build     :`, the
   release tag CI stamps into the assembly (`Directory.Build.props`,
   `-p:OverscanBuildTag`, read back by `BuildInfo`). A PR build says `pr-<n>` and
   anything built without the flag says `local build`. Until #105 the asset a
