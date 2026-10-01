@@ -2121,7 +2121,7 @@ Two candidates are left, and they need different fixes:
 - **The format.** TikTok sends HEVC (`bytevc1`) to a browser that says it can
   play it. The fix would be to stop saying yes to HEVC, so it sends H.264.
 
-`NuiMseWatch` is the build that asks which. It wraps `addSourceBuffer`,
+`NuiMseWatch` (`build-c05e9b9`) is the build that asks which. It wraps `addSourceBuffer`,
 `appendBuffer`, `changeType`, `MediaSource.isTypeSupported` and
 `URL.createObjectURL`, all strictly pass-through (the original's return value
 and exceptions reach the page unchanged; `tools/msewatch/run.sh` holds it to
@@ -3009,7 +3009,7 @@ the one its report has to come from. The state is:
   reel freezes `rs4 stuck` a few seconds in with data buffered, YouTube
   through the same proxy is fine, so it is the player and not the proxy (see
   *Reels freeze with the data there*). The MSE probe that asks whether it is
-  a quality switch or the HEVC format ships next.
+  a quality switch or the HEVC format shipped in `build-c05e9b9`.
   **Waiting on:** his report from that build, after a few reels have frozen.
   `init #2` before each `stall` means keep the player on one rendition; `hvc1`
   with only `init #1` means stop offering HEVC. Either is a change to what the
