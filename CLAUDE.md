@@ -45,6 +45,10 @@ rejects those TFMs outright. The 3.1 SDK needs OpenSSL 1.1, which is kept under
 `~/.local/openssl11` and fed in by `build.sh`. The header of that script has the
 detail.
 
+Every report opens with `build     :`, the release tag CI passes as
+`-p:OverscanBuildTag=build-<sha7>` (`Directory.Build.props` puts it in the
+assembly, `src/common/BuildInfo.cs` reads it). A local build says `local build`.
+
 `OverscanProbe` is not in `build.sh` (CI builds it). To check it compiles:
 
 ```sh

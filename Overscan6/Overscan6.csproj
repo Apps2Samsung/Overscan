@@ -26,6 +26,28 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      The native probe, in the same three places as Overscan5 (see the comments
+      there and NativeProbe): res/, bin/ beside Overscan.dll, and lib/. Issue #95
+      was closed on the Q80's answer because this package did not carry it, and
+      issue #105 is the same wall on another 6.0 set; this lets a Tizen 6 set
+      answer for itself. The object is Overscan5's, referenced rather than copied,
+      so there is one committed .so; res/ is therefore placed through the
+      packaging task like lib/, since this project has no res/ folder of its own.
+    -->
+    <None Include="../Overscan5/res/libovprobe.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>libovprobe.so</Link>
+    </None>
+    <TizenTpkUserIncludeFiles Include="../Overscan5/res/libovprobe.so">
+      <TizenTpkSubDir>res</TizenTpkSubDir>
+    </TizenTpkUserIncludeFiles>
+    <TizenTpkUserIncludeFiles Include="../Overscan5/res/libovprobe.so">
+      <TizenTpkSubDir>lib</TizenTpkSubDir>
+    </TizenTpkUserIncludeFiles>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Tizen.NET.Sdk" Version="1.1.9" />
     <PackageReference Include="Tizen.NET" Version="6.0.0.14995" />
   </ItemGroup>

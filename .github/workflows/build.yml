@@ -33,9 +33,9 @@ on:
   push:
     tags: ['v*']
     branches: [main]
-    paths: ['src/**', 'Overscan/**', 'Overscan4/**', 'Overscan5/**', 'Overscan6/**', 'OverscanNui/**', 'OverscanProbe/**', '.github/workflows/build.yml']
+    paths: ['src/**', 'Overscan/**', 'Overscan4/**', 'Overscan5/**', 'Overscan6/**', 'OverscanNui/**', 'OverscanProbe/**', 'Directory.Build.props', '.github/workflows/build.yml']
   pull_request:
-    paths: ['src/**', 'Overscan/**', 'Overscan4/**', 'Overscan5/**', 'Overscan6/**', 'OverscanNui/**', 'OverscanProbe/**']
+    paths: ['src/**', 'Overscan/**', 'Overscan4/**', 'Overscan5/**', 'Overscan6/**', 'OverscanNui/**', 'OverscanProbe/**', 'Directory.Build.props']
 
 permissions:
   contents: write
@@ -73,7 +73,14 @@ jobs:
         run: curl -sSL https://raw.githubusercontent.com/Samsung/Tizen.NET/main/workload/scripts/workload-install.sh | bash
 
       - name: Build
-        run: dotnet build ${{ matrix.project }} -c Release
+        # The tag the release job will give this commit, so a diagnostics report
+        # names the release it came from (src/common/BuildInfo.cs). A PR build is
+        # not a release and says which PR it was.
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then tag="pr-${{ github.event.number }}"
+          elif [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then tag="${GITHUB_REF#refs/tags/}"
+          else tag="build-${GITHUB_SHA::7}"; fi
+          dotnet build ${{ matrix.project }} -c Release -p:OverscanBuildTag="$tag"
 
       - name: Collect .tpk
         run: |
@@ -122,7 +129,14 @@ jobs:
           dotnet-version: '3.1.x'
 
       - name: Build (Tizen.NET.Sdk packages during build)
-        run: dotnet build ${{ matrix.project }} -c Debug
+        # The tag the release job will give this commit, so a diagnostics report
+        # names the release it came from (src/common/BuildInfo.cs). A PR build is
+        # not a release and says which PR it was.
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then tag="pr-${{ github.event.number }}"
+          elif [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then tag="${GITHUB_REF#refs/tags/}"
+          else tag="build-${GITHUB_SHA::7}"; fi
+          dotnet build ${{ matrix.project }} -c Debug -p:OverscanBuildTag="$tag"
 
       - name: Collect .tpk
         run: |

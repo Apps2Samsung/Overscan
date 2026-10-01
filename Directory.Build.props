@@ -1,0 +1,19 @@
+<Project>
+
+  <!--
+    The release a diagnostics report came from (see src/common/BuildInfo.cs).
+    CI passes -p:OverscanBuildTag=build-<sha7>, the release job's own name for the
+    release; anything built without it says so.
+  -->
+  <PropertyGroup>
+    <OverscanBuildTag Condition="'$(OverscanBuildTag)' == ''">local build</OverscanBuildTag>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>OverscanBuild</_Parameter1>
+      <_Parameter2>$(OverscanBuildTag)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>
