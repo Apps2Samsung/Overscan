@@ -513,17 +513,7 @@ namespace Overscan
                     NoteShowing(SafeUrl());
                     ApplySiteRules(SafeUrl(), true);
 
-                    // The engine answered, so the view is not the dead kind.
-                    _loadAskedAt = DateTime.MinValue;
-                    if (_blankRecoveries > 0)
-                    {
-                        // Kept, not cleared: which rung got this view loading again
-                        // is the whole answer issue #20 is waiting for, and it would
-                        // otherwise be erased by the load that proves it worked.
-                        _blankState = "recovered after " + _blankRecoveries +
-                                      (_blankRecoveries == 1 ? " attempt" : " attempts");
-                        _blankRecoveries = 0;
-                    }
+                    EngineAnswered();
                     ShowChrome();
 
                     // Whatever needed a debugging port, this is not it any more.
@@ -538,6 +528,10 @@ namespace Overscan
 
                 _web.PageLoadFinished += (s, e) =>
                 {
+                    // Issue #100: a finish whose start was never reported still
+                    // means the view is alive. Without this the watchdog fired six
+                    // seconds after a page that had loaded.
+                    EngineAnswered();
                     _loading = false;
                     _pageEverLoaded = true;
                     _progress.Hide();
@@ -562,9 +556,19 @@ namespace Overscan
 
                 _web.PageLoadError += (s, e) =>
                 {
+                    // A load that failed is a view that tried. Issue #100: a proxy
+                    // refusing the connection raised this, the watchdog then read
+                    // the silence after it as a dead view, rebuilt it and cleared
+                    // the session, so every proxy hiccup signed the reporter out.
+                    EngineAnswered();
                     _loading = false;
                     _progress.Hide();
-                    Breadcrumbs.Drop("load error on " + SafeUrl());
+                    string why = DescribeLoadError(e);
+                    Breadcrumbs.Drop("load error on " + why);
+                    if (_proxyOn)
+                    {
+                        Flash("Could not load this page through the proxy. Is the proxy answering?");
+                    }
                     UpdateStatus();
                 };
 
@@ -1041,6 +1045,58 @@ namespace Overscan
             }
 
             RetryLastLoad();
+        }
+
+        /// <summary>
+        /// The engine has said something about the load it was given, so the view
+        /// is not the dead kind <see cref="CheckSomethingLoaded"/> looks for.
+        /// Started, finished and failed all count: the ladder exists for a view
+        /// that says nothing at all.
+        /// </summary>
+        private void EngineAnswered()
+        {
+            _loadAskedAt = DateTime.MinValue;
+            if (_blankRecoveries > 0)
+            {
+                // Kept, not cleared: which rung got this view loading again
+                // is the whole answer issue #20 is waiting for, and it would
+                // otherwise be erased by the load that proves it worked.
+                _blankState = "recovered after " + _blankRecoveries +
+                              (_blankRecoveries == 1 ? " attempt" : " attempts");
+                _blankRecoveries = 0;
+            }
+        }
+
+        /// <summary>
+        /// The failed address, the engine's reason and whether the proxy was in
+        /// the way, for the trail. The view's own URL is often empty by then
+        /// (issue #100's trail was a column of bare "load error on"), so the
+        /// error's URL comes first and the one we asked for after it.
+        /// </summary>
+        private string DescribeLoadError(WebViewPageLoadErrorEventArgs e)
+        {
+            string url = null, code = null, description = null;
+            try
+            {
+                WebPageLoadError error = e == null ? null : e.PageLoadError;
+                if (error != null)
+                {
+                    url = error.Url;
+                    code = error.Code.ToString();
+                    description = error.Description;
+                }
+            }
+            catch (Exception ex)
+            {
+                description = "(error unreadable: " + ex.Message + ")";
+            }
+
+            if (string.IsNullOrEmpty(url)) { url = SafeUrl(); }
+            if (string.IsNullOrEmpty(url)) { url = _loadAskedFor ?? "(start screen)"; }
+
+            return url + ": " + (code ?? "no code") +
+                   (string.IsNullOrEmpty(description) ? string.Empty : ", " + description) +
+                   (_proxyOn ? "  (via proxy)" : string.Empty);
         }
 
         /// <summary>Asks again for whatever the dead view was given, home included.</summary>
