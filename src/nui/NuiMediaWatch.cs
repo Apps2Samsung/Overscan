@@ -120,6 +120,14 @@ namespace Overscan
                 return;
             }
 
+            // The MSE probe's (issue #100), kept out of LastCensus for the same
+            // reason as the cap's: the `media :` line is the count.
+            if (text.StartsWith(NuiMseWatch.Prefix, StringComparison.Ordinal))
+            {
+                NuiMseWatch.Note(Trim(text.Substring(NuiMseWatch.Prefix.Length)));
+                return;
+            }
+
             // Errors only. A page's ordinary logging is not evidence about anything
             // and would bury what is.
             if (level == null || level.IndexOf("Error", StringComparison.OrdinalIgnoreCase) < 0)
