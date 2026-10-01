@@ -2953,7 +2953,8 @@ the one its report has to come from. The state is:
   data (see *A failed load is an answer, not silence* above); that is the
   proxy's throughput, and nothing in the app reaches it. What the app did get
   wrong is fixed: a load the proxy refused set off the blank-view ladder, which
-  cleared his session. **Waiting on:** a report from the next build, where the
+  cleared his session. Shipped in `build-7e24138`.
+  **Waiting on:** a report from that build, where the
   census says `starved`/`stuck` and a refused load names its error code, plus
   whether a video on another site through the same proxy stalls the same way.
 
