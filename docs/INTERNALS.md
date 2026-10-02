@@ -1271,25 +1271,85 @@ screen showed on the second open: a failure screen that never came is the second
 finding above, and the no-provider page is then the only page this set will ever
 serve, which the reporter's instructions have to say.
 
-**State of #105 (2026-10-02, evening):** the ladder's answer is in and is the good
-one; `build-283f3e9` shipped the census and the AU7200 never reached it;
-`build-e1a648d` takes the census ahead of the engine and is the one the stub depends
-on. The reply quotes that tag. Nothing here changes the Q80's close: that set refused the
-mapping the AU7200 allows.
+**State of #105 (2026-10-02, late evening):** the ladder's answer is in and is the
+good one; `build-283f3e9` shipped the census and the AU7200 never reached it;
+`build-e1a648d` takes the census ahead of the engine, and its page (below) shows the
+census running on this set, nineteen libraries in, with the answer not yet reached.
+The next page needs no install: a relaunch, left alone until the summary screen, and
+the `previous run` block carries the finished count. Nothing here changes the Q80's
+close: that set refused the mapping the AU7200 allows.
 
-**The page sent for it (2026-10-02, 13:49 UTC) is not from `build-e1a648d`.** It is
+**The page sent for it (2026-10-02, 13:49 UTC) was not from `build-e1a648d`.** It was
 the attachment from the issue's first post, byte for byte (`tv_logs.txt`, 102 lines,
 same md5): no `build :` line, no `engine imports:` line, `native probe: not shipped in
 this package` — which only a build older than `build-3996334` says — and its
-`previous run` is the 14:59:27 launch the issue opened with. The words beside it, that
-the summary screen came up on the second open "for the first time", may well describe
-`build-e1a648d`; if they do, that is the second finding above going the other way, and
-the page he meant to send is the one that says so. A trail carries no date, so a
+`previous run` the 14:59:27 launch the issue opened with. A trail carries no date, so a
 re-posted file is told apart by its header: a page with `build :` on it is from
 `build-3996334` or later, and a page without one predates every build this issue has
-been given. The reply asks for the page again and names the asset to check the install
-against (`Overscan-tizen6.tpk` from `build-e1a648d`, 137,428 bytes). *How to read the
-next report*, above, still stands unchanged.
+been given. The reply asked for the page again and named the asset to check the
+install against (`Overscan-tizen6.tpk` from `build-e1a648d`, 137,428 bytes); the right
+one came an hour and a half later.
+
+**The `build-e1a648d` page (2026-10-02, 15:29 UTC) is a snapshot taken inside the
+census.** Its header: `build : build-e1a648d`, `engine : still starting`, `engine
+imports: reading /usr/share/chromium-efl/lib/libchromium-impl.so`, `trail write: 85
+lines on disk`. The TV's clock is three hours ahead of UTC, so its two launches,
+16:40:35 and 16:41:09, are the pair the 13:49 comment described: the words were right
+and the file was wrong. What it says:
+
+- **The first launch died where every first launch on this set has died.** No ledger
+  yet, so nothing went ahead of the engine: nine EFL subsystems up, `ewk_init` 0
+  twice, `libprivileged-service-client.so: Operation not permitted`, `own code: yes`,
+  `ENGINE FAILURE`, `native probe: starting`, `failure screen drawn — OnCreate
+  returns, the main loop starts`, and one second later `native probe: anonymous
+  PROT_EXEC control` is the last line. That is `build-283f3e9`'s first launch and the
+  Q80's: about a second behind `ENGINE FAILURE`, indifferent to what the probe is on.
+- **The second launch reached the UI, walked, and took the census — the second finding
+  of `build-283f3e9` going the other way.** The ledger said `launch 2`, and that the
+  anon-exec control had been asked by a launch that ended before it answered, so it
+  was asked once more and came back `ok` (the first time that rule has run on a set).
+  The walk went ahead of the engine and answered every rung of all five locations
+  again in 217 ms — same labels, same mounts, verdict `res/` — then `engine imports:
+  the engine failed on an earlier launch here — taking the census now, ahead of the
+  engine`, `the engine waits for the census (up to 60 s)`, `reading
+  …/libchromium-impl.so`, `ELF32 libchromium-impl.so: 115 needed, 2520 imports (5
+  weak)`. Whatever stopped `build-283f3e9`'s second launch inside
+  `Elementary.Initialize()` is not a property of second launches on this set, and the
+  instruction above that the no-provider page is the only page this set serves is
+  withdrawn: this is a full page, served by a launch that reached the UI.
+- **The census was nineteen libraries in when the page was fetched.** The stub block
+  lists all 115 `needed:` sonames — `libprivileged-service-client.so` among them,
+  **unversioned**, so that is the exact soname a stub carries — then `loaded:` for the
+  first nineteen in DT_NEEDED order, `libecore.so.1` through `libtts.so`, none
+  refused, and stops; the twentieth, `libcapi-media-player.so.0`, was inside its
+  dlopen. Nothing on the page says it was parked: `loaded:` lines are page-only
+  (`Note`), the `this run` block is `DiagLog`'s 60-line tail and ends on the counts
+  line, and a refusal or a deadline miss would be a `refused` line in the trail, which
+  is absent. The page was fetched within the first seconds of the second launch, and
+  the summary screen the reporter saw came up afterwards, when the census finished or
+  the 60 s budget ran out, whichever was first.
+
+So the question the build asks is still open, and the reporter can answer it
+**without another install**: the census's `refused`, `N unresolved` and `import:`
+lines are trail lines, and the full trail of a launch is the next launch's `previous
+run` block. The ask is one relaunch, left alone through the loading screen until the
+summary screen comes up — up to a minute, because the engine is waiting for the count,
+and backing out during it ends the count with the launch — then `:8081` once and the
+whole page. How to read it is unchanged from above, with what this page adds:
+
+- `previous run` has `engine imports: census finished after N ms — on to the engine`,
+  the engine lines, and the census's `N unresolved` line with names — the answer, read
+  by the list above.
+- `previous run` has `still counting after 60 s — on to the engine anyway`, the
+  engine's failure, and from the census's thread `refused X — DID NOT RETURN` lines or
+  a late `N unresolved` — a slow or a parking set. If the launch ended before the count
+  did, the next build carries the count across launches in the ledger, the way the
+  walk is carried, so that the budgets add up instead of starting over.
+- `previous run` ends inside the census with neither — no `still counting`, no
+  `finished`, no engine line behind the counts line — the launch ended inside a
+  dlopen, under a minute in. The census does not drop a breadcrumb before each dlopen
+  the way the walk does before each rung, so that page could not say which library;
+  the next build adds that line, and that is the one change it makes.
 
 ### `ELM_ACCEL` has to be set before the window exists
 
