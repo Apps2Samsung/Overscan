@@ -1277,6 +1277,20 @@ one; `build-283f3e9` shipped the census and the AU7200 never reached it;
 on. The reply quotes that tag. Nothing here changes the Q80's close: that set refused the
 mapping the AU7200 allows.
 
+**The page sent for it (2026-10-02, 13:49 UTC) is not from `build-e1a648d`.** It is
+the attachment from the issue's first post, byte for byte (`tv_logs.txt`, 102 lines,
+same md5): no `build :` line, no `engine imports:` line, `native probe: not shipped in
+this package` — which only a build older than `build-3996334` says — and its
+`previous run` is the 14:59:27 launch the issue opened with. The words beside it, that
+the summary screen came up on the second open "for the first time", may well describe
+`build-e1a648d`; if they do, that is the second finding above going the other way, and
+the page he meant to send is the one that says so. A trail carries no date, so a
+re-posted file is told apart by its header: a page with `build :` on it is from
+`build-3996334` or later, and a page without one predates every build this issue has
+been given. The reply asks for the page again and names the asset to check the install
+against (`Overscan-tizen6.tpk` from `build-e1a648d`, 137,428 bytes). *How to read the
+next report*, above, still stands unchanged.
+
 ### `ELM_ACCEL` has to be set before the window exists
 
 `libchromium-ewk.so` has a library constructor whose entire body is
@@ -3337,14 +3351,23 @@ the one its report has to come from. The state is:
   what a live stream reads, and also what an MSE clip reads until its page sets
   a duration — `inf` with a playhead that never loops back is live) and
   `, live page` on `loadstart` and `playing` while the address is `/@user/live`.
-  **Waiting on:** his report from that build with a freeze on it. `live page` or
-  `dur inf` on the re-sourced element is the live stream itself stalling, and a
-  live stream cannot buffer ahead: that is the proxy's throughput, the hold is
-  doing its job, and the answer is that live streams through that proxy will
-  stall. A finite `dur` on a `/video/` page with a `hold` a few seconds before is
-  TikTok loading into the on-screen element because the held one was not ready
-  — the hold would then have to release when the element on screen is emptied,
-  which is the next fix and a `tools/msehold` case before it is one.
+  **His second report from it (2026-10-02, evening) says the live-stream freeze
+  does not come back:** it happened "only the first two times after updating" and
+  then stopped. Its trail is the markers working on a live stream and nothing
+  stalling: at 19:22:32 the hold released v3 on `play()` (`release v3 after 8.5s`),
+  TikTok opened `ms22` on it with HEVC (`hev1.1.6.L93.B0`, 640x1280) and an audio
+  track, `loadedmetadata … dur inf, on screen` a second later, `v3 playing t 0.2`
+  the second after that, and the stream played for the twenty seconds until he
+  closed the app, with `mse stall : (no stall seen yet)` in the header. So a live
+  stream through that proxy does start and does play under the hold, and the
+  thirteen-second stall on the earlier trail has no second example. The two
+  freezes right after the update left no trail and are not worth a build: the
+  likeliest shape is the first launches after an install, with TikTok's own
+  stored state from before the hold still in play. Nothing is left to ask on
+  #100: the one-video hold from `build-644c119` is the fix, confirmed on normal
+  reels and on a live stream, and the issue closes on that report. If a freeze
+  near a live stream ever does come back, the `dur`/`live page` markers from
+  `build-e1a648d` are already in the probe and the reading above still applies.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
