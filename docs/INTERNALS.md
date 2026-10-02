@@ -1272,9 +1272,9 @@ finding above, and the no-provider page is then the only page this set will ever
 serve, which the reporter's instructions have to say.
 
 **State of #105 (2026-10-02, evening):** the ladder's answer is in and is the good
-one; `build-283f3e9` shipped the census and the AU7200 never reached it; the build
-after it takes the census ahead of the engine and is the one the stub depends on. The
-reply quotes that tag. Nothing here changes the Q80's close: that set refused the
+one; `build-283f3e9` shipped the census and the AU7200 never reached it;
+`build-e1a648d` takes the census ahead of the engine and is the one the stub depends
+on. The reply quotes that tag. Nothing here changes the Q80's close: that set refused the
 mapping the AU7200 allows.
 
 ### `ELM_ACCEL` has to be set before the window exists
@@ -3332,8 +3332,8 @@ the one its report has to come from. The state is:
   `pause` or `play` but `NuiVideoCap`, and it ran zero times on both trails.
   Whether the re-sourced v2 was the live stream, or a reel TikTok loaded cold into
   the element on screen because the held one was not ready, the trail cannot say:
-  it had no duration and no address. The build after `build-644c119` adds both
-  to the probe's lines, read-only: `loadedmetadata 768x576, dur inf` (`inf` is
+  it had no duration and no address. `build-e1a648d` adds both to the probe's
+  lines, read-only: `loadedmetadata 768x576, dur inf` (`inf` is
   what a live stream reads, and also what an MSE clip reads until its page sets
   a duration — `inf` with a playhead that never loops back is live) and
   `, live page` on `loadstart` and `playing` while the address is `/@user/live`.
