@@ -138,9 +138,14 @@ Object.defineProperty(fake, 'readyState', {get:function(){ return 4; }});
 Object.defineProperty(fake, 'currentTime', {get:function(){ return T; }, set:function(){ fake.__touched = 'seek'; }});
 Object.defineProperty(fake, 'src', {get:function(){ return url; }});
 Object.defineProperty(fake, 'currentSrc', {get:function(){ return url; }});
+Object.defineProperty(fake, 'duration', {get:function(){ return Infinity; }});
 fake.getVideoPlaybackQuality = function(){ return {totalVideoFrames: 40, droppedVideoFrames: 0}; };
 ['pause','play','load'].forEach(function(f){ fake[f] = function(){ fake.__touched = f; }; });
 document.body.appendChild(fake);
+/* Metadata the way a live stream reports it — no finite duration. The real MSE
+   element above never reaches metadata (its segments are shells), so this is the
+   one loadedmetadata the run has, and the probe has to read the duration off it. */
+setTimeout(function(){ fake.dispatchEvent(new Event('loadedmetadata')); }, 1500);
 setTimeout(function(){ setInterval(function(){ T += 0.25; }, 250); }, 5000);
 
 function has(re){ return mse.some(function(l){ return re.test(l); }); }
@@ -165,6 +170,8 @@ function check(){
   if (!has(/^moving again v\\d after \\d+\\.\\ds \\(on its own\\), frames \\+0, appends \\+0$/)) { fail('end of stall not reported'); }
   if (has(/avc1 0x0/)) { fail('the ftyp brand list was read as a sample entry'); }
   if (!has(/^v\\d loadstart ms1, preload \\w+, (on|off) screen$/)) { fail('MSE element loadstart not reported with its source'); }
+  if (!has(/^v\\d loadedmetadata \\d+x\\d+, dur inf, (on|off) screen$/)) { fail('loadedmetadata not reported with the duration'); }
+  if (has(/live page/)) { fail('a page that is not /live was called one'); }
   if (!has(/^v\\d loadstart url example\\.invalid\\/video, preload auto, (on|off) screen$/)) { fail('plain-URL element loadstart not reported'); }
   if (!has(/^with v\\d paused rs\\d ns\\d url example\\.invalid\\/video, (on|off) screen|no box, last \\w+ \\d+\\.\\ds ago$/)) { fail('stall does not list the plain-URL element'); }
   if (!has(/^with v\\d paused rs\\d ns\\d ms1, /)) { fail('stall does not list the other MSE element'); }

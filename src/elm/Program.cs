@@ -59,6 +59,13 @@ namespace Overscan
                 // Required before any ElmSharp widget is created (the Tizen.WebView
                 // sample in TizenFX does the same). ElmSharp is deprecated from API
                 // 10, so on a newer platform this is a place that can fail.
+                //
+                // Named before it is made, like every call that has ever stopped a
+                // launch. On the AU7200 (issue #105) the second launch of each build
+                // has shown three lines and no UI, on two builds; the last of them is
+                // the preload's, which puts this call next in line, by inference
+                // only. This line makes it the trail's statement rather than ours.
+                Breadcrumbs.Drop("Elementary: initializing");
                 Elementary.Initialize();
                 Elementary.ThemeOverlay();
                 Breadcrumbs.Drop("Elementary initialized");

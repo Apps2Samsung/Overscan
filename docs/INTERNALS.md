@@ -1211,10 +1211,71 @@ reversal later:
   never arrives — the set parks the census like the Q80 parked its calls; the
   previous-run block says which step.
 
-**State of #105 (2026-10-02):** the ladder's answer is in and is the good one; the
-census shipped in `build-283f3e9`, and the reply asking the reporter to run it quotes
-that tag. Nothing here changes the Q80's close:
-that set refused the mapping the AU7200 allows.
+### The census has to go ahead of the engine too
+
+The `build-283f3e9` report (2026-10-02, the same afternoon) has no `engine imports:`
+line on it, and the trail says why. Its previous-run block is the build's first
+launch: the early walk reached its verdict in 248 ms, the engine failed line for line
+as before, and then the post-failure thread **started the walk again** — the ledger's
+answers replayed, `probe: copy libovprobe.so to data/`, `probe: open res/` — and that
+is the launch's last line. No `read header` behind it, no deadline miss five seconds
+later, no `still on the failure screen — +10s` from the heartbeat. The launch was over
+within five seconds of `ENGINE FAILURE`: the Q80's shape (*The ladder has to start*,
+above), on a set that otherwise answers every call we make. The census was queued
+behind that second walk and never reached.
+
+The `this run` block — the second launch, 23 s later — is three lines with no UI:
+`Main entered`, the socket, the engine preload. The `build-3996334` page had the same
+three lines at the same place, fetched minutes after launch both times, so this is not
+a quick reporter: **on this set the second launch of a build stops before or inside
+`Elementary.Initialize()`** and the only page it ever serves is the no-provider page.
+That page had no `build :` line, though the reply had promised one, and nothing of the
+census.
+
+Four things follow and are in the code:
+
+- **A walk behind a verdict asks nothing.** `NativeProbe.Walk` reads the verdict
+  after `Ledger.Open` and returns on it: `native probe: verdict already on the books
+  — …; not walking again`. The repeatable rungs (`open`, `header`, `read`, the copy
+  into `data/`) were re-made on every walk so the rungs behind them had a descriptor;
+  behind a verdict there are no rungs, and on this set the first of them was where
+  the launch ended with the census behind it. `tools/probeladder`'s `resume`, `peek`,
+  `early` and `notearly` hold it; `peek` used to assert the opposite.
+- **The census goes ahead of the engine, on the walk's gate.**
+  `NativeProbe.EngineFailedHere()` is true whenever a ledger exists, which it only
+  does on an install whose engine has failed. `OnCreate` then runs
+  `EngineImports.RunInBackground` after the walk and waits up to 60 s for it
+  (`engine imports: the engine waits for the census (up to 60 s)` … `census finished
+  after N ms — on to the engine`), the way it waits for the walk; every dlopen in it
+  is under its own deadline, and what the bound cuts off still reaches the trail from
+  the census's thread. The lines go to the trail as they are established, because
+  the page that shows them is the *next* launch's. The post-failure call stays for
+  the first failure on an install and finds the census taken on every launch after.
+  `tools/engineimports`'s `background` scenario drives this shape, and found the
+  claim race in the first version of it.
+- **The no-provider page carries `build :`, `engine imports:` and the stub block**,
+  because on this set every page is that page.
+- **`Program.Main` drops `Elementary: initializing` before the call**, so the second
+  launch's three lines become four and name the call they stop in front of.
+
+How to read the next report, in addition to the four readings above: the
+previous-run block should carry, between `OnCreate: UI built` and `EFL subsystems`,
+the walk's verdict (early or already on the books), then `engine imports: the engine
+failed on an earlier launch here — taking the census now, ahead of the engine`,
+`reading /usr/share/chromium-efl/lib/libchromium-impl.so`, the `ELF32 … needed, …
+imports (… weak)` counts line, one `refused` line per library the loader would not
+open, and the `N unresolved` line with up to forty names. A `DID NOT RETURN` on the
+read is the set parking the census; `still counting after 60 s` with lines behind it
+is a slow set, and the lines are still the answer. The reply also asks what the
+screen showed on the second open: a failure screen that never came is the second
+finding above, and the no-provider page is then the only page this set will ever
+serve, which the reporter's instructions have to say.
+
+**State of #105 (2026-10-02, evening):** the ladder's answer is in and is the good
+one; `build-283f3e9` shipped the census and the AU7200 never reached it; the build
+after it takes the census ahead of the engine and is the one the stub depends on. The
+reply quotes that tag. Nothing here changes the Q80's close: that set refused the
+mapping the AU7200 allows.
 
 ### `ELM_ACCEL` has to be set before the window exists
 
@@ -3254,17 +3315,36 @@ the one its report has to come from. The state is:
   three seconds before, paused the whole time. The fix is `NuiMseHold` (see
   *One video at a time*): the next reel's source is held back until TikTok
   plays it, so no second pipeline opens under the one on screen. Menu row to
-  switch it off. Shipped in `build-644c119`. **Waiting on:** his report from
-  that build, after a few reels. The trail answers it in three lines per reel: `hold
-  v2 blob while v1 plays`, then on the swipe `release v2 after Ns (play)`,
-  then the probe's `v2 playing`. Reels that play to the end with that sequence
-  is the fix. A `release` with no `playing` after it, or the next reel sitting
-  on its spinner, is TikTok's player waiting for the preload to be ready
-  before it will swap — the hold would then have to let the attach through and
-  the fallback is the automatic pause/play on the frozen reel, which recovers
-  after a freeze he would still see. Reels still freezing with `held 0` on the
-  `one video :` line is TikTok attaching by a path the hold does not see, and
-  the probe's `loadstart` line (`blob not ours`, `srcObject`) says which.
+  switch it off. Shipped in `build-644c119`. **His report from it (2026-10-02):
+  "if next is normal videos never freeze"**, and the one freeze left comes
+  "sometimes, if the next video is a live stream". Two trails. The one without a
+  freeze has TikTok's swipe as an element swap — `hold v2 blob while v1 plays`,
+  `v1 playing` two seconds later, v1 then playing for three minutes — and never
+  a release, because v1 had been readied before the script was in the page. The
+  one with the freeze has the hold doing exactly what it was built to do (`hold
+  v1 blob while v2 plays` at 17:08:19, `release v1 after 122.6s (play)` at
+  17:10:22, `v1 playing` three seconds after that) and, four seconds after the
+  hold, a path it does not cover: TikTok **emptied the on-screen element and
+  gave it a new source** — `v2 emptied`, `v2 loadstart blob not ours`, a new
+  MediaSource `ms4` at the same 768x576 — and v2 sat `rs0 starved stuck` for
+  thirteen seconds before it played, then paused and resumed every few seconds
+  for two minutes. Those pauses are the page's own: nothing of ours calls
+  `pause` or `play` but `NuiVideoCap`, and it ran zero times on both trails.
+  Whether the re-sourced v2 was the live stream, or a reel TikTok loaded cold into
+  the element on screen because the held one was not ready, the trail cannot say:
+  it had no duration and no address. The build after `build-644c119` adds both
+  to the probe's lines, read-only: `loadedmetadata 768x576, dur inf` (`inf` is
+  what a live stream reads, and also what an MSE clip reads until its page sets
+  a duration — `inf` with a playhead that never loops back is live) and
+  `, live page` on `loadstart` and `playing` while the address is `/@user/live`.
+  **Waiting on:** his report from that build with a freeze on it. `live page` or
+  `dur inf` on the re-sourced element is the live stream itself stalling, and a
+  live stream cannot buffer ahead: that is the proxy's throughput, the hold is
+  doing its job, and the answer is that live streams through that proxy will
+  stall. A finite `dur` on a `/video/` page with a `hold` a few seconds before is
+  TikTok loading into the on-screen element because the held one was not ready
+  — the hold would then have to release when the element on screen is emptied,
+  which is the next fix and a `tools/msehold` case before it is one.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

@@ -421,6 +421,28 @@ namespace Overscan
     } catch (e) { return '?'; }
   }
 
+  /* How long the element says its media is: a number is a clip, `inf` is what a
+     live stream reads — and also what an MSE clip reads until its page sets
+     MediaSource.duration, so `inf` on its own is not live; `inf` with a playhead
+     that never loops back to 0 is. Issue #100's `build-644c119` reports: the one
+     freeze left is said to come with a live stream next in the feed, and nothing
+     on the trail could say which element had the live stream in it. */
+  function dur(v) {
+    try {
+      var d = v.duration;
+      return 'dur ' + (isFinite(d) ? d.toFixed(1) + 's' : 'inf');
+    } catch (e) { return 'dur ?'; }
+  }
+
+  /* TikTok's feed moves the address to /@user/live while a live stream is the
+     item on screen, which is the one plain statement of it there is. Nothing
+     else about the page is read, and nothing when it is not that page. */
+  function where() {
+    try {
+      return /\/live(\/|$)/.test(location.pathname) ? ', live page' : '';
+    } catch (e) { return ''; }
+  }
+
   ['loadstart', 'loadedmetadata', 'playing', 'waiting', 'pause', 'emptied'].forEach(function (type) {
     document.addEventListener(type, function (e) {
       try {
@@ -429,10 +451,10 @@ namespace Overscan
         var g = tag(v);
         g.ev = type;
         g.at = Date.now();
-        var what = type === 'loadstart' ? origin(v) + ', preload ' + v.preload + ', ' + onScreen(v)
-                 : type === 'loadedmetadata' ? v.videoWidth + 'x' + v.videoHeight + ', ' + onScreen(v)
+        var what = type === 'loadstart' ? origin(v) + ', preload ' + v.preload + ', ' + onScreen(v) + where()
+                 : type === 'loadedmetadata' ? v.videoWidth + 'x' + v.videoHeight + ', ' + dur(v) + ', ' + onScreen(v)
                  : type === 'emptied' ? onScreen(v)
-                 : 't ' + v.currentTime.toFixed(1) + ', ' + onScreen(v);
+                 : 't ' + v.currentTime.toFixed(1) + ', ' + onScreen(v) + (type === 'playing' ? where() : '');
         report(g.id + ' ' + type + ' ' + what);
       } catch (_) {}
     }, true);

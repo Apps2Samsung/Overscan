@@ -175,6 +175,7 @@ namespace Overscan
             // ladder is done. Bounded, because a set that stalls every rung would
             // otherwise hold a black screen for four minutes; the ledger carries the
             // rest to the next launch. See NativeProbe.WaitForWalk.
+            bool engineFailedHere = NativeProbe.EngineFailedHere();
             if (NativeProbe.StartEarlyIfUnfinished())
             {
                 const int WalkBudgetMs = 90000;
@@ -185,6 +186,32 @@ namespace Overscan
                 Breadcrumbs.Drop(finished
                     ? "native probe: walk finished after " + walkClock.ElapsedMilliseconds + " ms — on to the engine"
                     : "native probe: still walking after " + (WalkBudgetMs / 1000) + " s — on to the engine anyway");
+            }
+
+            // The second diagnostic allowed in front of the engine, on the same
+            // grounds and the same gate (issue #105). build-283f3e9 took the import
+            // census on the post-failure thread and the AU7200 never got there: the
+            // launch was over within five seconds of ENGINE FAILURE, as every Q80
+            // launch was, and the second launch of the build never reached this
+            // method. On an install whose ledger already records the engine's
+            // failure, the census runs here, after the walk, and the engine waits
+            // for it — bounded, because each of the implementation's hundred-odd
+            // dependencies is a dlopen under its own deadline, and a set that parks
+            // them all would otherwise hold a black screen for minutes. What the
+            // bound cuts off still reaches the trail from the census's own thread.
+            // See EngineImports for what the lines mean.
+            if (engineFailedHere)
+            {
+                const int CensusBudgetMs = 60000;
+                Breadcrumbs.Drop("engine imports: the engine failed on an earlier launch here — taking the census now, ahead of the engine");
+                EngineImports.RunInBackground(null, null);
+                Breadcrumbs.Drop("engine imports: the engine waits for the census (up to " +
+                                 (CensusBudgetMs / 1000) + " s)");
+                var censusClock = System.Diagnostics.Stopwatch.StartNew();
+                bool counted = EngineImports.WaitForCensus(CensusBudgetMs);
+                Breadcrumbs.Drop(counted
+                    ? "engine imports: census finished after " + censusClock.ElapsedMilliseconds + " ms — on to the engine"
+                    : "engine imports: still counting after " + (CensusBudgetMs / 1000) + " s — on to the engine anyway");
             }
 
             // Bringing up chromium-efl is the one step we expect to be able to

@@ -99,10 +99,24 @@ namespace Overscan
                 // The probe's ledger outlives a launch, and the header line is the
                 // one a reporter copies first — so it is here too, on the page they
                 // get when the UI is not up yet.
+                //
+                // The build tag and the import census too (issue #105): on the AU7200
+                // every page has been this one, because the first launch of a build
+                // dies within seconds of the engine failing and the second never
+                // reaches the UI. The `build-283f3e9` reply told the reporter the
+                // page would start with `build :`, and it did not — this page had no
+                // such line — which is a round trip spent on doubt about which
+                // build was installed. What this page cannot show is what the
+                // *current* launch has not yet established; the census it carries
+                // is this launch's if it has run, and the previous run's lines are
+                // in the trail below.
                 return "Overscan — no report provider yet (UI has not started)\n\n" +
+                       "build     : " + BuildInfo.Tag + "\n" +
                        "own native : " + NativeProbe.Summary + "\n" +
+                       "engine imports: " + EngineImports.Summary + "\n" +
                        "trail write: " + Breadcrumbs.Status + "\n\n" +
                        "this run\n" + DiagLog.Dump() +
+                       "\nwhat a stub must provide (the implementation's imports)\n" + EngineImports.Dump() +
                        "\nprevious run (last line is where it died)\n" +
                        Breadcrumbs.Previous +
                        "\nengine stdout/stderr (previous run)\n" +
