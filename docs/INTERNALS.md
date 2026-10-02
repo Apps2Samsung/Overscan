@@ -2208,6 +2208,98 @@ Pausing and playing the frozen reel automatically was considered and set
 aside: it recovers after the freeze rather than preventing it, and he would
 still see every reel stop.
 
+**His report from `build-dccb5ad` (2026-10-01) made it a fact.** Six stalls in
+two minutes of reels, and the same thing in front of every one of them: the
+*other* `<video>` starting to load the next reel three to four seconds earlier,
+reaching `loadedmetadata` one to three seconds earlier, and a new
+`omxtzuhdvideodec` instance in the native output at that moment.
+
+| stall (trail) | frozen | the other element | new decoder (native clock) |
+| --- | --- | --- | --- |
+| 20:28:54 | v1 | v2 loadstart :49, loadedmetadata :52 | dec1 :46, dec2 :52 |
+| 20:29:03 | v2 | v1 loadstart :00, loadedmetadata :01 | dec3 :01 |
+| 20:29:38 | v2 | v1 loadstart :34, loadedmetadata :35 | dec5 :35 |
+| 20:29:46 | v1 | v2 loadstart :43, loadedmetadata :43 | dec6 :43 |
+| 20:30:04 | v2 | v1 loadstart :00, loadedmetadata :01 | dec7 :01 |
+| 20:30:12 | v1 | v2 loadstart :08, loadedmetadata :09 | dec8 :10 |
+
+The `with` line at every stall reads the same way: `with v2 paused rs4 ns2 ms5,
+off screen, last loadedmetadata 2.9s ago`. So the newcomer **does not have to
+play** to take the decoder; it only has to be readied. The reel on screen stops
+while the other element sits paused at `HAVE_ENOUGH_DATA`. Three more things the
+run settles: he never paused and played in it — every `moving again ... (after a
+seeking)` is TikTok reusing the element for the next reel, so each reel played
+two to four seconds, froze, and stayed frozen until he swiped; the format and
+quality-switch readings stay ruled out (all `avc1.64001f`, one `init #1` each,
+the whole reel buffered before the freeze, HEVC asked about and never sent); and
+the zero-size `gst_video_overlay_set_render_rectangle` assertions cluster at the
+same moments, which fits the second pipeline being given the overlay sink for an
+element with no box. The cookie fix held too: the run opens with a `Canceled`
+load through the proxy and nothing clears the session.
+
+### One video at a time
+
+The fix is `NuiMseHold`, and it follows from the one fact above that matters:
+a second pipeline opens when the page **attaches** a MediaSource to a `<video>`.
+Nothing else can happen first — a MediaSource only opens once it is attached, so
+there are no `addSourceBuffer`s and no appends to interfere with before that
+point. So the attach is what is held. While another `<video>` on the page is
+playing, a `blob:` or `srcObject` source set on a paused element is remembered
+instead of applied; the element reads it back as if it were set (TikTok's own
+preloader checks `src`, and its `[Preloader_TT] ... empty src is invalid` is what
+it says when it is not); and the moment the page calls `play()` on that element
+the source is applied for real and the play goes through. Everything after that
+is the page's own sequence — `sourceopen`, its appends, `loadedmetadata`,
+`playing` — on an element that is now the one the viewer is watching. TikTok has
+the whole reel's segments in hand by then (the probe saw every reel fully appended
+within a second or two of `loadstart`), so the cost is a first frame's decode, not
+a download.
+
+What it does **not** hold, and why, is the whole safety of it:
+
+- Nothing while no other video is playing. The first reel, and every
+  single-player site, is untouched. "Playing" is `!paused && !ended` on another
+  `<video>` in the document, which is true from the moment `play()` is called,
+  frame or no frame — exactly when a second pipeline starts to matter.
+- Nothing with the `autoplay` attribute. The engine starts that one without the
+  page ever calling `play()`, so a held source would never be released.
+- Nothing on a plain URL. The evidence is MSE on TikTok; the sites that work
+  today keep doing what they do.
+- A new source set on a held element replaces the hold (`drop ... (src set
+  again)`); the page removing the source drops it (`drop ... (src removed)`);
+  `emptied` ends the element's load cycle, so the next source it is given is a new
+  question. That is how TikTok's two elements alternate: `v2 playing`, `v1
+  emptied`, `v1 loadstart` (held), swipe, `v1 play()` (released).
+- `URL.revokeObjectURL` on a held URL is deferred. The harness's control case
+  showed something worth knowing: chromium itself cannot open a source whose URL
+  is revoked in the same task as the set, with nothing held, so no working page
+  does that. What a working page may do is revoke a tick later, when in the
+  ordinary order the engine has already looked the URL up. Under the hold the
+  lookup has not happened yet, so the deferred revokes go out one task after the
+  released element's `loadstart` (the lookup is in that same task, after the
+  event), or after ten seconds if the load never starts.
+
+`play()` is the release, and a `play` event that did not come through `play()`
+counts too. The element names are the probe's: both scripts take `v1`, `v2`, ...
+from one namer on the window, so `hold v2 blob while v1 plays` and the probe's
+`v2 playing` are about one element whichever script ran first.
+
+It is the one script we inject that changes how a page loads video, so it has a
+switch — *One video at a time on/off* in the menu, on by default, stored as
+`onevideo`, a reload on toggle like the ad block — and a harness,
+`tools/msehold/run.sh`, that lifts the shipping script out of the `.cs` and
+drives it against desktop chromium's real MediaSource: held while another plays,
+applied on `play()`, read back meanwhile, untouched when nothing plays, untouched
+on `autoplay`, dropped when the source goes, the deferred revoke surviving to the
+release, `setAttribute` and `srcObject` held the same way. "Opened" in it means
+chromium fired `sourceopen`, which it only does once the engine has the source.
+The report has a `one video :` line with held, released and dropped counts and
+the last line; the trail has `hold:` lines beside the probe's `mse:` ones.
+
+The one thing it cannot answer off-device is whether TikTok's player tolerates
+its preload waiting. The automatic pause/play that was set aside is the fallback
+if it does not.
+
 ## What the NUI build never asked the engine for
 
 The two builds share `src/common` and nothing else, and everything the ElmSharp
@@ -3081,11 +3173,22 @@ the one its report has to come from. The state is:
   *Reels freeze with the data there*). The MSE probe from `build-c05e9b9`
   ruled out a quality switch and HEVC; every freeze lines up with a second
   hardware pipeline opening while a reel plays (see *Two videos, one
-  decoder*). `build-dccb5ad` names every `<video>` and lists the others at a
-  stall. **Waiting on:** his report from it, after a few reels have frozen.
-  Another element's `loadstart` just before each `stall` means two videos on
-  one decoder, and the fix (keeping the off-screen reel from opening a
-  pipeline) changes the page, so it is Patrick's call.
+  decoder*). `build-dccb5ad` named every `<video>`, and **his report from it
+  made it a fact**: six stalls, six times the other element readied two to
+  three seconds before, paused the whole time. The fix is `NuiMseHold` (see
+  *One video at a time*): the next reel's source is held back until TikTok
+  plays it, so no second pipeline opens under the one on screen. Menu row to
+  switch it off. **Waiting on:** his report from the next build, after a few
+  reels. The trail answers it in three lines per reel: `hold
+  v2 blob while v1 plays`, then on the swipe `release v2 after Ns (play)`,
+  then the probe's `v2 playing`. Reels that play to the end with that sequence
+  is the fix. A `release` with no `playing` after it, or the next reel sitting
+  on its spinner, is TikTok's player waiting for the preload to be ready
+  before it will swap — the hold would then have to let the attach through and
+  the fallback is the automatic pause/play on the frozen reel, which recovers
+  after a freeze he would still see. Reels still freezing with `held 0` on the
+  `one video :` line is TikTok attaching by a path the hold does not see, and
+  the probe's `loadstart` line (`blob not ours`, `srcObject`) says which.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

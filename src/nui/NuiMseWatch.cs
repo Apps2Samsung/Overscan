@@ -376,11 +376,22 @@ namespace Overscan
      stall lists what every other element was doing. Media events do not bubble,
      but they do pass through a capturing listener on the document. */
   var tags = new WeakMap();   /* video -> {id, ev, at} */
-  var nextTag = 1;
+
+  /* The name is shared with NuiMseHold's script through the window, so its
+     `hold v2` and this probe's `v2 playing` are about the same element whichever
+     of the two ran first. */
+  var name = window.__ovsVideoName || (window.__ovsVideoName = (function () {
+    var m = new WeakMap(), n = 1;
+    return function (v) {
+      var g = m.get(v);
+      if (!g) { g = 'v' + (n++); m.set(v, g); }
+      return g;
+    };
+  })());
 
   function tag(v) {
     var g = tags.get(v);
-    if (!g) { g = { id: 'v' + (nextTag++), ev: '', at: 0 }; tags.set(v, g); }
+    if (!g) { g = { id: name(v), ev: '', at: 0 }; tags.set(v, g); }
     return g;
   }
 

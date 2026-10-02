@@ -134,6 +134,26 @@ also holds the per-element half to naming an MSE element and a plain-URL one,
 listing the other elements at a stall, and not reading a sample entry out of
 the ftyp's brand list.
 
+### The one-video harness
+
+Any change to `NuiMseHold` — issue #100's fix, which holds the next reel's
+source back while another video plays and applies it on `play()` — is exercised
+against desktop chromium first:
+
+```sh
+tools/msehold/run.sh
+```
+
+It is the one script we inject that changes how a page loads video, so the
+harness drives real MediaSources on real elements and holds it to the contract:
+held while another `<video>` plays, applied on `play()`, read back as if set
+meanwhile, untouched when nothing plays, untouched on `autoplay`, dropped when
+the page takes the source away, a revoke of a held URL surviving to the release,
+`setAttribute` and `srcObject` held the same way. "Opened" means chromium fired
+`sourceopen`, which it only does once the engine has the source. It also carries
+a control case worth reading: chromium itself cannot open a source revoked in the
+same task as the set, so that is a shape no working page has.
+
 ### The start-page harness
 
 Any change to `Store`, `HomePage` or `StartPage` — what gets saved as a visit or
