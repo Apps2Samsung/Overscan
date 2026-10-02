@@ -1212,8 +1212,8 @@ reversal later:
   previous-run block says which step.
 
 **State of #105 (2026-10-02):** the ladder's answer is in and is the good one; the
-census build is the next thing the reporter is asked to run. A reply quoting its tag
-is drafted and goes out when Patrick says so. Nothing here changes the Q80's close:
+census shipped in `build-283f3e9`, and the reply asking the reporter to run it quotes
+that tag. Nothing here changes the Q80's close:
 that set refused the mapping the AU7200 allows.
 
 ### `ELM_ACCEL` has to be set before the window exists
