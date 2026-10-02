@@ -625,6 +625,18 @@ namespace Overscan
             /// returned. The page was loaded a second after launch, which is a
             /// reasonable thing to do and has now cost two rounds of somebody's evening.
             /// </summary>
+            /// <summary>The verdict on the books, from this launch or an earlier one, or null.</summary>
+            public static string Verdict
+            {
+                get
+                {
+                    lock (Book)
+                    {
+                        return _verdict;
+                    }
+                }
+            }
+
             public static string Progress()
             {
                 lock (Book)
@@ -844,6 +856,10 @@ namespace Overscan
         /// question is queued behind it. They are ledgered too, which is what makes
         /// them collectable at all: a hang on the first location used to eat every
         /// reading behind it, on every launch, forever.
+        ///
+        /// A walk whose verdict is already on the books — from an earlier launch, or
+        /// from the early walk on this one — says so and asks nothing; see the note
+        /// in <see cref="Walk"/>.
         /// </summary>
         public static void Run()
         {
@@ -932,13 +948,7 @@ namespace Overscan
         /// </summary>
         public static bool StartEarlyIfUnfinished()
         {
-            string directory = DataDirectory();
-            if (string.IsNullOrEmpty(directory))
-            {
-                return false;
-            }
-
-            string outcome = Ledger.Standing(Path.Combine(directory, LedgerFile));
+            string outcome = Standing();
             if (!outcome.StartsWith("unfinished", StringComparison.Ordinal))
             {
                 return false;
@@ -948,6 +958,40 @@ namespace Overscan
                   outcome + " — walking it now, ahead of the engine");
             RunInBackground();
             return true;
+        }
+
+        /// <summary>
+        /// Where the ladder stands on this install, read from the ledger and never
+        /// written: "no ledger" (every set this app works on), "finished",
+        /// "unfinished", "unfinished — another build's ledger", or the deadline's
+        /// miss. One small file read, under the deadline.
+        /// </summary>
+        public static string Standing()
+        {
+            string directory = DataDirectory();
+            if (string.IsNullOrEmpty(directory))
+            {
+                return "no ledger";
+            }
+
+            return Ledger.Standing(Path.Combine(directory, LedgerFile));
+        }
+
+        /// <summary>
+        /// Whether the engine has already failed on this install: the ledger only
+        /// ever comes into existence on a launch whose engine had failed, so its
+        /// presence is that record, whatever build wrote it and whether or not the
+        /// walk finished. This is the gate for every diagnostic allowed in front of
+        /// the engine — the walk when it is unfinished, and the import census
+        /// (issue #105) whenever the ledger is there at all — because on an install
+        /// where the books already say the engine fails, a launch spent
+        /// re-establishing that is a launch spent on nothing.
+        /// </summary>
+        public static bool EngineFailedHere()
+        {
+            string outcome = Standing();
+            return string.Equals(outcome, "finished", StringComparison.Ordinal) ||
+                   outcome.StartsWith("unfinished", StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -1012,6 +1056,25 @@ namespace Overscan
                 if (Ledger.Unavailable)
                 {
                     Trace("  probe ledger: none — a fatal step will not be skipped next launch");
+                }
+
+                // A verdict on the books is the answer, and nothing behind this line
+                // can improve on it — so the walk stops here rather than re-asking
+                // the repeatable rungs. The AU7200 (issue #105) showed why that
+                // matters: on `build-3996334` and `build-283f3e9` alike the early walk
+                // reached its verdict in a quarter of a second, the engine failed,
+                // the post-failure thread started the walk *again*, and the launch
+                // ended at `probe: open res/` — the first repeatable rung — with the
+                // import census queued behind it and never reached. On that set
+                // every launch is over within five seconds of the engine failing
+                // (no heartbeat, no deadline miss), so whatever sits in front of a
+                // question on the failure path is what costs that question a build.
+                string settled = Ledger.Verdict;
+                if (settled != null)
+                {
+                    Summary = settled;
+                    Trace("native probe: verdict already on the books — " + settled + "; not walking again");
+                    return;
                 }
 
                 // Before the first question, and again after every location: both

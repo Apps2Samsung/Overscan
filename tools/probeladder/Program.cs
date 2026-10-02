@@ -151,31 +151,44 @@ namespace Overscan.Harness
 
             NativeProbe.Run();
 
-            Expect(NativeProbe.Summary.Contains("maps executable and dlopen loaded it"),
-                   "a walk behind it replaces the verdict with this box's own");
+            // Until the AU7200's two reports a walk behind a verdict replaced it with
+            // this launch's own. It asks nothing now — see Resume — so the seeded
+            // verdict stands, on the header and on the file, and nothing is written
+            // after it.
+            Expect(NativeProbe.Summary == before, "a walk behind it keeps the verdict rather than asking again");
+            Expect(Breadcrumbs.Trail.Contains("verdict already on the books — " + before), "and says why");
             string ledger = Ledger(root);
-            Expect(ledger.IndexOf("verdict\t" + NativeProbe.Summary, StringComparison.Ordinal) >
-                   ledger.IndexOf("verdict\tREFUSED in res/", StringComparison.Ordinal),
-                   "and writes the new one down after the old — later lines win");
+            Expect(Occurrences(ledger, "verdict\t") == 1, "and writes no second verdict down");
+            Expect(!Breadcrumbs.Trail.Contains("probe: open res/"), "having opened nothing");
         }
 
         /// <summary>
-        /// A second launch replays what the first established instead of asking again.
-        /// The rungs that must not be repeated are the ones that can end a launch.
+        /// A second walk behind a verdict asks nothing at all. It used to replay the
+        /// answered rungs and re-make the repeatable ones, and on the AU7200 (issue
+        /// #105) the post-failure walk behind the early walk's verdict stopped on the
+        /// first of those — `probe: open res/`, on two builds — with the import census
+        /// queued behind it. The verdict is the answer; a walk cannot improve on it.
         /// </summary>
         private static void Resume(string root)
         {
             NativeProbe.Run();
+            string verdict = NativeProbe.Summary;
+            Expect(verdict.Contains("maps executable and dlopen loaded it"), "the first walk reaches a verdict");
+
             NativeProbe.Run();
 
             string trail = Breadcrumbs.Trail;
 
-            Expect(trail.Contains("res/:exec: answered on an earlier launch"),
-                   "the second launch replays the executable mapping");
+            Expect(trail.Contains("native probe: verdict already on the books — " + verdict + "; not walking again"),
+                   "the second walk says the verdict is on the books");
+            Expect(Occurrences(trail, "native probe: starting") == 2,
+                   "and said it started before it looked — the ledger's own open is still a call");
+            Expect(Occurrences(trail, "probe: open res/") == 1,
+                   "and does not open the file again — nothing behind the verdict is worth a call");
             Expect(Occurrences(trail, "probe: mmap PROT_READ|PROT_EXEC res/") == 1,
-                   "and does not ask for it a second time");
-            Expect(Occurrences(trail, "probe: open res/") == 2,
-                   "but does open the file again — the rungs behind it need the descriptor");
+                   "nor ask for the executable mapping again");
+            Expect(NativeProbe.Summary == verdict, "and the header still holds the verdict");
+            Expect(NativeProbe.EngineFailedHere(), "a ledger with a verdict says the engine has failed here");
         }
 
         /// <summary>
@@ -251,6 +264,7 @@ namespace Overscan.Harness
         /// </summary>
         private static void Early(string root, Stopwatch clock)
         {
+            Expect(NativeProbe.EngineFailedHere(), "an unfinished ledger says the engine has failed here");
             bool started = NativeProbe.StartEarlyIfUnfinished();
             Expect(started, "an unfinished ledger starts the walk ahead of the engine");
             Expect(Breadcrumbs.Trail.Contains("walking it now, ahead of the engine"),
@@ -266,6 +280,14 @@ namespace Overscan.Harness
             Expect(NativeProbe.WaitForWalk(0), "a wait after the walk returns at once");
             Expect(Occurrences(Breadcrumbs.Trail, "native probe: starting") == 1,
                    "having started exactly once");
+
+            // The post-failure thread's walk, behind the early one, on the same launch:
+            // the shape that stopped the AU7200 twice.
+            NativeProbe.Run();
+            Expect(Breadcrumbs.Trail.Contains("verdict already on the books"),
+                   "a walk behind the early walk's verdict on the same launch asks nothing");
+            Expect(Occurrences(Breadcrumbs.Trail, "probe: open res/") == 1,
+                   "and the file is opened once in the launch");
         }
 
         /// <summary>
@@ -274,12 +296,22 @@ namespace Overscan.Harness
         /// </summary>
         private static void NotEarly(string root)
         {
+            Expect(NativeProbe.Standing() == "no ledger", "no ledger: the standing says so");
+            Expect(!NativeProbe.EngineFailedHere(), "no ledger: the engine has not failed here, nothing runs ahead of it");
             Expect(!NativeProbe.StartEarlyIfUnfinished(), "no ledger: the engine goes first, as always");
 
             File.WriteAllText(Path.Combine(root, "data", "probe-ledger.txt"),
                               "ledger 3\nlaunch\nres/:exec\tPROT_READ|PROT_EXEC: ok\nverdict\tseeded\n");
+            Expect(NativeProbe.Standing() == "finished", "a ledger with a verdict stands finished");
+            Expect(NativeProbe.EngineFailedHere(), "and says the engine has failed here — the census still goes ahead of it");
             Expect(!NativeProbe.StartEarlyIfUnfinished(), "a ledger with a verdict: nothing left to ask early");
             Expect(!Breadcrumbs.Trail.Contains("native probe: starting"), "and neither started a walk");
+
+            NativeProbe.Run();
+            Expect(Breadcrumbs.Trail.Contains("verdict already on the books — seeded; not walking again"),
+                   "and the ordinary walk behind the engine takes the seeded verdict as the answer");
+            Expect(!Breadcrumbs.Trail.Contains("probe: open res/"), "without opening a file");
+            Expect(NativeProbe.Summary == "seeded", "the header shows it");
         }
 
         /// <summary>

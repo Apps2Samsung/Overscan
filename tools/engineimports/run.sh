@@ -67,6 +67,9 @@ run() {
 # set says "Operation not permitted", and the census only has to carry the words.
 chmod 000 "$work/lib/libblocked.so"
 run census "$work/lib/libneedy.so" libblocked.so
+# The same, taken on a thread of its own with the caller waiting — how OnCreate
+# runs it ahead of the engine.
+run background "$work/lib/libneedy.so" libblocked.so
 chmod 644 "$work/lib/libblocked.so"
 
 # Nothing to import at all, on the committed ARM ELF32.

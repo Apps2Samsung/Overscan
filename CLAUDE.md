@@ -287,9 +287,11 @@ platform types it touches, and walks it over the shapes that set has actually
 produced: a rung that hangs, a rung a previous launch never came back from (once,
 which is asked again, and twice, which is a refusal), a ledger left by another
 build, a ledger that never opens, a page loaded before the walk, an install whose
-ledger says the engine already failed there (the walk goes ahead of the engine), and
-a clean run twice over. It needs a C compiler for the stand-in library and nothing
-else.
+ledger says the engine already failed there (the walk goes ahead of the engine), a
+clean run twice over (the second walk finds the verdict on the books and asks
+nothing — issue #105's set ended two launches on the first rung of a walk behind a
+verdict), and a walk started behind the early one on the same launch. It needs a C
+compiler for the stand-in library and nothing else.
 
 The ladder's only real property is that it converges — whatever one rung does, the
 rungs and locations behind it still get asked. Two builds have been spent finding out
@@ -312,9 +314,11 @@ builds a library in this box's own architecture that needs `libm`, `libc` and a
 `libblocked.so` made unopenable by permission, and holds the census to naming
 exactly the blocked library's two symbols (a function and a data object), the
 refusal with the loader's words, nothing that another library provides, and no
-weak import. The committed ARM `libovprobe.so` exercises the ELF32 path, a FIFO
-holds it to a recorded miss rather than a hang, and a second call must change
-nothing. Needs the .NET 6 SDK under `~/.dotnet-local` and a C compiler.
+weak import — taken inline and again on a thread of its own with the caller
+waiting, which is how `OnCreate` runs it ahead of the engine. The committed ARM
+`libovprobe.so` exercises the ELF32 path, a FIFO holds it to a recorded miss rather
+than a hang, and a second call must change nothing. Needs the .NET 6 SDK under
+`~/.dotnet-local` and a C compiler.
 
 ### The trail harness
 

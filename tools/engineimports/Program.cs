@@ -31,7 +31,22 @@ namespace Overscan.Harness
             string blocked = args.Length > 2 ? args[2] : null;
 
             var started = DateTime.UtcNow;
-            EngineImports.Census(path, blocked);
+            if (scenario == "background")
+            {
+                // The shape OnCreate uses ahead of the engine (issue #105): the census
+                // on its own thread, the caller waiting, bounded. Same answers as
+                // the inline call, and a Census behind it must find it taken.
+                EngineImports.RunInBackground(path, blocked);
+                Expect(EngineImports.WaitForCensus(60000), "the census on its own thread finishes inside the wait");
+                Expect(EngineImports.WaitForCensus(0), "a wait after it returns at once");
+                scenario = "census";
+            }
+            else
+            {
+                Expect(EngineImports.WaitForCensus(0), "before any census, a wait returns at once");
+                EngineImports.Census(path, blocked);
+            }
+
             double seconds = (DateTime.UtcNow - started).TotalSeconds;
 
             string summary = EngineImports.Summary;

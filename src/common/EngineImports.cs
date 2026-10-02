@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 
 namespace Overscan
 {
@@ -35,12 +36,24 @@ namespace Overscan
     ///    load. Whatever is still unresolved is what the stub has to provide, by name.
     ///
     /// Each step past managed code goes out under a <see cref="Deadline"/>, because
-    /// a call this firmware objects to is parked rather than refused, and it runs on
-    /// the post-failure probe thread after the engine has already failed: whatever
-    /// is most likely not to survive the firmware goes last. It is placed ahead of
-    /// the permission investigation on that thread because the investigation's last
-    /// step is the one the Q80 never came back from, and this census is the question
-    /// the next build is waiting on.
+    /// a call this firmware objects to is parked rather than refused.
+    ///
+    /// Where it runs was decided by the `build-283f3e9` report (2026-10-02). That build
+    /// put the census on the post-failure probe thread, behind the ladder's walk and
+    /// ahead of the permission investigation, and the census never ran: the launch
+    /// ended within five seconds of `ENGINE FAILURE` — no heartbeat tick, no deadline
+    /// miss — with the thread still on the walk's first repeatable rung. That is the
+    /// Q80's shape exactly (see <c>NativeProbe.StartEarlyIfUnfinished</c>): on these
+    /// sets a launch whose engine has failed is over before anything queued behind
+    /// the failure gets a turn, and the second launch of the same build never reached
+    /// the UI at all. So, like the walk, the census goes **ahead of the engine** on
+    /// an install whose ledger already says the engine fails here
+    /// (<c>NativeProbe.EngineFailedHere</c>), after the walk if one is due, and the
+    /// engine waits for it, bounded. On every set this app works on there is no
+    /// ledger and none of this runs. The post-failure call is still made, for the
+    /// first failure on an install, and finds the census already taken on the rest.
+    /// Its lines go to the trail as they are established, because the page that
+    /// shows them is served by the *next* launch, before its UI exists.
     ///
     /// How to read it: a short list of plain C function names is a no-op stub,
     /// buildable with the same toolchain recipe as `libovprobe.so`. C++ names (`_Z…`)
@@ -75,6 +88,9 @@ namespace Overscan
         private static readonly object Gate = new object();
         private static readonly List<string> Lines = new List<string>();
         private static bool _ran;
+
+        /// <summary>Set whenever no census is running; reset while one is.</summary>
+        private static readonly ManualResetEvent Finished = new ManualResetEvent(true);
 
         /// <summary>One line for the diagnostics header.</summary>
         public static string Summary { get; private set; } = "(not asked)";
@@ -116,16 +132,35 @@ namespace Overscan
         /// </summary>
         public static void Census(string implementation, string blocked)
         {
+            if (Claim())
+            {
+                Take(implementation, blocked);
+            }
+        }
+
+        /// <summary>
+        /// Takes the one census this process gets, for whichever caller is first;
+        /// false for every caller after. The wait event is reset here, under the
+        /// same lock, so a caller that starts the census on a thread and then waits
+        /// cannot see the event still set from before the thread got going.
+        /// </summary>
+        private static bool Claim()
+        {
             lock (Gate)
             {
                 if (_ran)
                 {
-                    return;
+                    return false;
                 }
 
                 _ran = true;
+                Finished.Reset();
+                return true;
             }
+        }
 
+        private static void Take(string implementation, string blocked)
+        {
             try
             {
                 Run(implementation, blocked);
@@ -134,6 +169,62 @@ namespace Overscan
             {
                 Summary = "threw " + ex.GetType().Name + ": " + ex.Message;
                 Trace(Summary);
+            }
+            finally
+            {
+                try
+                {
+                    Finished.Set();
+                }
+                catch (Exception)
+                {
+                    // Nobody to tell.
+                }
+            }
+        }
+
+        /// <summary>
+        /// <see cref="Census"/> on a thread of its own, for the launch that runs it
+        /// ahead of the engine: the caller waits with <see cref="WaitForCensus"/>,
+        /// bounded, and a census still going when the bound passes carries on while
+        /// the engine is asked — its lines reach the trail either way. Claimed here,
+        /// before the thread exists, so the post-failure call finds it taken.
+        /// </summary>
+        public static void RunInBackground(string implementation, string blocked)
+        {
+            if (!Claim())
+            {
+                return;
+            }
+
+            try
+            {
+                var thread = new Thread(delegate () { Take(implementation, blocked); });
+                thread.IsBackground = true;
+                thread.Name = "engine-imports";
+                thread.Start();
+            }
+            catch (Exception ex)
+            {
+                // A set that will not give us a thread gets asked the dangerous way.
+                Trace("no thread (" + ex.GetType().Name + "), taking the census inline");
+                Take(implementation, blocked);
+            }
+        }
+
+        /// <summary>
+        /// Waits for a census started by <see cref="RunInBackground"/> to finish, for
+        /// at most <paramref name="timeoutMs"/>. True if it did (or none is running).
+        /// </summary>
+        public static bool WaitForCensus(int timeoutMs)
+        {
+            try
+            {
+                return Finished.WaitOne(timeoutMs);
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 

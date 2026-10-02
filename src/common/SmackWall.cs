@@ -180,8 +180,12 @@ namespace Overscan
 
                     // Issue #105: what a stub would have to export, ahead of the
                     // investigation because the investigation's last step is the
-                    // one the Q80 never came back from, and this is the question
-                    // the next build on a set that passed the ladder waits on.
+                    // one the Q80 never came back from. On an install whose ledger
+                    // already records the engine's failure the census was taken
+                    // ahead of the engine, from OnCreate, and this call finds it
+                    // done; this is the first failure's path. build-283f3e9 had it
+                    // here only, and the AU7200's launch was over before the walk
+                    // in front of it finished — see EngineImports.
                     EngineImports.Census(ChromiumImpl.Implementation, target);
                     Investigate(target);
                 });
