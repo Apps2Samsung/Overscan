@@ -128,6 +128,13 @@ namespace Overscan
                 return;
             }
 
+            // The hold's (issue #100's fix): what it kept back and when it let go.
+            if (text.StartsWith(NuiMseHold.Prefix, StringComparison.Ordinal))
+            {
+                NuiMseHold.Note(Trim(text.Substring(NuiMseHold.Prefix.Length)));
+                return;
+            }
+
             // Errors only. A page's ordinary logging is not evidence about anything
             // and would bury what is.
             if (level == null || level.IndexOf("Error", StringComparison.OrdinalIgnoreCase) < 0)

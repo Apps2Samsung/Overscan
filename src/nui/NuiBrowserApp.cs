@@ -100,6 +100,7 @@ namespace Overscan
         private bool _hintsWanted = true;
         private bool _imagesOn = true;
         private bool _adBlockOn = true;
+        private bool _oneVideoOn = true;
 
         /// <summary>
         /// The browser-wide answers, i.e. what a site with no rule of its own
@@ -472,6 +473,12 @@ namespace Overscan
                 NuiAdBlock.Install(_web, _adBlockOn);
                 DiagLog.Add("ad block: " + NuiAdBlock.LastResult);
 
+                // Issue #100: the hold that keeps a second reel from opening a
+                // pipeline under the one that is playing. Default on for the same
+                // reason as the ad block; the menu row is for the site it breaks.
+                _oneVideoOn = Store.GetBool("onevideo", true);
+                NuiMseHold.Enabled = _oneVideoOn;
+
                 // Read here, applied later. See ApplyVideoPath: on this set a
                 // stored overlay handed to a WebView that has never loaded
                 // anything gives a view that never loads anything either, so
@@ -525,6 +532,7 @@ namespace Overscan
                     NuiVideoCap.Reset();
                     NuiVideoRect.Reset();
                     NuiMseWatch.Reset();
+                    NuiMseHold.Reset();
                 };
 
                 _web.PageLoadFinished += (s, e) =>
@@ -640,9 +648,10 @@ namespace Overscan
         }
 
         /// <summary>
-        /// Puts the media census, the decoder cap, the geometry probe and the MSE
-        /// probe into the page. Alongside the cursor's own script and for the same reason it is
-        /// re-run on every load: a navigation takes the previous page's copy with it.
+        /// Puts the media census, the decoder cap, the geometry probe, the MSE
+        /// probe and, when it is on, the one-video hold into the page. Alongside the
+        /// cursor's own script and for the same reason it is re-run on every load: a
+        /// navigation takes the previous page's copy with it.
         ///
         /// Separate evaluations rather than one, so that a page which somehow breaks one
         /// of them still gets the others — the census in particular, which is what
@@ -684,6 +693,21 @@ namespace Overscan
             catch (Exception ex)
             {
                 DiagLog.Add("mse watch failed: " + ex.Message);
+            }
+
+            // Last, and only when it is on: it is the one script here that changes
+            // what the page does, and the probes above are what would explain it
+            // if it went wrong.
+            if (_oneVideoOn)
+            {
+                try
+                {
+                    _web.EvaluateJavaScript(NuiMseHold.Script());
+                }
+                catch (Exception ex)
+                {
+                    DiagLog.Add("mse hold failed: " + ex.Message);
+                }
             }
         }
 
@@ -1421,6 +1445,7 @@ namespace Overscan
                 new RemoteMenu.Item(RemoteMenu.ActionFitPage, "Fit page to screen", "6"),
                 new RemoteMenu.Item(RemoteMenu.ActionImages, "Images on/off", "Info"),
                 new RemoteMenu.Item(RemoteMenu.ActionAdBlock, "Ad blocking on/off", string.Empty),
+                new RemoteMenu.Item(RemoteMenu.ActionOneVideo, "One video at a time on/off", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionProxy, "Proxy on/off", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionProxyAddress, "Proxy address…", string.Empty),
                 new RemoteMenu.Item(RemoteMenu.ActionForgetSite, "Forget this site's settings", string.Empty),
@@ -1651,6 +1676,10 @@ namespace Overscan
 
                 case RemoteMenu.ActionAdBlock:
                     ToggleAdBlock();
+                    break;
+
+                case RemoteMenu.ActionOneVideo:
+                    ToggleOneVideo();
                     break;
 
                 case RemoteMenu.ActionProxy:
@@ -2217,6 +2246,32 @@ namespace Overscan
             catch (Exception ex)
             {
                 DiagLog.Add("reload after ad block toggle failed: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Issue #100's fix, switchable. The script lives in the page, so like the ad
+        /// block this reloads to make the page that is open show the difference.
+        /// Menu only: no digit is free. Off is for a site whose player will not wait
+        /// for its preload; the report says which it was.
+        /// </summary>
+        private void ToggleOneVideo()
+        {
+            _oneVideoOn = !_oneVideoOn;
+            NuiMseHold.Enabled = _oneVideoOn;
+            Store.Set("onevideo", _oneVideoOn);
+            DiagLog.Add("one video at a time " + (_oneVideoOn ? "ON" : "OFF"));
+            Flash(_oneVideoOn
+                ? "One video at a time — the next reel loads when it is played"
+                : "Videos preload freely — a reel may freeze when the next one is readied");
+            UpdateStatus();
+            try
+            {
+                _web.Reload();
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Add("reload after one-video toggle failed: " + ex.Message);
             }
         }
 
@@ -2995,6 +3050,7 @@ namespace Overscan
                   "video rect: " + NuiVideoRect.LastBox + "\n" +
                   "mse format: " + NuiMseWatch.LastFormat + "\n" +
                   "mse stall : " + NuiMseWatch.LastStall + "\n" +
+                  "one video : " + NuiMseHold.Summary() + "\n" +
                   "blank view: " + _blankState + "\n" +
                   "start page: " + _startPageState + "\n" +
                   "opens at  : " + StartPage.Describe(Store.RecentHistory) + "\n" +

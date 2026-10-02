@@ -53,6 +53,7 @@ namespace Overscan
         public const string ActionFitPage = "fitpage";
         public const string ActionImages = "images";
         public const string ActionAdBlock = "adblock";
+        public const string ActionOneVideo = "onevideo";
         public const string ActionProxy = "proxy";
         public const string ActionProxyAddress = "proxyaddress";
         public const string ActionVideoPath = "videopath";
