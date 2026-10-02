@@ -2337,11 +2337,13 @@ namespace Overscan
                            ? "(nothing was refused)"
                            : ChromiumImpl.Blocked + " — " + SmackWall.Summary) + "\n" +
                        "own native : " + NativeProbe.Summary + "\n" +
+                       "engine imports: " + EngineImports.Summary + "\n" +
                        "trail file : " + Breadcrumbs.Location + "\n" +
                        "trail write: " + Breadcrumbs.Status + "\n" +
                        (full ? "\nefl ladder (ewk_init's own order)\n" + EflSubsystems.Dump() +
                                "\nengine implementation (libchromium-impl.so)\n" + ChromiumImpl.Dump() +
                                "\nnative code of our own\n" + NativeProbe.Dump() +
+                               "\nwhat a stub must provide (the implementation's imports)\n" + EngineImports.Dump() +
                                "\npermission wall" +
                                (ChromiumImpl.Blocked == null
                                    ? "\n"

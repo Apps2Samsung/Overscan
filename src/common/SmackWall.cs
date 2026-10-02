@@ -177,6 +177,12 @@ namespace Overscan
                     // this Run finds it taken and says so; see
                     // NativeProbe.StartEarlyIfUnfinished.
                     NativeProbe.Run();
+
+                    // Issue #105: what a stub would have to export, ahead of the
+                    // investigation because the investigation's last step is the
+                    // one the Q80 never came back from, and this is the question
+                    // the next build on a set that passed the ladder waits on.
+                    EngineImports.Census(ChromiumImpl.Implementation, target);
                     Investigate(target);
                 });
 
@@ -192,6 +198,7 @@ namespace Overscan
                 // just gets it the dangerous way.
                 Trace("probe: no thread (" + ex.GetType().Name + "), running inline");
                 NativeProbe.Run();
+                EngineImports.Census(ChromiumImpl.Implementation, target);
                 Investigate(target);
             }
         }
