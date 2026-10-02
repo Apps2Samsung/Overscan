@@ -564,6 +564,10 @@ next one of these arrives:
   the Q80's: refused in every location is the same wall, and closes it like #95; any
   location that maps executable reopens the stub route, whose next question is which
   symbols `libchromium-impl.so` imports from `libprivileged-service-client.so`.
+  **It answered on 2026-10-02, and the answer is the other one**: every location maps
+  executable and `dlopen` loads our library. The stub route is open on that set, and
+  the census that asks what the stub must export is the next build. See *A set that
+  passed the third gate* below; the state of #105 lives there.
 - **The report names its build from `build-3996334` on.** Both reports open with
   `build     :`, the
   release tag CI stamps into the assembly (`Directory.Build.props`,
@@ -1139,6 +1143,78 @@ So `build-9f4a87a` does three things, all in `src/elm` and `Program.cs`:
 None of that is a fourth question for the reporter. The question is still the
 ladder's, and the wait is what gives it the time to answer in one launch; the markers
 and the handler are there so the *next* silence names its side of the hand-over.
+
+### A set that passed the third gate: the AU7200 (issue #105)
+
+The `build-3996334` report from the AU7200 on Tizen 6.0 (2026-10-02) is the first
+trail on which the ladder's verdict is **yes**. On an install whose ledger already
+said the engine fails there, the walk went ahead of the engine from `OnCreate`,
+answered every rung of all five locations in 243 ms on one launch, and the engine
+waited for it as designed:
+
+```
+anonymous exec memory: ok
+res/  mmap PROT_READ|PROT_EXEC: ok      dlopen: loaded, ov_probe_marker resolved
+bin/  mmap PROT_READ|PROT_EXEC: ok      dlopen: loaded, ov_probe_marker resolved
+bin/ (assembly path)  ... ok            dlopen: loaded, ov_probe_marker resolved
+lib/  mmap PROT_READ|PROT_EXEC: ok      dlopen: loaded, ov_probe_marker resolved
+data/ mmap PROT_READ|PROT_EXEC: ok      dlopen: loaded, ov_probe_marker resolved
+native probe verdict: res/ maps executable and dlopen loaded it
+```
+
+The Smack labels are the expected `User::Pkg::org.apps2samsung.overscan::RO` on the
+read-only copies and the unsuffixed label on `data/`, all on the `vdfs` `/opt` mount.
+Then the engine wall, line for line the Q80's: nine EFL subsystems up, `ewk_init`
+returning 0 twice, `libchromium-impl.so` refused on `libprivileged-service-client.so:
+cannot open shared object file: Operation not permitted`, `RTLD_LAZY` refused the
+same way, the implementation file readable by us. So on this firmware the gate that
+refuses the engine's helper library does **not** refuse a native library of ours. Of
+the three gates the stub route was given in *What is left on the Q80*, this is the one
+the Q80 failed and the AU7200 passes. The reporter also says the set has not had a
+firmware update in a long time, which is consistent with the gate being older
+firmware's rather than newer.
+
+What the stub route needs next is the one thing the firmware will not let us read:
+the symbols the engine imports from the refused library, which is the file it will
+not open. `EngineImports` (`src/common`) asks the loader instead. It reads the
+implementation's own dynamic section — DT_NEEDED and every undefined dynamic symbol,
+ELF32 on the set and ELF64 for the harness — dlopens each DT_NEEDED library by soname
+and then by path in the engine's directory, recording each refusal with the loader's
+words, and looks every non-weak import up in the process and in each library that
+loaded. What is left unresolved is what a stub must export, by name and kind
+(`FUNC`, `OBJECT`). It runs on the post-failure probe thread, after `NativeProbe.Run`
+and **ahead of** `SmackWall.Investigate`, because the investigation's last step is
+the one the Q80 never came back from and this census is the question the build is
+for; every step past managed code is under a `Deadline`. The report has an
+`engine imports:` header line and a *what a stub must provide* block; the trail has
+`engine imports:` lines with up to forty names. `tools/engineimports/run.sh` builds a
+library in this box's architecture that needs a `libblocked.so` made unopenable by
+permission, and holds the census to naming exactly that library's two symbols, one
+function and one data object, with `cos` and `strlen` resolved elsewhere and the weak
+imports set aside; the committed ARM `libovprobe.so` exercises the ELF32 path.
+
+How to read the next report, said here before it exists so neither reading is a
+reversal later:
+
+- `engine imports: N needed (1 refused: libprivileged-service-client.so), M imports,
+  U unresolved` with a short list of plain C names (`FUNC`) — a no-op stub is
+  buildable with the `tools/elfprobe` recipe, exporting those names, and the build
+  after it ships the stub in `lib/` and dlopens it `RTLD_GLOBAL` by absolute path
+  before the implementation. That build is the one that says whether the AU7200
+  runs Overscan.
+- Names beginning `_Z` (C++) or `OBJECT`s among them — the engine reads data or
+  calls methods out of that library, and a stub has to carry real behaviour. Worth
+  one look at what the names say before deciding whether to try.
+- More than one library refused — the stub has to stand in for each, and the odds
+  fall with every one.
+- `DID NOT RETURN` on the read or the resolve, or an `engine imports:` line that
+  never arrives — the set parks the census like the Q80 parked its calls; the
+  previous-run block says which step.
+
+**State of #105 (2026-10-02):** the ladder's answer is in and is the good one; the
+census build is the next thing the reporter is asked to run. A reply quoting its tag
+is drafted and goes out when Patrick says so. Nothing here changes the Q80's close:
+that set refused the mapping the AU7200 allows.
 
 ### `ELM_ACCEL` has to be set before the window exists
 

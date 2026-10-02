@@ -297,6 +297,25 @@ from a TV that it did not, which is a reporter's evening each. The `hang` scenar
 the one that holds it: against the previous `NativeProbe.cs` it does not fail, it
 never returns.
 
+### The engine-imports harness
+
+Any change to `EngineImports` — the census of what a stub
+`libprivileged-service-client.so` would have to export (issue #105) — is exercised
+off-device first:
+
+```sh
+tools/engineimports/run.sh
+```
+
+It compiles the shipping `src/common/EngineImports.cs` against a trail stand-in,
+builds a library in this box's own architecture that needs `libm`, `libc` and a
+`libblocked.so` made unopenable by permission, and holds the census to naming
+exactly the blocked library's two symbols (a function and a data object), the
+refusal with the loader's words, nothing that another library provides, and no
+weak import. The committed ARM `libovprobe.so` exercises the ELF32 path, a FIFO
+holds it to a recorded miss rather than a hang, and a second call must change
+nothing. Needs the .NET 6 SDK under `~/.dotnet-local` and a C compiler.
+
 ### The trail harness
 
 Any change to `Breadcrumbs` or `DiagLog` — the trail every diagnostic in this app
