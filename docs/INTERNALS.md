@@ -3178,8 +3178,8 @@ the one its report has to come from. The state is:
   three seconds before, paused the whole time. The fix is `NuiMseHold` (see
   *One video at a time*): the next reel's source is held back until TikTok
   plays it, so no second pipeline opens under the one on screen. Menu row to
-  switch it off. **Waiting on:** his report from the next build, after a few
-  reels. The trail answers it in three lines per reel: `hold
+  switch it off. Shipped in `build-644c119`. **Waiting on:** his report from
+  that build, after a few reels. The trail answers it in three lines per reel: `hold
   v2 blob while v1 plays`, then on the swipe `release v2 after Ns (play)`,
   then the probe's `v2 playing`. Reels that play to the end with that sequence
   is the fix. A `release` with no `playing` after it, or the next reel sitting
