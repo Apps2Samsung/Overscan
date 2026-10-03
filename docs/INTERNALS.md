@@ -537,7 +537,7 @@ the page, and reopen. The rest of this section is the road that got here.
 
 **2026-10-03, a postscript.** The stub route that was dead here turned out to be
 alive on the AU7200 (issue #105, Tizen 6.0; see *The census came back, and the
-stub ships*), and from the build after `build-ab20b83` the tizen5 package carries
+stub ships*), and from `build-5cdc532` the tizen5 package carries
 the stub as well, under the same gates. That does not change the reading above:
 the Q80's ladder refused the very `dlopen` the stub needs, in every location. The
 reporter was invited anyway, at Patrick's call, with that expectation stated in
@@ -1460,7 +1460,7 @@ The report has an `engine stub:` header line on both pages (the full one and the
 no-provider one); the trail has `engine stub: loading <path> (<bytes>) RTLD_NOW|RTLD_GLOBAL`
 before the call and the result after it. The tizen6 package carries the file from
 its own `res/`; the NUI sets have no wall and do not. **Since the AU7200 ran on it
-(2026-10-03), `Overscan5` ships the same file too**, placed in `res/` by a
+(2026-10-03), `Overscan5` ships the same file too, from `build-5cdc532`**, placed in `res/` by a
 `TizenTpkUserIncludeFiles` item from `Overscan6/res/`. Not for the Q80: that set
 refused to execute-map every file of ours in every location, `dlopen` included,
 and the stub's `dlopen` is that same call, so on the Q80 the line will read
