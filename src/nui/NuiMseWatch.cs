@@ -58,7 +58,24 @@ namespace Overscan
     /// stall is two videos holding the one hardware decoder. A stall with nothing
     /// else stirring is not that.
     ///
-    /// **This wraps four MSE calls and changes none of them.** Every wrapper calls the
+    /// `build-dccb5ad` made that a fact and <see cref="NuiMseHold"/> is the fix, and
+    /// the one freeze left (2026-10-03, a live stream next in the feed) has the hold
+    /// doing its job — the next element held at <c>rs0 ns0</c>, its pipeline opened
+    /// only on release — and the reel on screen stopping anyway, at the second a
+    /// fourth pipeline came up in the native output with an audio decoder and no
+    /// video decoder. Nothing this probe could see asked for it: it listened to
+    /// <c>&lt;video&gt;</c> elements in the document and nothing else. So it now
+    /// listens to <c>&lt;audio&gt;</c> too (named from the same namer, marked
+    /// <c>(audio)</c>), writes down a <c>src</c>, <c>srcObject</c> or <c>load()</c> on
+    /// a media element that is <em>not in the document</em> (<c>v4 src blob not ours,
+    /// detached</c>) and remembers that element weakly so a stall can list it, and
+    /// ends every stall with a <c>scene</c> line: how many video and audio elements
+    /// the document has, how many detached ones are known, and how many frames it
+    /// holds and how many of those are another origin's. A pipeline that opens with
+    /// none of that stirring is the engine's own doing, below the page.
+    ///
+    /// **This wraps four MSE calls and three media-element ones and changes none of
+    /// them.** Every wrapper calls the
     /// original with the same <c>this</c> and arguments and returns what it returned,
     /// and an exception from the original reaches the page unchanged after the wrapper
     /// has written down its name. Our own bookkeeping is in its own try, so a mistake
@@ -391,8 +408,119 @@ namespace Overscan
 
   function tag(v) {
     var g = tags.get(v);
-    if (!g) { g = { id: name(v), ev: '', at: 0 }; tags.set(v, g); }
+    if (!g) {
+      g = { id: name(v) + (v.tagName === 'AUDIO' ? ' (audio)' : ''), ev: '', at: 0 };
+      tags.set(v, g);
+    }
     return g;
+  }
+
+  /* --- elements the document cannot show ---
+
+     The 2026-10-03 trail: the hold held the next reel, and the reel on screen froze
+     at the second a pipeline with an audio decoder and no video decoder came up.
+     No <video> in the document had asked for anything. Two places such a pipeline
+     can come from without this probe hearing it: an <audio> element (the listeners
+     below took video only), and a media element that is not in the document at
+     all — events on one never reach the document, and no DOM walk finds it. So a
+     src, srcObject or load() on a detached element is written down here, from the
+     prototype, and the element is kept weakly so a stall can list it. WeakRef only:
+     a strong list would keep a page's dead element — and its pipeline — alive,
+     which is the very thing being looked for. Without WeakRef the registry is
+     skipped and the lines still come. Each wrapper calls the original with the same
+     this and arguments and returns what it returned; a throw reaches the page
+     unchanged. */
+  var ME = window.HTMLMediaElement;
+  var known = new WeakMap();
+  var detached = [];
+  var HasWeakRef = typeof WeakRef === 'function';
+
+  function remember(v) {
+    try {
+      if (!v || known.get(v) || !HasWeakRef) { return; }
+      known.set(v, true);
+      detached.push(new WeakRef(v));
+      if (detached.length > 12) { detached.shift(); }
+    } catch (e) {}
+  }
+
+  function describe(value) {
+    try {
+      var s = String(value);
+      var r = byUrl[s];
+      if (r) { return r.id; }
+      if (s.indexOf('blob:') === 0) { return 'blob not ours'; }
+      var a = document.createElement('a');
+      a.href = s;
+      return 'url ' + a.host + '/' + (a.pathname.split('/')[1] || '');
+    } catch (e) { return '?'; }
+  }
+
+  function sourced(v, what, how) {
+    remember(v);
+    if (v.isConnected) { return; }
+    report(tag(v).id + ' ' + what + ' ' + how + ', detached');
+  }
+
+  function wrapSetter(prop, how) {
+    if (!ME) { return; }
+    var d = Object.getOwnPropertyDescriptor(ME.prototype, prop);
+    if (!d || !d.set || !d.get || !d.configurable) { return; }
+    Object.defineProperty(ME.prototype, prop, {
+      configurable: true,
+      enumerable: d.enumerable,
+      get: d.get,
+      set: function (value) {
+        var r = d.set.call(this, value);
+        try { if (value) { sourced(this, prop, how(value)); } } catch (e) {}
+        return r;
+      }
+    });
+  }
+
+  wrapSetter('src', describe);
+  wrapSetter('srcObject', function () { return 'srcObject'; });
+
+  if (ME && typeof ME.prototype.load === 'function') {
+    var load = ME.prototype.load;
+    ME.prototype.load = function () {
+      var r = load.apply(this, arguments);
+      try { sourced(this, 'load()', origin(this)); } catch (e) {}
+      return r;
+    };
+  }
+
+  function elements() {
+    var out = [];
+    try {
+      var vs = document.querySelectorAll('video,audio');
+      for (var i = 0; i < vs.length; i++) { out.push(vs[i]); }
+      for (var j = 0; j < detached.length; j++) {
+        var o = detached[j].deref();
+        if (o && !o.isConnected) { out.push(o); }
+      }
+    } catch (e) {}
+    return out;
+  }
+
+  function scene() {
+    try {
+      var video = document.getElementsByTagName('video').length;
+      var audio = document.getElementsByTagName('audio').length;
+      var gone = 0;
+      for (var j = 0; j < detached.length; j++) {
+        var o = detached[j].deref();
+        if (o && !o.isConnected) { gone++; }
+      }
+      var frames = document.getElementsByTagName('iframe'), foreign = 0;
+      for (var i = 0; i < frames.length; i++) {
+        var doc = null;
+        try { doc = frames[i].contentDocument; } catch (e) {}
+        if (!doc) { foreign++; }
+      }
+      report('scene: ' + video + ' video, ' + audio + ' audio in the document, ' +
+             gone + ' detached known, ' + frames.length + ' iframes (' + foreign + ' not ours)');
+    } catch (e) {}
   }
 
   /* Where an element's media comes from: one of our MediaSources by id, a blob we
@@ -447,7 +575,8 @@ namespace Overscan
     document.addEventListener(type, function (e) {
       try {
         var v = e.target;
-        if (!v || v.tagName !== 'VIDEO') { return; }
+        if (!v || (v.tagName !== 'VIDEO' && v.tagName !== 'AUDIO')) { return; }
+        remember(v);
         var g = tag(v);
         g.ev = type;
         g.at = Date.now();
@@ -461,21 +590,24 @@ namespace Overscan
   });
 
   /* One line per other element, because a stall line already runs near the
-     trail's line length on its own. */
+     trail's line length on its own: the document's media elements first, then
+     the detached ones that are known, four at most, and the scene line last. */
   function others(v) {
     try {
-      var vs = document.getElementsByTagName('video');
-      for (var i = 0, n = 0; i < vs.length && n < 3; i++) {
+      var vs = elements();
+      for (var i = 0, n = 0; i < vs.length && n < 4; i++) {
         var o = vs[i];
         if (o === v) { continue; }
         n++;
         var g = tag(o);
         report('with ' + g.id + ' ' + (o.paused ? 'paused' : 'playing') +
                ' rs' + o.readyState + ' ns' + o.networkState + ' ' + origin(o) + ', ' +
-               onScreen(o) + ', last ' + (g.ev ? g.ev + ' ' + ago(g.at) : 'no event seen'));
+               (o.isConnected ? onScreen(o) : 'detached') +
+               ', last ' + (g.ev ? g.ev + ' ' + ago(g.at) : 'no event seen'));
       }
-      if (vs.length > 4) { report('with ' + (vs.length - 4) + ' more not listed'); }
+      if (vs.length > 5) { report('with ' + (vs.length - 5) + ' more not listed'); }
     } catch (e) {}
+    scene();
   }
 
   function look() {

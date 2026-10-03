@@ -2413,6 +2413,9 @@ namespace Overscan
                    "state     : " + (_started ? "running" : "still starting") + "\n" +
                    "engine UA : " + _engineUserAgent + "\n" +
                    "engine init: " + _engineInit + "\n" +
+                   // Issue #105: on the AU7200 the engine only starts with our stub in,
+                   // and the one page that set runs now is this one, so it has to say so.
+                   "engine stub: " + EngineStub.Summary + "\n" +
                    "forced UA : " + forced + "\n" +
                    "page sees : " + _lastProbe + "\n" +
                    "view geom : " + _cachedGeometry + "\n" +

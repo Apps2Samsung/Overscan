@@ -16,6 +16,12 @@
 # original reaches the caller with its own name, and the probe never pauses,
 # plays, loads or seeks. It also checks that it reads an init segment's codec
 # and size, counts a second init as a switch, and reports a stall and its end.
+# Since the 2026-10-03 trail (the hold holding and the reel freezing anyway, at
+# the second an audio-only pipeline opened) it also holds the probe to naming an
+# <audio> element, to writing down a src or load() on a media element that is
+# not in the document and listing it at a stall, to a refused srcObject throwing
+# the engine's own error and leaving no line, and to the scene line telling a
+# frame of ours from another origin's.
 #
 # The script is lifted out of src/nui/NuiMseWatch.cs rather than copied, for the
 # same reason as tools/msewatch: a harness that tests its own copy tests nothing.
