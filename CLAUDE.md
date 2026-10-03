@@ -132,7 +132,11 @@ reads an init segment's codec and size, counts a second one as a switch, and
 reports a stall and its end without pausing, playing, loading or seeking. It
 also holds the per-element half to naming an MSE element and a plain-URL one,
 listing the other elements at a stall, and not reading a sample entry out of
-the ftyp's brand list.
+the ftyp's brand list; and, since the first trail with the hold in and a freeze
+anyway, to naming an `<audio>` element, writing down a `src` or `load()` on a
+media element that is not in the document and listing it at a stall, a refused
+`srcObject` throwing the engine's own error and leaving no line, and the
+`scene:` line telling a frame of ours from another origin's.
 
 ### The one-video harness
 

@@ -1487,6 +1487,68 @@ install; the second serves the page that shows it), and the whole `:8081` page �
 and says in advance which of the five readings above means the AU7200 runs
 Overscan and which means it does not.
 
+**The AU7200 runs Overscan (2026-10-03, 08:24 UTC).** His page from
+`build-91f53ce` came with "This time I could see the header as Overscan, as well
+as the action list of remote controller keys on the right hand side", and it is
+the first reading in the list above, line for line. It took the two launches the
+reply asked for, though not for the reason the reply gave: the install had no
+ledger. Its `previous run` (11:14:44 on the TV's clock) is a launch with no census
+and no stub, the ladder starting *after* `ENGINE FAILURE` the way it does on an
+install the engine has never failed on — so `data/` did not come across with the
+install, and the first launch failed the ordinary way and wrote the ledger. The
+second (`this run`, 11:15:19) did everything in front of the engine: the ladder in
+266 ms, the census in 1124 ms reading the line predicted above to the letter
+(`115 needed (1 refused: libprivileged-service-client.so), 2520 imports, 4
+unresolved: PS_Mknod (FUNC), PS_Mount (FUNC), PS_ErrorToString (FUNC), PS_Umount
+(FUNC)`, with `libwgt-manifest-handlers.so.1` held back and loaded on the second
+pass), and then:
+
+```
+engine stub: loading /opt/usr/apps/org.apps2samsung.overscan/res/libprivileged-service-client.so (5148 bytes) RTLD_NOW|RTLD_GLOBAL
+engine stub: loaded from /opt/usr/apps/org.apps2samsung.overscan/res/libprivileged-service-client.so — the loader has libprivileged-service-client.so from us; the engine is asked with it in
+EFL subsystems: all up (9 checked)
+Chromium.Initialize()
+Chromium initialized, refcount=1
+WebView created
+...
+engine UA: Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 76.0.3809.146/6.0 TV Safari/537.36
+home screen shown
+load finished: data:text/html;... (the start screen)
+```
+
+The header reads `state : running`, `engine init: refcount=1`, and the start
+screen's own probe answered (`page sees : ... | 1920 | 1080 | 1 | Overscan`). So
+on this 2021 set the privileged-service client is the whole wall; four no-ops
+under its soname are enough for `ewk_init`; and the loader does honour an
+`RTLD_GLOBAL` handle in the app's namespace when it walks the implementation's
+`DT_NEEDED` — the third and fourth readings above are not this firmware. What the
+no-ops cost is not known: the engine wanted them for a sandbox mount, and if a
+page needs anything that mount would have carried it will show up as whatever
+does not work on that set from here on. Every launch on that install now loads
+the stub (the ledger gating it is permanent), and `engine-stub.txt` gains a
+`trying` and a `came back  engine started` line per launch, so the two-strikes
+rule never trips on a set where it works.
+
+One thing the page did not say, and the build after this fixes: the report a
+*running* engine serves had no `engine stub:` header line. The failure page and
+the no-provider page had one; the page everyone had been reading until now was
+one of those two, and the working page was never going to be served on this set
+until the stub was in. It carries the line now, under `engine init:`, so the next
+page from that set says in its header that the stub is loaded.
+
+What it changes elsewhere: **#95's Q70A is a Tizen 6.0 set on this same
+package**, closed 2026-09-09 on the Q80's inference that there was nowhere to put
+a stub. The AU7200 says a 6.0 set can map one from `res/`; whether the Q70A can is
+the ladder's question, and `build-91f53ce`'s `Overscan-tizen6.tpk` carries the
+ladder, the census and the stub, gated the same way. Whether to say so on a closed
+issue is Patrick's call; the reading, if it is tried, is the same five-way list
+above.
+
+**State of #105 (2026-10-03, afternoon):** the question the issue is named for
+is answered — the set runs Overscan on `build-91f53ce`, with the stub in. Nothing
+is waiting on a page. What comes next is whatever the browser does on that set,
+which on a Tizen 6.0 engine (Chromium 76) is a new question per report.
+
 ### `ELM_ACCEL` has to be set before the window exists
 
 `libchromium-ewk.so` has a library constructor whose entire body is
@@ -2662,6 +2724,126 @@ The one thing it cannot answer off-device is whether TikTok's player tolerates
 its preload waiting. The automatic pause/play that was set aside is the fallback
 if it does not.
 
+### The hold held, and the reel froze anyway
+
+The page FUSIONOF posted on 2026-10-03 (08:33 UTC, a gist, 628 KB with the whole
+native output) is from `build-e1a648d` — the hold in it is the same code as
+`build-91f53ce`'s, which touched neither script — and its `previous run` is the
+launch he reopened the issue over: a TikTok session ending at 13:58:04 on the TV's
+clock with `OnTerminate — closing normally`, relaunched at 13:58:15 for the page.
+It has the freeze, with the hold in and working, and it is the first trail to show
+the freeze and the hold's `hold`/`release` lines side by side:
+
+```
+13:55:11  load started: https://www.tiktok.com/            47 s to finish; probe and hold go in at 13:55:58
+13:55:27  native: omxtzuhdvideodec0 + omxtzaudiodec0        the landing reel, readied during the load
+13:56:02  media: playing=1 of 2 — 576x576 rs1 ... stuck     thirty seconds, not one mse: line — nothing of ours saw v1 load
+13:56:34  native: omxtzuhdvideodec1 ; mse: v1 playing t 0.3  a second pipeline for the same element, with no load event
+13:57:09  media: ... rs4 starved ; 13:57:10 v1 pause t 20.9  the swipe
+13:57:11  mse: v2 playing t 0.3 ; media: playing=1 of 1     v1 is out of the document
+13:57:18  mse: asks mse video/mp4;codecs="avc1.64001f,mp4a.40.2" -> yes
+13:57:18  native: GstTZAppSrc -> omxtzaudiodec3 -> mmaudiosink3   NO video decoder
+13:57:20  media: 768x576 rs4 stuck ; asks hev1.1.6.L93.B0,mp4a.40.2 -> yes ; hold v3 blob while v2 plays (twice: src set again)
+13:57:21  mse: stall v2 blob not ours t 6.3 buf 0.1-38.2 | frames 0
+13:57:21  mse: with v3 paused rs0 ns0 ms2, off screen, last no event seen
+13:57:29  v1 emptied ; hold: release v3 after 8.7s (play) ; v1 loadstart blob not ours
+13:57:30  ms2 add video hev1.1.6.L93.B0 + add audio mp4a.40.2 ; ms2 video init #1 hvc1 720x1280 ; v3 loadedmetadata 720x1280, dur inf
+13:57:30  ms4 add audio mp4a.40.29 + video avc1.64001f ; v1 loadedmetadata 1024x576, dur 18.6s, off screen
+13:57:31  native: omxtzh265dec0 + omxtzaudiodec4             the live stream's pipeline, after the release
+13:57:32  mse: v3 playing t 0.5 ... 13:57:53 v3 pause t 24.4  the live stream plays until the next swipe
+13:57:53  mse: v1 playing t 1.0 (1024x576)
+13:58:04  OnPause ; OnTerminate — closing normally
+```
+
+Read in order:
+
+- **The hold did what it was built to do.** v3 is the live stream (`hev1`, 720x1280,
+  `dur inf`), its blob set at 13:57:20 while v2 played and held — the `with` line a
+  second later has it at `rs0 ns0`, nothing loaded, no event — and its pipeline
+  (`omxtzh265dec0`, the run's one HEVC decoder) came up only after the release at
+  13:57:29. It then played for twenty seconds until he swiped, and v1 after it. So a
+  live stream next in the feed does not open a pipeline under the reel on screen any
+  more, and when it is its turn it plays.
+- **The reel on screen stopped anyway.** v2's playhead stopped at 6.3 s, about
+  13:57:17, with the whole reel buffered (`buf 0.1-38.2`), and stayed stopped until
+  the swipe at 13:57:29. That is the freeze he saw, "because of livestream" in the
+  sense that the live stream was next; the live stream's own pipeline had not opened.
+- **At that second a pipeline opened that nothing we watched asked for.** The native
+  output's fourth pipeline, 13:57:18: `GstTZAppSrc` → `omxtzaudiodec3` →
+  `mmaudiosink3`, and no `video_drm`, no `omxtzuhdvideodec` — every pipeline that
+  played a reel in this run has both. It is audio alone. On the trail, no `<video>`
+  in the document fired `loadstart`; v1 was out of the document (`playing=1 of 1`)
+  and paused; v3 was held. The one thing the page did at that second was ask
+  `isTypeSupported` for `avc1.64001f,mp4a.40.2` — the codec pair of the reel that
+  later became `ms4` on v1 — so TikTok was readying something, and the probe could
+  not see what it readied it on.
+- **What can open an audio-only pipeline unseen.** The probe listened to `<video>`
+  elements in the document (`tagName !== 'VIDEO'` returned early, `others()` walked
+  `getElementsByTagName('video')`). Outside that: an `<audio>` element; a media
+  element that is not in the document, whose events never reach the document's
+  listeners and which no DOM walk finds; a `<video>` in a frame of another origin,
+  where no script of ours runs at all; or the engine itself, rebuilding a playing
+  element's pipeline without its video track (Chromium does drop a video track as a
+  background optimisation; whether this engine does, and why it would on the
+  element on screen, nothing from here can say). The 13:56:34 line is a reminder
+  that the engine builds pipelines on its own account: v1 got a second decoder on
+  `play()` with no load event at all, which the earlier census of one pipeline per
+  reel had not allowed for.
+- **The first thirty seconds are the window the previous reading named.** v1 was
+  readied during a 47-second page load, before the scripts were in, and sat at
+  `rs1 stuck` — metadata and no data — from 13:56:02 until a fresh pipeline at
+  13:56:34 moved it. Not one line of ours covers it. Whether that was the proxy's
+  throughput or the engine is unknowable from this trail, and it is a second
+  symptom to keep apart from the freeze: a reel that never starts, not one that
+  stops.
+- **The proxy half held.** The first eight minutes of the launch are a different
+  proxy (`191.96.254.138:6185`) refusing every load (`load error ... Unknown, Unknown
+  (via proxy)` on TikTok, on `tiktok.com`, on DuckDuckGo), and `blank view: (never
+  blank)` with the session intact throughout — `build-7e24138`'s fix. He changed to
+  `198.23.243.226:6361` at 13:55 and everything above went through that one.
+
+The build after this asks the one question: **what asked for the pipeline that
+opened at the freeze.** `NuiMseWatch` now takes `<audio>` elements in the same
+listeners (named from the shared namer, marked `(audio)`); wraps the `src` and
+`srcObject` setters and `load()` on `HTMLMediaElement.prototype` — pass-through,
+the original's return and exceptions untouched, the probe's own line after a
+successful call — and writes `v4 src blob not ours, detached` / `v4 load() url
+host/seg, detached` when the element is not in the document; remembers every
+element it has heard of through a `WeakRef` (a strong list would keep a dead
+element and its pipeline alive, which is the thing being hunted; without `WeakRef`
+the registry is skipped and the lines still come); lists the document's video and
+audio elements and then the detached ones it knows at a stall, four at most; and
+ends every stall with `scene: N video, N audio in the document, N detached known,
+N iframes (N not ours)`, a frame being "not ours" when its `contentDocument` cannot
+be read. `tools/msewatch/run.sh` holds all of it: an audio element named and
+listed, a detached element's `src` and `load()` each leaving a line and the
+element listed at the stall, the setter reading back and reaching the attribute, a
+refused `srcObject` throwing the engine's own `TypeError` and leaving no line, and
+the scene line telling an `about:blank` frame from another origin's. The hold is
+unchanged; the harness run on it still passes.
+
+How to read the next freeze, said here first:
+
+- **An `(audio)` or a `detached` line in the second before the stall, or such an
+  element in the `with` lines with a recent event** — that is the element the hold
+  has to learn. A blob source on it is already held (the hold wraps
+  `HTMLMediaElement.prototype`, audio included, document or not); a plain URL would
+  mean lifting the plain-URL exemption for that element's kind, and the line names
+  the kind.
+- **`scene:` with a frame `not ours` and nothing else stirring** — it is in a frame
+  no script of ours enters. Nothing to hold from the top document.
+- **Nothing stirring at all** — the engine's own doing, below the page.
+
+The last two share a fix, and it is the one set aside in *Two videos, one decoder*:
+pause and play the stalled element from the probe's side once a stall has lasted a
+few seconds with nothing on the page to explain it. It was set aside because it
+recovers rather than prevents, and at the time every reel froze. With the freeze
+now confined to a live stream next in the feed, a two-second hiccup once in a
+session is a different trade from a stop on every reel, and `build-7e24138`'s
+reading — "pause and resume brings it back, which restarts the pipeline" — is the
+evidence it would work. It is not in this build: it changes playback, and the
+question of what opened the pipeline is worth one page first.
+
 ## What the NUI build never asked the engine for
 
 The two builds share `src/common` and nothing else, and everything the ElmSharp
@@ -3609,6 +3791,25 @@ the one its report has to come from. The state is:
   report forgets. Read it by the markers above: `dur inf` and `live page` name the
   stream, a `hold:` line in front of the stall says the hold was in, no `hold:` line
   on a page that was playing says it was not.
+  **That page came the same morning (2026-10-03, 08:33 UTC), from `build-e1a648d`
+  still, and it carries the freeze** — see *The hold held, and the reel froze
+  anyway* above for the whole reading. In one line: the hold did its job (the live
+  stream held at `rs0 ns0`, its HEVC pipeline opened only on the release, and it
+  then played), the reel in front of it stopped anyway with the whole reel
+  buffered, and at that second the native output has a fourth pipeline with an
+  audio decoder and no video decoder that nothing the probe watched had asked for.
+  The probe watched `<video>` elements in the document and nothing else, so the
+  build after this widens it, read-only: `<audio>` elements named and listed, a
+  `src`/`srcObject`/`load()` on a media element outside the document written down
+  and listed at a stall, and a `scene:` line closing every stall with the counts of
+  video, audio, detached and foreign-frame elements. The hold is unchanged.
+  **Waiting on:** the next freeze's page, read by those lines: an `(audio)` or
+  `detached` line at the stall's second names the element the hold has to learn;
+  a `scene:` with a frame `not ours` and nothing else puts it where no script of
+  ours runs; nothing stirring at all is the engine's own doing. The last two have
+  the same fix — the pause/play recovery set aside in *Two videos, one decoder*,
+  a different trade now that the freeze is confined to live streams — and the
+  first one has the hold.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

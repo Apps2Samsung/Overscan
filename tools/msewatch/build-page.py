@@ -86,6 +86,41 @@ plain.preload = 'auto';
 document.body.appendChild(plain);
 plain.src = 'https://example.invalid/video/reel.mp4';
 
+/* An <audio> element on a plain URL: the 2026-10-03 trail's pipeline had an audio
+   decoder and no video decoder, and the probe had been listening to <video> only.
+   It must be named from the same namer, marked, and left alone. */
+var aud = document.createElement('audio');
+aud.id = 'aud';
+aud.preload = 'auto';
+['pause','play','load'].forEach(function(f){ aud[f] = function(){ aud.__touched = f; }; });
+document.body.appendChild(aud);
+aud.src = 'https://example.invalid/audio/sound.mp3';
+
+/* A <video> that is never put in the document. Its events reach no listener on the
+   document and no DOM walk finds it, so the probe hears of it only from the
+   prototype: the src set and the load() must each leave a line saying `detached`,
+   the setter and load() must pass through, a refused srcObject must throw the
+   engine's own error and leave no line, and a stall must still list it. */
+var det = document.createElement('video');
+det.src = 'https://example.invalid/detached/reel.mp4';
+if (det.src !== 'https://example.invalid/detached/reel.mp4') { fail('src setter changed what src reads back: ' + det.src); }
+if (det.getAttribute('src') !== 'https://example.invalid/detached/reel.mp4') { fail('src setter did not reach the attribute'); }
+det.load();
+try {
+  det.srcObject = {};
+  fail('srcObject accepted a plain object');
+} catch (e) {
+  if (e.name !== 'TypeError') { fail('srcObject threw ' + e.name + ', not TypeError'); }
+}
+
+/* Two frames, one ours and one not: the scene line has to tell them apart. */
+var same = document.createElement('iframe');
+same.src = 'about:blank';
+document.body.appendChild(same);
+var other = document.createElement('iframe');
+other.src = 'https://example.invalid/frame/';
+document.body.appendChild(other);
+
 var ms = new MediaSource();
 var url = URL.createObjectURL(ms);
 if (typeof url !== 'string' || url.indexOf('blob:') !== 0) { fail('createObjectURL returned ' + url); }
@@ -175,9 +210,17 @@ function check(){
   if (!has(/^v\\d loadstart url example\\.invalid\\/video, preload auto, (on|off) screen$/)) { fail('plain-URL element loadstart not reported'); }
   if (!has(/^with v\\d paused rs\\d ns\\d url example\\.invalid\\/video, (on|off) screen|no box, last \\w+ \\d+\\.\\ds ago$/)) { fail('stall does not list the plain-URL element'); }
   if (!has(/^with v\\d paused rs\\d ns\\d ms1, /)) { fail('stall does not list the other MSE element'); }
+  if (!has(/^v\\d \\(audio\\) loadstart url example\\.invalid\\/audio, preload auto, (no box|on screen|off screen)$/)) { fail('audio element loadstart not reported'); }
+  if (!has(/^v\\d src url example\\.invalid\\/detached, detached$/)) { fail('src on a detached element not reported'); }
+  if (!has(/^v\\d load\\(\\) url example\\.invalid\\/detached, detached$/)) { fail('load() on a detached element not reported'); }
+  if (has(/srcObject/)) { fail('a refused srcObject left a line'); }
+  if (!has(/^with v\\d paused rs\\d ns\\d url example\\.invalid\\/detached, detached, last no event seen$/)) { fail('stall does not list the detached element'); }
+  if (!has(/^with v\\d \\(audio\\) paused rs\\d ns\\d url example\\.invalid\\/audio, /)) { fail('stall does not list the audio element'); }
+  if (!has(/^scene: 3 video, 1 audio in the document, 1 detached known, 2 iframes \\(1 not ours\\)$/)) { fail('scene line wrong or missing: ' + mse.filter(function(l){ return /^scene/.test(l); })); }
+  if (mse.filter(function(l){ return /^scene/.test(l); }).length !== 1) { fail('scene reported other than once with the one stall'); }
   if (has(/^stall/) && mse.filter(function(l){ return /^stall/.test(l); }).length !== 1) { fail('one stall reported more than once'); }
 
-  [real, fake, plain].forEach(function(v){ if (v.__touched) { fail('probe called ' + v.__touched + ' on #' + (v.id || 'fake')); } });
+  [real, fake, plain, aud].forEach(function(v){ if (v.__touched) { fail('probe called ' + v.__touched + ' on #' + (v.id || 'fake')); } });
 
   document.getElementById('out').innerHTML =
     '<div id=RESULTS>RESULTS\\n' + (fails.length ? fails.join('\\n') : 'ok') +
