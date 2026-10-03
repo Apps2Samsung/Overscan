@@ -30,10 +30,12 @@
 #   4. the file: a round trip through the disk, forgetting that reports whether
 #      it did anything, and a hand-edited or future-build file that cannot stop
 #      the browser from starting;
-#   5. the other site: that it alternates between the two sites somebody is going
-#      back and forth between, treats another host of the same site as the same
-#      site, skips this app's own generated pages, and has an answer when there
-#      is nowhere to go.
+#   5. the other site: that with favourites it goes round them in tile order,
+#      each at the last page seen on that site (issue 100's third site), and
+#      without them alternates between the two sites somebody is going back and
+#      forth between; treats another host of the same site as the same site,
+#      skips this app's own generated pages, and has an answer when there is
+#      nowhere to go.
 #   6. the proxy (issue 97, NUI only): the third field follows the same rules as
 #      the other two, and the typed address is taken apart so the login never
 #      reaches the engine's proxy string or anything shown on screen or on the

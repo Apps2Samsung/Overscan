@@ -308,17 +308,85 @@ namespace Overscan
         }
 
         /// <summary>
-        /// The most recent entry in the history that is on a different site from
-        /// the address given, or null when there is none.
+        /// Where the switch action goes from the address given, or null when there
+        /// is nowhere to go.
         ///
-        /// Issue #75, and the reason it is this and not a list: the history is kept
-        /// most-recent-first, so from a page on B the first entry that is not on B
-        /// is the page on A the user came from — and once they are on A the first
-        /// entry that is not on A is the page on B they just left. One action
-        /// therefore alternates between the two sites somebody is going back and
-        /// forth between, which is the question as it was asked. From the start
-        /// screen (a null address, since it is on no site) it opens the most recent
-        /// site instead.
+        /// It goes round the favourites, in the order they sit on the start screen:
+        /// from a site that has a favourite, to the site of the next favourite after
+        /// it, wrapping round at the end; from a site that has none, to the first.
+        /// Two favourites on one site count as one stop. Each stop opens the last
+        /// page the history has on that site, so a return to Spotify lands where
+        /// Spotify was left and not on the tile's address — the tile is the answer
+        /// only for a site never visited.
+        ///
+        /// Issue #75 asked for a way between <em>two</em> sites, and the first
+        /// shape of this walked the history instead: from B the first entry not on
+        /// B is the page on A the user came from, and from A it is B again, so one
+        /// action alternated between the two sites somebody is going back and forth
+        /// between. The reporter's third site is what that shape cannot reach — the
+        /// history is always ordered by what was just left, so the two most recent
+        /// sites trade places for ever and the third never comes up. The favourites
+        /// are the list he already keeps, in an order he can see, so they are the
+        /// round. The history walk stays as the answer when there is no round to go:
+        /// no favourites, or every favourite on the site already open. From the
+        /// start screen (a null address, since it is on no site) it opens the most
+        /// recent site either way.
+        /// </summary>
+        public static Bookmark OtherSite(IList<Bookmark> favourites, IList<Bookmark> history, string currentUrl)
+        {
+            string here = KeyFor(currentUrl);
+            if (here != null && favourites != null)
+            {
+                // The distinct sites among the favourites, in tile order.
+                var sites = new List<string>();
+                for (int i = 0; i < favourites.Count; i++)
+                {
+                    string site = KeyFor(favourites[i].Url);
+                    if (site != null && !sites.Contains(site))
+                    {
+                        sites.Add(site);
+                    }
+                }
+
+                int at = sites.IndexOf(here);
+                if (sites.Count > (at >= 0 ? 1 : 0))
+                {
+                    string next = sites[at < 0 ? 0 : (at + 1) % sites.Count];
+                    return LastOn(history, next) ?? LastOn(favourites, next);
+                }
+            }
+
+            return OtherSite(history, currentUrl);
+        }
+
+        /// <summary>The first entry in the list that is on the site named, or null.</summary>
+        private static Bookmark LastOn(IList<Bookmark> list, string site)
+        {
+            if (list == null)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (string.Equals(KeyFor(list[i].Url), site, StringComparison.Ordinal))
+                {
+                    return list[i];
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// The most recent entry in the history that is on a different site from
+        /// the address given, or null when there is none. The first shape of the
+        /// switch (see above), and still what it does when there is no round of
+        /// favourites to go: the history is kept most-recent-first, so from a page
+        /// on B the first entry that is not on B is the page on A the user came
+        /// from — and once they are on A the first entry that is not on A is the
+        /// page on B they just left. From the start screen (a null address, since
+        /// it is on no site) it opens the most recent site instead.
         /// </summary>
         public static Bookmark OtherSite(IList<Bookmark> history, string currentUrl)
         {
