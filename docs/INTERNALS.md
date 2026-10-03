@@ -1479,8 +1479,9 @@ How to read the next report, said here first:
   ladder said maps executable; the loader's words on that line are the finding.
 
 **State of #105 (2026-10-03):** the census is read, the stub route is the four
-names above, and the stub ships in the build this section was written for. The
-reply asks for an install of that build's `Overscan-tizen6.tpk`, two launches (the
+names above, and the stub shipped in `build-91f53ce` (PR #119, with the switch
+change of #118 in the same release). The reply, posted 2026-10-03 quoting that
+tag, asks for an install of its `Overscan-tizen6.tpk`, two launches (the
 first is the one that loads the stub, since the ledger already exists on his
 install; the second serves the page that shows it), and the whole `:8081` page —
 and says in advance which of the five readings above means the AU7200 runs
@@ -3600,8 +3601,8 @@ the one its report has to come from. The state is:
   unrecorded. That is not built on — nothing says his freeze was in it, and the
   earlier freeze trail had the hold in and working — but it is the first place to
   look if the next trail shows a stall with no `hold:` line in front of it.
-  **Shipped in the switch build: the round of favourites** (see *Switching sites*
-  above; `tools/siterules` holds it). **Waiting on:** the freeze itself, which needs
+  **Shipped in `build-91f53ce`: the round of favourites** (see *Switching sites*
+  above; `tools/siterules` holds it). Reply posted 2026-10-03 quoting that tag. **Waiting on:** the freeze itself, which needs
   the page from a launch that *had* it: `:8081` while the app is still open after
   the freeze (the `this run` block carries it), or at the very next launch (the
   `previous run` block does), and not a launch later, because that is the one the
