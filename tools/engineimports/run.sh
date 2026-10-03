@@ -15,7 +15,12 @@
 # (one function, one data object), and then makes libblocked.so unopenable the way
 # the set does (a permission refusal, not a missing file). The census has to name
 # exactly those two, say libblocked.so was refused and why, and leave cos and
-# strlen out of it. The ELF32 path is exercised on the committed ARM
+# strlen out of it. A second shape is a library that only loads in company — one
+# that imports a data symbol from a sibling it does not name in its own DT_NEEDED
+# — which the census must hold back, load on a second pass once the rest are in,
+# and never count as refused or its exports as a stub's work (the AU7200's
+# libwgt-manifest-handlers.so.1 put twenty-three C++ names on the first census
+# that way). The ELF32 path is exercised on the committed ARM
 # Overscan5/res/libovprobe.so, which has nothing to import and must say so.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -71,6 +76,18 @@ run census "$work/lib/libneedy.so" libblocked.so
 # runs it ahead of the engine.
 run background "$work/lib/libneedy.so" libblocked.so
 chmod 644 "$work/lib/libblocked.so"
+
+# A dependency that only loads in company (the AU7200's libwgt-manifest-handlers
+# .so.1): libunder.so imports a data symbol from libsib.so without naming it in
+# its own DT_NEEDED, and the implementation lists libunder.so first. Alone it is
+# "undefined symbol"; after the rest have loaded it is not.
+printf 'int sib_value = 3;\n' > "$work/sib.c"
+"$CC" -shared -fPIC -Wl,-soname,libsib.so -o "$work/lib/libsib.so" "$work/sib.c"
+printf 'extern int sib_value;\nint under_get(void) { return sib_value; }\n' > "$work/under.c"
+"$CC" -shared -fPIC -Wl,-soname,libunder.so -o "$work/lib/libunder.so" "$work/under.c"
+printf 'extern int sib_value;\nint under_get(void);\nint needy2_use(void) { return under_get() + sib_value; }\n' > "$work/needy2.c"
+"$CC" -shared -fPIC -Wl,-soname,libneedy2.so -Wl,--no-as-needed -L"$work/lib" -o "$work/lib/libneedy2.so" "$work/needy2.c" -lunder -lsib
+run underlinked "$work/lib/libneedy2.so"
 
 # Nothing to import at all, on the committed ARM ELF32.
 run clean ../../Overscan5/res/libovprobe.so

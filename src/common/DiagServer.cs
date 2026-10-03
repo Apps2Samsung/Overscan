@@ -114,6 +114,7 @@ namespace Overscan
                        "build     : " + BuildInfo.Tag + "\n" +
                        "own native : " + NativeProbe.Summary + "\n" +
                        "engine imports: " + EngineImports.Summary + "\n" +
+                       "engine stub: " + EngineStub.Summary + "\n" +
                        "trail write: " + Breadcrumbs.Status + "\n\n" +
                        "this run\n" + DiagLog.Dump() +
                        "\nwhat a stub must provide (the implementation's imports)\n" + EngineImports.Dump() +

@@ -315,7 +315,11 @@ builds a library in this box's own architecture that needs `libm`, `libc` and a
 exactly the blocked library's two symbols (a function and a data object), the
 refusal with the loader's words, nothing that another library provides, and no
 weak import — taken inline and again on a thread of its own with the caller
-waiting, which is how `OnCreate` runs it ahead of the engine. The committed ARM
+waiting, which is how `OnCreate` runs it ahead of the engine. A second shape holds
+the second pass: a library that imports a data symbol from a sibling it does not
+name in its own `DT_NEEDED` is held back, loaded once the rest are in, and never
+counted as refused or its exports as a stub's work — the AU7200's first census put
+twenty-three C++ names on the list that way. The committed ARM
 `libovprobe.so` exercises the ELF32 path, a FIFO holds it to a recorded miss rather
 than a hang, and a second call must change nothing. Needs the .NET 6 SDK under
 `~/.dotnet-local` and a C compiler.
@@ -339,18 +343,27 @@ every stall it has ever shown was a call immediately followed by a trail write; 
 trail written on the caller's thread could not tell the two apart. Needs only the
 .NET 6 SDK under `~/.dotnet-local`.
 
-### The native probe library
+### The native libraries
 
-`Overscan5/res/libovprobe.so` is the only native binary this repo ships: a tiny ARM
-shared object that exists so issue #17's set can be asked whether this app may load
-native code of its own at all. It is **committed**, because CI has no ARM toolchain.
-It ships three times from that one file — `res/` needs no `.csproj` item, a `<None>`
-item puts a copy in `bin/` (the directory the app's own assembly lives in, and the
-only one on that set known to map a file of ours executable), and a
-`TizenTpkUserIncludeFiles` item with `TizenTpkSubDir` puts one in `lib/`. All three
-are covered by both signatures.
+Two tiny ARM shared objects are the only native binaries this repo ships, both
+**committed** because CI has no ARM toolchain:
 
-Rebuild it only if `tools/elfprobe/ovprobe.s` changes:
+- `Overscan5/res/libovprobe.so` exists so issue #17's set can be asked whether this
+  app may load native code of its own at all. It ships three times from that one
+  file — `res/` needs no `.csproj` item, a `<None>` item puts a copy in `bin/` (the
+  directory the app's own assembly lives in, and the only one on that set known to
+  map a file of ours executable), and a `TizenTpkUserIncludeFiles` item with
+  `TizenTpkSubDir` puts one in `lib/`. All three are covered by both signatures.
+  `Overscan6` references the same file.
+- `Overscan6/res/libprivileged-service-client.so` is issue #105's stub: the four
+  no-op C functions the engine imports from the library the firmware will not let
+  an app open, under that soname. `EngineStub` loads it `RTLD_GLOBAL` before the
+  engine, and **only** on an install whose ledger says the engine already failed
+  there, at most twice if the launch never comes back with it in. INTERNALS, *The
+  census came back, and the stub ships*, has the readings. Only the tizen6 package
+  carries it.
+
+Rebuild them only if `tools/elfprobe/ovprobe.s` or `tools/elfprobe/psstub.s` changes:
 
 ```sh
 apt-get download binutils-arm-linux-gnueabihf          # no root needed
@@ -358,9 +371,13 @@ dpkg-deb -x binutils-arm-linux-gnueabihf_*.deb /some/where
 XTOOL=/some/where tools/elfprobe/build.sh
 ```
 
-That script prints the ELF header and dynamic section at the end — check it still
-says `DYN`, `ARM`, `SONAME libovprobe.so` and no `NEEDED`. A dependency on anything
-would make a refusal to load ambiguous, which defeats the whole measurement.
+That script prints each file's ELF header, dynamic section and exports at the end —
+check each still says `DYN`, `ARM`, its own `SONAME`, and no `NEEDED` and no
+`TEXTREL`. A dependency on anything would make a refusal to load ambiguous, which
+defeats the whole measurement, and a text relocation asks the loader for a
+writable code page on a firmware that refuses far less. Rebuilding with a different
+binutils changes the probe library's bytes without changing what it does; commit
+only the file whose source changed.
 
 ## Releasing
 

@@ -214,6 +214,17 @@ namespace Overscan
                     : "engine imports: still counting after " + (CensusBudgetMs / 1000) + " s — on to the engine anyway");
             }
 
+            // The census's answer, applied (issue #105): a stand-in for the one
+            // library the engine needs and the firmware will not let us open, put
+            // into the process under its soname before ewk_init goes looking. Not a
+            // diagnostic, so the rule that puts those behind the engine does not
+            // apply — it is the thing being tried, and it has to be in front. Its
+            // own gate keeps it off every set where the engine starts, and its own
+            // ledger withholds it after two launches that never came back with it
+            // in. After the census, so the census still measures the firmware and
+            // not us. See EngineStub.
+            EngineStub.Preload();
+
             // Bringing up chromium-efl is the one step we expect to be able to
             // fail: there are reports of an app-created Tizen.WebView crashing on
             // the TV emulator with nothing in the log, and the TV profile is not
@@ -235,6 +246,11 @@ namespace Overscan
                 DiagLog.Add("ENGINE FAILURE " + _engineFailure);
                 started = false;
             }
+
+            // Either way the engine answered, which with the stub in is the fact
+            // the next launch needs: a launch that dies inside ewk_init never
+            // writes this line, and two of those withhold the stub.
+            EngineStub.EngineAnswered(started ? "engine started" : "engine failed — " + (_engineFailure ?? "(no reason recorded)"));
 
             if (!started)
             {
@@ -2365,6 +2381,7 @@ namespace Overscan
                            : ChromiumImpl.Blocked + " — " + SmackWall.Summary) + "\n" +
                        "own native : " + NativeProbe.Summary + "\n" +
                        "engine imports: " + EngineImports.Summary + "\n" +
+                       "engine stub: " + EngineStub.Summary + "\n" +
                        "trail file : " + Breadcrumbs.Location + "\n" +
                        "trail write: " + Breadcrumbs.Status + "\n" +
                        (full ? "\nefl ladder (ewk_init's own order)\n" + EflSubsystems.Dump() +

@@ -65,6 +65,8 @@ namespace Overscan
     {
         private const int RtldLazy = 0x0001;
         private const int RtldLocal = 0x0000;
+        private const int RtldNoload = 0x0004;
+        private const int RtldGlobal = 0x0100;
 
         /// <summary>How many unresolved names the trail carries; the dump has them all.</summary>
         private const int TrailNames = 40;
@@ -282,12 +284,14 @@ namespace Overscan
             // then by path in the engine's directories, which the loader does not
             // search for us. One refusal line each; the ones that load are not news.
             var handles = new List<KeyValuePair<string, IntPtr>>();
+            var openedAs = new Dictionary<string, string>(StringComparer.Ordinal);
             var refused = new List<string>();
+            var heldBack = new List<string>();
             string directory = Path.GetDirectoryName(path) ?? "/usr/lib";
             foreach (string soname in elf.Needed)
             {
                 IntPtr handle = IntPtr.Zero;
-                string error = null;
+                string error = null, used = soname;
                 string answer = Deadline.Run(delegate
                 {
                     handle = Open(soname, out error);
@@ -296,6 +300,7 @@ namespace Overscan
                         string here = Path.Combine(directory, soname);
                         if (File.Exists(here))
                         {
+                            used = here;
                             handle = Open(here, out error);
                         }
                     }
@@ -306,13 +311,93 @@ namespace Overscan
                 if (answer == "loaded")
                 {
                     handles.Add(new KeyValuePair<string, IntPtr>(soname, handle));
+                    openedAs[soname] = used;
                     Note("  loaded: " + soname);
                     continue;
                 }
 
                 string why = answer == Deadline.Missed ? Deadline.Missed : (error ?? answer);
+
+                // "undefined symbol" is not a wall, it is an order. A library built
+                // against a sibling it does not name in its own DT_NEEDED resolves
+                // fine when the engine loads it — everything on the implementation's
+                // list is in one global scope by then — and fails here, where each
+                // one is opened alone and RTLD_LOCAL. build-e1a648d's census on the
+                // AU7200 had one of these, libwgt-manifest-handlers.so.1 missing a
+                // typeinfo that libmanifest-parser.so.1 (later on the same list)
+                // provides, and its twenty-three wgt::parse exports then counted
+                // as what a stub must provide. They are not. Such a library is set
+                // aside and asked again once the rest have loaded, below.
+                if (error != null && error.IndexOf("undefined symbol", StringComparison.Ordinal) >= 0)
+                {
+                    heldBack.Add(soname);
+                    Trace("held back " + soname + " — " + why + " (asked again after the rest)");
+                    continue;
+                }
+
                 refused.Add(soname + " — " + why);
                 Trace("refused " + soname + " — " + why);
+            }
+
+            // Step 2b: the second pass. Everything that loaded is promoted to the
+            // global scope first — RTLD_NOLOAD loads nothing, it only changes the
+            // flags of a library already in the process — so a held-back library's
+            // data relocations can find a sibling the way they do under the engine.
+            // Only ever reached on an install whose engine has already failed, so
+            // the wider scope costs a working engine nothing.
+            if (heldBack.Count > 0)
+            {
+                string promoted = Deadline.Run(delegate
+                {
+                    foreach (KeyValuePair<string, IntPtr> pair in handles)
+                    {
+                        string name;
+                        if (openedAs.TryGetValue(pair.Key, out name))
+                        {
+                            dlopen(name, RtldLazy | RtldNoload | RtldGlobal);
+                        }
+                    }
+
+                    return "ok";
+                }, 30000);
+                if (promoted != "ok")
+                {
+                    Trace("second pass: promoting the loaded libraries " + promoted);
+                }
+
+                foreach (string soname in heldBack)
+                {
+                    IntPtr handle = IntPtr.Zero;
+                    string error = null, used = soname;
+                    string answer = Deadline.Run(delegate
+                    {
+                        handle = Open(soname, out error);
+                        if (handle == IntPtr.Zero && IsNotFound(error))
+                        {
+                            string here = Path.Combine(directory, soname);
+                            if (File.Exists(here))
+                            {
+                                used = here;
+                                handle = Open(here, out error);
+                            }
+                        }
+
+                        return handle == IntPtr.Zero ? "refused" : "loaded";
+                    });
+
+                    if (answer == "loaded")
+                    {
+                        handles.Add(new KeyValuePair<string, IntPtr>(soname, handle));
+                        openedAs[soname] = used;
+                        Trace("loaded " + soname + " on the second pass — the symbol was another needed library's, not a wall");
+                        Note("  loaded: " + soname + " (second pass)");
+                        continue;
+                    }
+
+                    string why = answer == Deadline.Missed ? Deadline.Missed : (error ?? answer);
+                    refused.Add(soname + " — " + why);
+                    Trace("refused " + soname + " — " + why + " (second pass)");
+                }
             }
 
             // Step 3: the process first (libc and everything already in it), then

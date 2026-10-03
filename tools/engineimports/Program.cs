@@ -8,6 +8,7 @@ namespace Overscan.Harness
     /// process because the census's books are static.
     ///
     ///   census  <needy.so> <blocked soname>   the real shape: one dependency refused
+    ///   underlinked <needy.so>                a dependency that only resolves in company
     ///   clean   <lib.so>                      nothing refused, nothing unresolved
     ///   hang    <fifo>                        a file that never answers
     ///   missing <path>                        no implementation at all
@@ -73,6 +74,23 @@ namespace Overscan.Harness
                     Expect(summary.Contains("(1 refused: " + blocked + ")"), "the summary names the refusal");
                     Expect(summary.Contains("2 unresolved: blocked_alpha (FUNC), blocked_counter (OBJECT)"), "a short unresolved list is on the summary line");
                     Expect(trail.Contains("engine imports: done — "), "the trail ends on done");
+                    break;
+
+                case "underlinked":
+                    // The AU7200's libwgt-manifest-handlers.so.1: a library whose own
+                    // DT_NEEDED does not name the sibling that provides a data symbol
+                    // it imports, so alone and RTLD_LOCAL it is "undefined symbol",
+                    // and under the engine, with the whole list in one scope, it
+                    // loads. The census must not count it as refused or its exports
+                    // as a stub's work.
+                    Expect(trail.Contains("engine imports: held back libunder.so — ") && trail.Contains("undefined symbol: sib_value"),
+                           "the first pass holds the library back and names the symbol");
+                    Expect(trail.Contains("engine imports: loaded libunder.so on the second pass"), "the second pass loads it");
+                    Expect(!trail.Contains("refused libunder.so"), "it is never called refused");
+                    Expect(EngineImports.Refused.Count == 0, "nothing refused, got " + EngineImports.Refused.Count);
+                    Expect(EngineImports.Unresolved.Count == 0, "nothing unresolved, got: " + string.Join(", ", EngineImports.Unresolved));
+                    Expect(dump.Contains("  loaded: libunder.so (second pass)"), "the dump says which pass loaded it");
+                    Expect(summary.Contains("0 unresolved") && !summary.Contains("refused"), "the summary is clean: " + summary);
                     break;
 
                 case "clean":
