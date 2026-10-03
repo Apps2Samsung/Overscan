@@ -228,8 +228,8 @@ you to another of its own hosts, too wide and a suffix test lets
 file to the name a site is remembered under, what a rule covers and what it must
 not, the third state (a field nobody set follows the browser-wide switch rather
 than meaning "off"), a round trip through the disk, a hand-edited file that cannot
-stop the browser starting, and the alternation the switch key depends on. It
-also compiles `src/nui/ProxyAddress.cs` (issue #97) and holds it to the one
+stop the browser starting, the round of favourites the switch key walks and the
+two-site alternation it falls back to. It also compiles `src/nui/ProxyAddress.cs` (issue #97) and holds it to the one
 thing that must not go wrong there: the proxy login reaches the engine's login
 call and nothing that is shown, logged or served on `:8081`. Needs only the
 .NET 6 SDK under `~/.dotnet-local`.

@@ -2342,14 +2342,15 @@ namespace Overscan
         }
 
         /// <summary>
-        /// Opens the most recent page that is not on this site — issue #75. From a
-        /// page on B that is where the user came from, and from there it is B
-        /// again, so the one action goes back and forth between the two sites
-        /// somebody is actually using.
+        /// Goes round the favourites — issue #75, and #100's note that the first
+        /// shape only ever reached two sites. From a site with a favourite it opens
+        /// the next favourite's site, at the last page seen there; with no round to
+        /// go it falls back to the site the user just came from. SiteRules.OtherSite
+        /// has the reasoning.
         /// </summary>
         private void SwitchSite()
         {
-            Bookmark other = SiteRules.OtherSite(Store.RecentHistory, PageUrl());
+            Bookmark other = SiteRules.OtherSite(Store.AllFavourites, Store.RecentHistory, PageUrl());
             if (other == null)
             {
                 Flash("No other site to switch to yet");

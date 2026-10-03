@@ -2182,13 +2182,28 @@ television that will not stop reloading is a different order of bad.
 
 ### Switching sites
 
-`SiteRules.OtherSite` walks the history — which is kept most-recent-first — and
-returns the first entry that is not on this site. From a page on B that is the
+`SiteRules.OtherSite` goes round the favourites, in the order their tiles sit on
+the start screen: from a site with a favourite to the next favourite's site,
+wrapping at the end, and from a site with none to the first. Two tiles on one site
+are one stop. Each stop opens the last page the history has on that site, so a
+return to Spotify lands where Spotify was left; the tile's own address is the
+answer only for a site never visited. With no round to go — no favourites, or every
+favourite on the site already open — it falls back to the first shape below, and
+from the start screen it opens the most recent site either way. It needs no new
+screen: a list of sites is what the start screen already is, and the reporter had
+said he did not want to go there.
+
+**The first shape walked the history, and could only ever reach two sites.** It
+returned the first history entry not on this site: from a page on B that is the
 page on A the user came from, and from A it is the page on B they just left, so
-one action alternates between the two sites somebody is going back and forth
-between. That is #75 as it was asked, and it needs no new screen: a list of recent
-sites is what the start screen already is, and the reporter had said he did not
-want to go there.
+one action alternated between the two sites somebody is going back and forth
+between. That is #75 as it was asked — "between two sites" — and it is also why
+his third site never came up (#100, 2026-10-03: "it only switches between 2 sites
+instagram and spotify not to 3rd favourite tiktok"): the history is always ordered
+by what was just left, so the two most recent sites trade places for ever and the
+third is never the first entry off the current site. His own word for the fix,
+"favourite", is the list he already keeps in an order he can see, so that is the
+round.
 
 **It is a menu row before it is a key.** Every digit and `Info` were already spoken
 for, so the only button left on a Samsung remote is the red / A one — and which
@@ -3428,6 +3443,36 @@ the one its report has to come from. The state is:
   reels and on a live stream, and the issue closes on that report. If a freeze
   near a live stream ever does come back, the `dur`/`live page` markers from
   `build-e1a648d` are already in the probe and the reading above still applies.
+  **It came back the same evening (2026-10-02, 17:08 UTC), and #100 was reopened
+  on 2026-10-03:** "Video freeze occured again because of livestream", plus a
+  second complaint, that *Switch site* "only switches between 2 sites instagram and
+  spotify not to 3rd favourite tiktok". The page attached to it does not carry the
+  freeze, and the reason is worth saying once: the report keeps one launch back,
+  and the launch in its `previous run` block (22:23:58–22:36:14 on the TV's clock)
+  has TikTok open twice, for six seconds at launch and for eleven seconds from a
+  start-screen tile at 22:33, with no `mse:` line, no `hold:` line and no
+  `load finished` for either — he left for the start screen both times before the
+  page had finished loading. Between them is an Instagram reels session (fifteen
+  `<video>`s readied at once, none held because none was playing, no stall) and
+  after them Spotify. *Switch site* was never pressed in that launch (`navigate:`
+  is only on the two start-ups), so the switch complaint is from a session the page
+  does not hold either, and it does not need one: the shape above explains it
+  exactly. What the trail does say is where the hold is *not*: `InstallMediaWatch`
+  runs from `PageLoadFinished`, so a TikTok page that has not finished loading has
+  neither the probe nor the hold in it, and on the trail that worked (19:14:34 the
+  day before) TikTok's landing page took two seconds to finish once and fourteen
+  the second time. A reel that plays inside that window is unprotected and
+  unrecorded. That is not built on — nothing says his freeze was in it, and the
+  earlier freeze trail had the hold in and working — but it is the first place to
+  look if the next trail shows a stall with no `hold:` line in front of it.
+  **Shipped in the switch build: the round of favourites** (see *Switching sites*
+  above; `tools/siterules` holds it). **Waiting on:** the freeze itself, which needs
+  the page from a launch that *had* it: `:8081` while the app is still open after
+  the freeze (the `this run` block carries it), or at the very next launch (the
+  `previous run` block does), and not a launch later, because that is the one the
+  report forgets. Read it by the markers above: `dur inf` and `live page` name the
+  stream, a `hold:` line in front of the stall says the hold was in, no `hold:` line
+  on a page that was playing says it was not.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a

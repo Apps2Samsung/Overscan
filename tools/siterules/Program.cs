@@ -192,11 +192,15 @@ namespace Overscan
 
             // ------------------------------------------------- 5. the other site
             //
-            // Issue #75. History is most-recent-first, so the first entry that is
-            // not on this site is the site the user came from — and from there, the
-            // first that is not on *that* one is the site they left. One action
-            // therefore alternates between the two, which is how the question was
-            // asked.
+            // Issue #75, and #100's complaint about it. With no favourites the
+            // switch walks the history: it is most-recent-first, so the first entry
+            // that is not on this site is the site the user came from — and from
+            // there, the first that is not on *that* one is the site they left. One
+            // action therefore alternates between the two, which is how #75 was
+            // asked, and which is also why a third site never came up: the two most
+            // recent sites trade places for ever. With favourites it goes round
+            // them instead, in tile order, each at the last page seen on that site.
+            var none = new List<Bookmark>();
             var history = new List<Bookmark>
             {
                 new Bookmark("https://open.spotify.com/album/2", "Spotify"),
@@ -232,6 +236,53 @@ namespace Overscan
                       new Bookmark("https://b.test/", "B"),
                   }, "https://a.test/").Url == "https://b.test/",
                   "a generated page in the history is skipped, not switched to");
+            Check(SiteRules.OtherSite(none, history, "https://open.spotify.com/album/2").Url ==
+                      "https://www.instagram.com/reels/x/" &&
+                  SiteRules.OtherSite(null, history, other.Url).Url == "https://open.spotify.com/album/2",
+                  "with no favourites the three-argument form is the same walk");
+
+            // The round. Three favourites in tile order, two of them on sites the
+            // history knows; a return lands on the page that was left there, not on
+            // the tile, and the one site never visited opens at its tile.
+            var favourites = new List<Bookmark>
+            {
+                new Bookmark("https://www.instagram.com/", "Instagram"),
+                new Bookmark("https://open.spotify.com/", "Spotify"),
+                new Bookmark("https://open.spotify.com/playlist/9", "Spotify again"),
+                new Bookmark("https://www.tiktok.com/", "TikTok"),
+            };
+            Bookmark step1 = SiteRules.OtherSite(favourites, history, "https://www.instagram.com/reels/x/");
+            Check(step1 != null && step1.Url == "https://open.spotify.com/album/2",
+                  "from Instagram the round goes to Spotify, at the page left there");
+            Bookmark step2 = SiteRules.OtherSite(favourites, history, step1.Url);
+            Check(step2 != null && step2.Url == "https://www.tiktok.com/",
+                  "from Spotify it goes past the second Spotify tile to TikTok, at its tile (never visited)");
+            Bookmark step3 = SiteRules.OtherSite(favourites, history, "https://www.tiktok.com/@someone/live");
+            Check(step3 != null && step3.Url == "https://www.instagram.com/reels/x/",
+                  "from TikTok it wraps round to Instagram, at the page left there");
+            Check(SiteRules.OtherSite(favourites, history, "https://www.google.com/search?q=x").Url ==
+                      "https://www.instagram.com/reels/x/",
+                  "from a site with no favourite it goes to the first favourite's site");
+            Check(SiteRules.OtherSite(favourites, history, HomePage.BaseUrl).Url == "https://open.spotify.com/album/2",
+                  "from the start screen it still opens the most recent site");
+            Check(SiteRules.OtherSite(favourites, new List<Bookmark>(), "https://open.spotify.com/album/2").Url ==
+                      "https://www.tiktok.com/",
+                  "with no history at all each stop is its tile");
+            var oneSite = new List<Bookmark>
+            {
+                new Bookmark("https://open.spotify.com/", "Spotify"),
+                new Bookmark("https://open.spotify.com/playlist/9", "Spotify again"),
+            };
+            Check(SiteRules.OtherSite(oneSite, history, "https://open.spotify.com/album/2").Url ==
+                      "https://www.instagram.com/reels/x/",
+                  "every favourite on this site is no round, so it falls back to the site just left");
+            Check(SiteRules.OtherSite(oneSite, history, "https://www.instagram.com/").Url ==
+                      "https://open.spotify.com/album/2",
+                  "and from elsewhere the one favourite site is where it goes");
+            Check(SiteRules.OtherSite(new List<Bookmark> { new Bookmark(AsEngineUrl("<html></html>"), "Overscan") },
+                                      history, "https://open.spotify.com/album/2").Url ==
+                      "https://www.instagram.com/reels/x/",
+                  "a favourite that is a generated page is not a stop");
 
             // ------------------------------------------------------- 6. the proxy
             //
