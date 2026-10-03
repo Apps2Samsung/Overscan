@@ -1277,7 +1277,9 @@ good one; `build-283f3e9` shipped the census and the AU7200 never reached it;
 census running on this set, nineteen libraries in, with the answer not yet reached.
 The next page needs no install: a relaunch, left alone until the summary screen, and
 the `previous run` block carries the finished count. Nothing here changes the Q80's
-close: that set refused the mapping the AU7200 allows.
+close: that set refused the mapping the AU7200 allows. **Superseded the next
+morning** — the relaunch page came, the count is read, and the stub ships: see *The
+census came back, and the stub ships* below, which is where #105's state now lives.
 
 **The page sent for it (2026-10-02, 13:49 UTC) was not from `build-e1a648d`.** It was
 the attachment from the issue's first post, byte for byte (`tv_logs.txt`, 102 lines,
@@ -1350,6 +1352,139 @@ whole page. How to read it is unchanged from above, with what this page adds:
   dlopen, under a minute in. The census does not drop a breadcrumb before each dlopen
   the way the walk does before each rung, so that page could not say which library;
   the next build adds that line, and that is the one change it makes.
+
+### The census came back, and the stub ships
+
+The `build-e1a648d` page the reporter sent on 2026-10-03 (07:13 UTC, after one
+relaunch, no install) is the finished count. Its `previous run` is a launch on
+2026-10-02 at 16:52 (the TV's clock), and between `OnCreate: UI built` and the EFL
+ladder it carries the whole census, ahead of the engine, in 1421 ms:
+
+```
+engine imports: ELF32 libchromium-impl.so: 115 needed, 2520 imports (5 weak)
+engine imports: refused libwgt-manifest-handlers.so.1 — /lib/libwgt-manifest-handlers.so.1: undefined symbol: _ZTIN6parser15ManifestHandlerE
+engine imports: refused libprivileged-service-client.so — libprivileged-service-client.so: cannot open shared object file: Operation not permitted
+engine imports: 27 unresolved (23 C++) — what a stub must provide
+engine imports: census finished after 1421 ms — on to the engine
+```
+
+Then the engine, line for line as before — nine EFL subsystems, `ewk_init` 0 twice,
+the implementation refused on the same soname — the failure screen, the ladder's
+verdict already on the books, the permission probe through to `probe: done`, the
+heartbeat's `+10s` and `+20s`, and `app loop returned` at 16:53:01: the reporter
+closing it. A whole launch, nothing parked, and the `this run` block is a launch
+that reached the same place again the next morning. Read by the list written above
+it is **two readings at once**, and telling them apart is the whole point of what
+the census records beside each name:
+
+- **The twenty-three C++ names are not the blocked library's.** Every one is in
+  `wgt::parse` (`WidgetConfigParser`, `MetaDataInfo`, `CSPInfo::Key` …), which is
+  the widget-manifest handler library — `libwgt-manifest-handlers.so.1`, the
+  *other* refusal, and its refusal is not a wall: `undefined symbol:
+  _ZTIN6parser15ManifestHandlerE` is the typeinfo of `parser::ManifestHandler`,
+  which `libmanifest-parser.so.1` exports, and that library is on the same
+  DT_NEEDED list, *after* it, and loaded. The census opens each library alone and
+  `RTLD_LOCAL`; the engine's loader opens the whole list into one scope and the
+  typeinfo resolves. A library underlinked against its sibling is a build habit of
+  the platform, not a gate, and the loader's own words say which it is.
+- **The four plain C names are.** `PS_Mknod`, `PS_Mount`, `PS_Umount`,
+  `PS_ErrorToString`, all `FUNC`, no data, nothing C++: the privileged-service
+  client's whole surface as the engine uses it. That is the first reading in the
+  list above — *a no-op stub is buildable, and the build after it ships the stub*.
+
+Two things changed for it. **The census now takes a second pass.** A library
+refused for an `undefined symbol` is held back rather than refused (`held back X —
+… (asked again after the rest)`), and once the rest have loaded they are promoted to
+the global scope with `RTLD_NOLOAD|RTLD_GLOBAL` — nothing new is loaded, the flags
+change — and the held-back library is opened again. One that loads then says so
+(`loaded X on the second pass — the symbol was another needed library's, not a
+wall`) and its exports resolve like anyone else's; one that still fails is refused
+with the second pass named. The wider scope only ever happens on an install whose
+engine has already failed, since that is the only install the census runs on.
+`tools/engineimports`'s `underlinked` scenario builds that exact shape — a library
+importing a data symbol from a sibling it does not name — and holds the census to
+0 refused, 0 unresolved. The next page from the AU7200 should read `115 needed (1
+refused: libprivileged-service-client.so), 2520 imports, 4 unresolved: PS_Mknod
+(FUNC), PS_Mount (FUNC), PS_Umount (FUNC), PS_ErrorToString (FUNC)`.
+
+**And the stub ships.** `Overscan6/res/libprivileged-service-client.so`, 5 KB,
+built from `tools/elfprobe/psstub.s` by the same recipe as the probe library
+(`tools/elfprobe/build.sh` now builds both): `DYN`, `ARM`, EABI5 soft-float like
+the engine's own header, `SONAME libprivileged-service-client.so` — unversioned,
+because that is how the implementation names it — no `NEEDED`, and no `TEXTREL`
+(the one string it returns is addressed PC-relative, inside `.text`, so the loader
+never has to make a code page writable on a firmware that polices mappings). Each
+of the four functions returns 0; `PS_ErrorToString` returns an empty string. The
+privileged-service calls are what the engine would use to set up a sandbox mount a
+browser-only app has no use for, and "done, nothing happened" is the answer most
+likely to let it carry on; an error would come back as the failure we already have.
+
+`EngineStub` (`src/common`) is what loads it, from `OnCreate` after the census and
+before `TryStartEngine`: `dlopen` by absolute path, `RTLD_NOW|RTLD_GLOBAL`, under a
+`Deadline`, with `PS_Mount` resolved from the handle as proof it is ours. glibc
+checks the sonames already in the process before it searches for a `DT_NEEDED`,
+so when `ewk_init` loads the implementation the loader finds
+`libprivileged-service-client.so` satisfied and never opens the file in `/usr/lib`
+that it may not. It is **not a diagnostic**, so the rule that puts diagnostics
+behind the engine does not apply — it is the thing being tried and has to be in
+front — and two gates stand in for that rule:
+
+- **Never on a set where the engine starts.** The gate is
+  `NativeProbe.EngineFailedHere()`, the ledger that only comes into existence on a
+  launch whose engine failed. On every set this app works on the header says
+  `engine stub: shipped, not loaded — the engine has not failed on this install`
+  and nothing else happens. A stub shadowing a real library on a working set would
+  be the worst thing this build could do, and this is what makes it impossible.
+- **At most twice on a set where it does not help.** `engine-stub.txt` in `data/`
+  gets a `trying` line before the dlopen and a `came back <why>` line once the
+  engine has answered, started or failed. A launch that loads the stub and then
+  dies inside `ewk_init` — the Q80's shape, a second after the call — never writes
+  the second line; two `trying` lines with nothing behind them and the stub is
+  withheld (`engine stub: withheld — 2 launches never came back from the engine with
+  it in`), the failure screen is back, and the report says why. The ladder's own
+  rule for its rungs, for the same reason: a fix that kills every launch is a brick,
+  and from the sofa a brick and a dead set look the same.
+
+The report has an `engine stub:` header line on both pages (the full one and the
+no-provider one); the trail has `engine stub: loading <path> (<bytes>) RTLD_NOW|RTLD_GLOBAL`
+before the call and the result after it. Only the tizen6 package carries the file:
+the AU7200 is the only set that has passed the third gate, the Q80 (tizen5) refused
+every mapping, and the NUI sets have no wall.
+
+How to read the next report, said here first:
+
+- **`engine stub: loaded from …`, then `Chromium initialized, refcount=1` (or any
+  positive count), then `engine UA:` and a page** — the AU7200 runs Overscan. The
+  reply says so, and the follow-up is whatever the browser then does on that set,
+  as a new issue or on this one.
+- **`engine stub: loaded from …`, then the engine failing on a *different* line** —
+  `dlopen failed:` naming another library, or an `undefined symbol` — the stub did
+  its job and the wall has a second layer; the name on that line is the next
+  question, and the census (now four names clean) says whether a second stub is a
+  short list of C functions or not.
+- **`engine stub: loaded from …`, then the same `libprivileged-service-client.so:
+  Operation not permitted`** — the loader went to `/usr/lib` regardless, so the
+  soname match did not happen in this firmware's loader (an `RTLD_GLOBAL` handle in
+  the app's namespace not being consulted for the engine's `dlopen`, or the
+  implementation loaded in a way that bypasses it). That is the end of the stub
+  route as designed, and the only variant left is the one `ChromiumImpl` already
+  does between the two attempts: open the implementation ourselves, by absolute
+  path, after the stub.
+- **`engine stub: loading …` as the launch's last line, or `Chromium.Initialize()`
+  right behind it with no `Chromium initialized`** — the stub, or the engine with
+  the stub in, ended the launch. The next launch tries once more and says so
+  (`attempt 2, the last launch with it in never came back`); the one after withholds
+  it. Two launches, then the report reads as before and the set is where #95 is.
+- **`engine stub: refused — …`** — our own library would not load on a path the
+  ladder said maps executable; the loader's words on that line are the finding.
+
+**State of #105 (2026-10-03):** the census is read, the stub route is the four
+names above, and the stub ships in the build this section was written for. The
+reply asks for an install of that build's `Overscan-tizen6.tpk`, two launches (the
+first is the one that loads the stub, since the ledger already exists on his
+install; the second serves the page that shows it), and the whole `:8081` page —
+and says in advance which of the five readings above means the AU7200 runs
+Overscan and which means it does not.
 
 ### `ELM_ACCEL` has to be set before the window exists
 
