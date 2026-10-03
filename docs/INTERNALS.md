@@ -535,6 +535,17 @@ on the latest firmware, since a software update is the only thing that could shi
 different engine and change this — if it pulls one, reinstall `build-9f4a87a`, resend
 the page, and reopen. The rest of this section is the road that got here.
 
+**2026-10-03, a postscript.** The stub route that was dead here turned out to be
+alive on the AU7200 (issue #105, Tizen 6.0; see *The census came back, and the
+stub ships*), and from the build after `build-ab20b83` the tizen5 package carries
+the stub as well, under the same gates. That does not change the reading above:
+the Q80's ladder refused the very `dlopen` the stub needs, in every location. The
+reporter was invited anyway, at Patrick's call, with that expectation stated in
+the invitation, because a firmware update since September could have changed the
+mapping policy and the page would say so either way: `own code:` still refusing
+every location and `engine stub: refused` is the same close, and `Chromium
+initialized, refcount=1` is the set running Overscan.
+
 **The same wall on a 2021 set, and the second close (issue #95, 2026-09-09).** A
 QE65Q70AA on Tizen 6.0 sent the whole diagnostics page for the tizen6 package
 (`build-481d83c`), and it is the Q80's trail line for line: engine preloaded, nine
@@ -1447,9 +1458,17 @@ front — and two gates stand in for that rule:
 
 The report has an `engine stub:` header line on both pages (the full one and the
 no-provider one); the trail has `engine stub: loading <path> (<bytes>) RTLD_NOW|RTLD_GLOBAL`
-before the call and the result after it. Only the tizen6 package carries the file:
-the AU7200 is the only set that has passed the third gate, the Q80 (tizen5) refused
-every mapping, and the NUI sets have no wall.
+before the call and the result after it. The tizen6 package carries the file from
+its own `res/`; the NUI sets have no wall and do not. **Since the AU7200 ran on it
+(2026-10-03), `Overscan5` ships the same file too**, placed in `res/` by a
+`TizenTpkUserIncludeFiles` item from `Overscan6/res/`. Not for the Q80: that set
+refused to execute-map every file of ours in every location, `dlopen` included,
+and the stub's `dlopen` is that same call, so on the Q80 the line will read
+`engine stub: refused ... failed to map segment` and the failure screen stays.
+It is for the 5.x set nobody has heard from yet whose firmware has the engine wall
+and not the mapping one: the two gates are independent and the Tizen version
+predicts neither (Patrick's RU7020 on 5.0 has no wall at all). The gates in
+`EngineStub` are what make shipping it to every 5.x set safe.
 
 How to read the next report, said here first:
 

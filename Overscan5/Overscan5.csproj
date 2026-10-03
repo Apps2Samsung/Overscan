@@ -51,6 +51,19 @@
     <TizenTpkUserIncludeFiles Include="res/libovprobe.so">
       <TizenTpkSubDir>lib</TizenTpkSubDir>
     </TizenTpkUserIncludeFiles>
+    <!--
+      Issue #105's stub, the same file the tizen6 package ships, placed in res/
+      where EngineStub looks for it. The Q80 (issue #17, Tizen 5.5) refused to map
+      any file of ours executable, so on that set this is one recorded refusal and
+      nothing more; it is here for the 5.x set whose firmware has the engine wall
+      and not the mapping one, which the Tizen version does not predict. The gates
+      in EngineStub are what make shipping it to every 5.x set safe: never loaded
+      unless the engine has already failed on this install, withheld after two
+      launches that did not come back with it in.
+    -->
+    <TizenTpkUserIncludeFiles Include="../Overscan6/res/libprivileged-service-client.so">
+      <TizenTpkSubDir>res</TizenTpkSubDir>
+    </TizenTpkUserIncludeFiles>
   </ItemGroup>
 
   <ItemGroup>

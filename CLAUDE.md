@@ -364,8 +364,11 @@ Two tiny ARM shared objects are the only native binaries this repo ships, both
   an app open, under that soname. `EngineStub` loads it `RTLD_GLOBAL` before the
   engine, and **only** on an install whose ledger says the engine already failed
   there, at most twice if the launch never comes back with it in. INTERNALS, *The
-  census came back, and the stub ships*, has the readings. Only the tizen6 package
-  carries it.
+  census came back, and the stub ships*, has the readings. The tizen6 package
+  carries it from its own `res/`, and `Overscan5` ships the same file into its
+  `res/` with a `TizenTpkUserIncludeFiles` item: the Q80 (#17) refused to map any
+  file of ours, so there it is one recorded refusal, but the refusal is per
+  firmware and another 5.x set may answer the ladder differently.
 
 Rebuild them only if `tools/elfprobe/ovprobe.s` or `tools/elfprobe/psstub.s` changes:
 
