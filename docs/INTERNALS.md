@@ -1529,7 +1529,7 @@ the stub (the ledger gating it is permanent), and `engine-stub.txt` gains a
 `trying` and a `came back  engine started` line per launch, so the two-strikes
 rule never trips on a set where it works.
 
-One thing the page did not say, and the build after this fixes: the report a
+One thing the page did not say, and `build-ab20b83` fixes: the report a
 *running* engine serves had no `engine stub:` header line. The failure page and
 the no-provider page had one; the page everyone had been reading until now was
 one of those two, and the working page was never going to be served on this set
@@ -2802,7 +2802,7 @@ Read in order:
   blank)` with the session intact throughout — `build-7e24138`'s fix. He changed to
   `198.23.243.226:6361` at 13:55 and everything above went through that one.
 
-The build after this asks the one question: **what asked for the pipeline that
+`build-ab20b83` asks the one question: **what asked for the pipeline that
 opened at the freeze.** `NuiMseWatch` now takes `<audio>` elements in the same
 listeners (named from the shared namer, marked `(audio)`); wraps the `src` and
 `srcObject` setters and `load()` on `HTMLMediaElement.prototype` — pass-through,
@@ -2841,7 +2841,7 @@ recovers rather than prevents, and at the time every reel froze. With the freeze
 now confined to a live stream next in the feed, a two-second hiccup once in a
 session is a different trade from a stop on every reel, and `build-7e24138`'s
 reading — "pause and resume brings it back, which restarts the pipeline" — is the
-evidence it would work. It is not in this build: it changes playback, and the
+evidence it would work. It is not in `build-ab20b83`: it changes playback, and the
 question of what opened the pipeline is worth one page first.
 
 ## What the NUI build never asked the engine for
@@ -3798,12 +3798,12 @@ the one its report has to come from. The state is:
   then played), the reel in front of it stopped anyway with the whole reel
   buffered, and at that second the native output has a fourth pipeline with an
   audio decoder and no video decoder that nothing the probe watched had asked for.
-  The probe watched `<video>` elements in the document and nothing else, so the
-  build after this widens it, read-only: `<audio>` elements named and listed, a
+  The probe watched `<video>` elements in the document and nothing else, so
+  `build-ab20b83` widens it, read-only: `<audio>` elements named and listed, a
   `src`/`srcObject`/`load()` on a media element outside the document written down
   and listed at a stall, and a `scene:` line closing every stall with the counts of
   video, audio, detached and foreign-frame elements. The hold is unchanged.
-  **Waiting on:** the next freeze's page, read by those lines: an `(audio)` or
+  **Waiting on:** the next freeze's page from that build, read by those lines: an `(audio)` or
   `detached` line at the stall's second names the element the hold has to learn;
   a `scene:` with a frame `not ours` and nothing else puts it where no script of
   ours runs; nothing stirring at all is the engine's own doing. The last two have
