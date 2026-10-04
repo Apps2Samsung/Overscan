@@ -69,6 +69,70 @@ namespace Overscan
         }
 
         /// <summary>
+        /// How much of this run's trail the report carries when the file has grown
+        /// past it: the end, because the end is where the thing being asked about
+        /// is. A session's own lines are a few dozen kilobytes an hour; this is only
+        /// reached by a page that writes errors without end.
+        /// </summary>
+        private const int CurrentCap = 1024 * 1024;
+
+        /// <summary>
+        /// This run's trail so far, read back from disk for the report.
+        ///
+        /// The report used to carry the previous run's trail and this run's
+        /// <see cref="DiagLog"/>, and nothing else — because the app that dies has no
+        /// afterwards in which to read anything back, the launch that died is the one
+        /// with the answer in it, and sixty on-screen lines are what an app that is
+        /// still up needs. But the lines that go to the trail alone
+        /// (<see cref="DropToTrail"/>: the memory readings, the media census, the
+        /// MSE probe, the hold) are exactly the evidence a reporter is asked for
+        /// *while the app is still open*, and until this existed the page fetched
+        /// then did not have them: issue #100's 2026-10-04 page was fetched with
+        /// TikTok on screen refusing every video, and carried a header snapshot
+        /// (<c>media : ... rs0 starved stuck</c>) with not one <c>mse:</c> line
+        /// behind it, the sequence being on disk and nowhere on the page.
+        ///
+        /// Read on the diagnostics server's thread, never the writer's, and with the
+        /// file shared for writing so the writer is never waited on. A trail still
+        /// in the writer's queue (see <see cref="Status"/>) is not on disk yet and so
+        /// not here; the header's <c>trail write:</c> line says when that is the case.
+        /// </summary>
+        public static string Current
+        {
+            get
+            {
+                string path = _path;
+                if (path == null)
+                {
+                    return "(no trail: nowhere was writable)";
+                }
+
+                try
+                {
+                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    {
+                        long length = stream.Length;
+                        string note = string.Empty;
+                        if (length > CurrentCap)
+                        {
+                            stream.Seek(length - CurrentCap, SeekOrigin.Begin);
+                            note = "(first " + (length - CurrentCap) + " bytes of this run's trail left out; the end is below)\n";
+                        }
+
+                        using (var reader = new StreamReader(stream))
+                        {
+                            return note + reader.ReadToEnd();
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    return "(this run's trail could not be read back: " + ex.GetType().Name + ": " + ex.Message + ")";
+                }
+            }
+        }
+
+        /// <summary>
         /// The directory the trail landed in, or null when none was writable.
         /// <see cref="NativeStdErr"/> needs a scratch file and this is the one
         /// place that has already worked out where the app may write.

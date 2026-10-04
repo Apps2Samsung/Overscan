@@ -3071,10 +3071,20 @@ namespace Overscan
             // The previous run's trail, exactly as the ElmSharp report carries it.
             // A page that closes the app leaves nothing to read in this run: the
             // launch that died is the one with the answer in it.
+            //
+            // And this run's, read back from disk (issue #100, 2026-10-04). The
+            // `log` block at the end is DiagLog's sixty on-screen lines, which the
+            // trail-only lines — `media:`, `mse:`, `hold:`, `page error:`, the
+            // memory readings — never enter. A reporter asked for the page "while
+            // the app is still open" sent exactly that page, with TikTok refusing
+            // every video on screen, and it carried the header's one-line snapshot
+            // of each probe and not one line of the sequence behind it. The trail
+            // was on disk the whole time. Breadcrumbs.Current explains the read.
             return "Overscan diagnostics (NUI build)\n\n" +
                    "build     : " + BuildInfo.Tag + "\n" +
                    "platform  : NUI WebView, api-version 9.0+\n" +
                    "trail file : " + Breadcrumbs.Location + "\n" +
+                   "trail write: " + Breadcrumbs.Status + "\n" +
                    engine + "\n\n" +
                    // Issue #37. dest is the engine's own Sec-Fetch-Dest for the
                    // request, and build-f295172's report answered what it was put
@@ -3086,6 +3096,8 @@ namespace Overscan
                    "sites remembered (issue 74)\n" + SiteRules.Dump() + "\n" +
                    "requests this run (one line per host and first path segment, most first)\n" +
                    RequestTrail.Dump() + "\n\n" +
+                   "this run (the trail so far — the media, mse, hold and page error lines are here and not in the log)\n" +
+                   Breadcrumbs.Current + "\n\n" +
                    "previous run (last line is where it died)\n" + Breadcrumbs.Previous + "\n\n" +
                    "previous run's native output\n" + Breadcrumbs.PreviousStdErr + "\n\n" +
                    "log\n" + DiagLog.Dump();

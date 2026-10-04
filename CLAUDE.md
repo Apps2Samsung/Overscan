@@ -429,7 +429,10 @@ around spending it well.
 - **`http://<TV-IP>:8081`** serves the diagnostics report (`DiagServer`), and key
   `3` shows a shorter version on the TV. Ask for the *whole* page: the
   `previous run` block is where a launch actually ended, and the `this run` block
-  only shows how far the current start-up had got when the page was loaded.
+  only shows how far the current launch had got when the page was loaded. On the
+  NUI build that block is the trail file read back, so it has the probe lines
+  (`media:`, `mse:`, `hold:`, `page error:`); on the ewk builds it is the
+  sixty-line on-screen log, which never has them.
 - **Whatever is most likely not to survive the firmware goes last.** A probe in
   front of the thing it is explaining has cost this project a build three times
   now — issues #13, #17 and #17 again. If a diagnostic can kill the process, it
