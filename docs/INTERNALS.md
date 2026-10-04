@@ -2931,7 +2931,7 @@ add, `page error:` with TikTok's own words for the fetch that failed, the
 the start-up), and the trail is on disk and was on no page. The passage in *What
 is left on the 2025 sets* saying "the `this run` block carries it" was written
 from the ElmSharp report, whose `this run` is also `DiagLog`; it was never true of
-either build. So `Breadcrumbs.Current` reads this run's file back — on the
+either build. So `Breadcrumbs.Current` (`build-b019483`) reads this run's file back — on the
 diagnostics server's thread, shared for writing, the last megabyte if it has
 grown past that — and the NUI report carries it as `this run (the trail so
 far)`, with `trail write:` in the header above it the way the ElmSharp one has.
@@ -3898,8 +3898,8 @@ the one its report has to come from. The state is:
   **Shipped in `build-91f53ce`: the round of favourites** (see *Switching sites*
   above; `tools/siterules` holds it). Reply posted 2026-10-03 quoting that tag. **Waiting on:** the freeze itself, which needs
   the page from a launch that *had* it: `:8081` while the app is still open after
-  the freeze (the `this run` block carries it — **it did not, until the build
-  after `build-ab20b83`**; see *Every video refused, and the page without its
+  the freeze (the `this run` block carries it — **it did not, until `build-b019483`**;
+  see *Every video refused, and the page without its
   trail*), or at the very next launch (the `previous run` block does), and not a
   launch later, because that is the one the report forgets. Read it by the markers above: `dur inf` and `live page` name the
   stream, a `hold:` line in front of the stall says the hold was in, no `hold:` line
@@ -3935,8 +3935,8 @@ the one its report has to come from. The state is:
   and the page cannot prove it, because the page fetched while the app is open
   carried no trail: the NUI report had never had a `this run` block for the trail
   file, only `DiagLog`'s sixty lines, and every `mse:`/`media:`/`page error:` line
-  is trail-only. Fixed: `Breadcrumbs.Current` and the `this run (the trail so
-  far)` block, `trail write:` in the header. His hold is **off** by the menu row
+  is trail-only. Fixed in `build-b019483`: `Breadcrumbs.Current` and the `this run
+  (the trail so far)` block, `trail write:` in the header. His hold is **off** by the menu row
   and should go back on. **Waiting on:** TikTok through the other proxy (plays:
   it is this proxy, nothing on our side), and the page from the new build while
   TikTok is refusing, read by `page error:` (TikTok's words for the failed fetch),
