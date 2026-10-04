@@ -77,6 +77,33 @@ namespace Overscan.Harness
             Expect(Tizen.Log.Calls == 1, "dlog saw the one line meant for it (" + Tizen.Log.Calls + ")");
             Expect(DiagLog.Dump().Contains("first") && !DiagLog.Dump().Contains("second"),
                    "and the on-screen log kept the one meant for it");
+
+            // Issue #100, 2026-10-04: the report carries this run's trail read back
+            // from disk, so a page fetched while the app is open has the trail-only
+            // lines (media, mse, hold) and not just the on-screen log.
+            string current = Breadcrumbs.Current;
+            Expect(current.Contains("--- run started ---") && current.Contains("  first\n") && current.Contains("  second\n"),
+                   "the report's read-back has this run's trail, trail-only lines included");
+            Breadcrumbs.DropToTrail("third");
+            Expect(Breadcrumbs.Current.Contains("  third\n"), "and a later line the next time it is asked");
+
+            // A trail past the cap comes back from its end, with the cut said out loud.
+            using (var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            {
+                byte[] filler = System.Text.Encoding.ASCII.GetBytes(new string('x', 4095) + "\n");
+                for (int i = 0; i < 300; i++)
+                {
+                    stream.Write(filler, 0, filler.Length);
+                }
+            }
+
+            Breadcrumbs.DropToTrail("last");
+            string capped = Breadcrumbs.Current;
+            Expect(capped.StartsWith("(first ") && capped.Contains(" bytes of this run's trail left out"),
+                   "a trail past a megabyte says what it left out");
+            Expect(!capped.Contains("--- run started ---") && capped.EndsWith("  last\n"),
+                   "and keeps the end, where the last line is");
+            Expect(capped.Length <= 1024 * 1024 + 200, "at about the cap (" + capped.Length + " chars)");
         }
 
         /// <summary>

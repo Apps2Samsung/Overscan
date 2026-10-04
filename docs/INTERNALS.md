@@ -2863,6 +2863,99 @@ reading — "pause and resume brings it back, which restarts the pipeline" — i
 evidence it would work. It is not in `build-ab20b83`: it changes playback, and the
 question of what opened the pipeline is worth one page first.
 
+### Every video refused, and the page without its trail
+
+The page FUSIONOF posted on 2026-10-04 (10:12 UTC, a gist, 38 KB) is from
+`build-ab20b83` and it is a different complaint: "We're having trouble playing
+this video. Please refresh and try again." on **every** TikTok video, and the same
+proxy "works fine on laptop". Not a freeze. Nothing plays at all.
+
+What the page says, and it is the header saying it, not the trail:
+
+```
+forced UA : Mobile Safari (the fifth preset he tried; TV default, Chrome 130, Chrome 125, Safari 17 before it)
+media     : playing=1 of 1 — 0x0 rs0 starved stuck
+mse format: ms1 video init #1 avc1 576x1024
+mse stall : (no stall seen yet)
+one video : off (menu) — videos preload freely
+ad block  : ... 1775 requests, 0 refused, 0 silenced
+proxy     : http://191.96.254.138:6185  (login set)   ·   this page through it
+requests  : v16-webapp-prime.us.tiktok.com/video — 7 GET, range no
+```
+
+Read in order:
+
+- **The element is playing nothing and the engine has refused nothing.** `rs0`
+  with `0x0` is an element that never reached metadata; `starved` is nothing
+  buffered past the playhead; no `ERROR n` on the line is `v.error` null, and an
+  init segment the engine could not parse ends in the append-error algorithm and
+  `MEDIA_ERR_SRC_NOT_SUPPORTED` on the element, which the census would carry. So
+  TikTok built one MediaSource, appended one video init segment (`avc1`,
+  576x1024, a portrait reel; the day before, `avc1` 1024x576 went from `init #1`
+  to `loadedmetadata` within the same second), and then nothing else arrived
+  for it to append. The error on screen is TikTok's own toast for a fetch that
+  failed or never finished, not the engine's.
+- **The requests went out and the census cannot say what came back.** Seven
+  `GET`s to the video CDN over five page loads, none refused by us (`0 refused`),
+  no `Range` header on any of them. The `answered` column is ours only — what
+  the interceptor itself answered — and the hook never sees a response, so the
+  page cannot tell a 403 from a byte stream that stopped. That is the one
+  thing it would have taken to call this closed from here.
+- **It is the proxy that refused every load the day before.** `191.96.254.138:
+  6185` is the one *The hold held, and the reel froze anyway* has refusing
+  TikTok, `tiktok.com` and DuckDuckGo for eight minutes on 2026-10-03 (`Unknown,
+  Unknown (via proxy)`), after which he changed to `198.23.243.226:6361` and
+  everything through that one played, freeze included. On 2026-10-04 he is back
+  on the first proxy; it answers pages now and starves video. That is the shape
+  *A failed load is an answer, not silence* already named — `rs1`/`rs2` with the
+  `GstTZAppSrc` underflow, "a shared proxy that cannot keep up with video" —
+  one step further down, at `rs0`. "The same proxy works on the laptop" is the
+  one thing against it, and it is weaker than it sounds: a shared proxy hands
+  out exits per connection, a CDN that refuses an exit refuses it for the one
+  client on it, and nothing on this page says the laptop's video went through
+  the same exit, or through the proxy at all for the CDN host.
+- **The hold is off**, by the menu row, which he will have done looking for the
+  cause. It has nothing to do with this (`playing=1 of 1`: no second element for
+  it to hold) and the freeze comes back with it off, so it goes back on.
+- **The UA presets are not it.** Five of them, the error on all five.
+
+**And the page carried none of the sequence, which is the finding about us.** The
+report asked him for, twice now in this issue, is "the `:8081` page while the app
+is still open". He sent exactly that. The NUI report had the previous run's
+trail, this run's `log` — `DiagLog`'s sixty on-screen lines — and this run's
+*header*, one line per probe with its last reading. Every line that would have
+shown the sequence (`mse: ms1 add video …`, the audio buffer it did or did not
+add, `page error:` with TikTok's own words for the fetch that failed, the
+`media:` census going from `rs0` to `rs0`) goes to the trail alone through
+`DropToTrail`, by design (`DiagLog` is sixty lines and a heartbeat would evict
+the start-up), and the trail is on disk and was on no page. The passage in *What
+is left on the 2025 sets* saying "the `this run` block carries it" was written
+from the ElmSharp report, whose `this run` is also `DiagLog`; it was never true of
+either build. So `Breadcrumbs.Current` reads this run's file back — on the
+diagnostics server's thread, shared for writing, the last megabyte if it has
+grown past that — and the NUI report carries it as `this run (the trail so
+far)`, with `trail write:` in the header above it the way the ElmSharp one has.
+`tools/trail/run.sh` holds the read-back to carrying trail-only lines, picking
+up a later one, and saying what it cut past the cap. Nothing in the app's
+behaviour changes; the ewk packages compile the accessor and never call it.
+
+What decides it, and none of it needs a build:
+
+- **The other proxy.** TikTok through `198.23.243.226:6361` played reels on
+  2026-10-03 through the same probe and hold. Videos playing through it today
+  and not through `191.96.254.138:6185` is the proxy, and nothing on this side.
+- **The page from the build with the read-back, while TikTok is on screen
+  refusing.** `page error:` lines are TikTok's own console errors and will name
+  the fetch (a status, `Failed to fetch`, a `net::ERR_` code); the `mse:` lines
+  say whether an audio buffer was ever added and what it got; the `media:`
+  census at `rs0 starved` for the whole session is the data never coming. And
+  the native output: not one `omxtzuhdvideodec` for the whole session is an
+  engine that was never handed a frame to decode.
+- **The one answer that would be ours:** an `init #1` followed by `ERROR 4` or
+  `ERROR 3` on the census, or a `page error:` naming a `SourceBuffer` append.
+  That is the engine refusing the stream, and the format on the `init` line is
+  what to go to.
+
 ## What the NUI build never asked the engine for
 
 The two builds share `src/common` and nothing else, and everything the ElmSharp
@@ -3805,9 +3898,10 @@ the one its report has to come from. The state is:
   **Shipped in `build-91f53ce`: the round of favourites** (see *Switching sites*
   above; `tools/siterules` holds it). Reply posted 2026-10-03 quoting that tag. **Waiting on:** the freeze itself, which needs
   the page from a launch that *had* it: `:8081` while the app is still open after
-  the freeze (the `this run` block carries it), or at the very next launch (the
-  `previous run` block does), and not a launch later, because that is the one the
-  report forgets. Read it by the markers above: `dur inf` and `live page` name the
+  the freeze (the `this run` block carries it — **it did not, until the build
+  after `build-ab20b83`**; see *Every video refused, and the page without its
+  trail*), or at the very next launch (the `previous run` block does), and not a
+  launch later, because that is the one the report forgets. Read it by the markers above: `dur inf` and `live page` name the
   stream, a `hold:` line in front of the stall says the hold was in, no `hold:` line
   on a page that was playing says it was not.
   **That page came the same morning (2026-10-03, 08:33 UTC), from `build-e1a648d`
@@ -3829,6 +3923,27 @@ the one its report has to come from. The state is:
   the same fix — the pause/play recovery set aside in *Two videos, one decoder*,
   a different trade now that the freeze is confined to live streams — and the
   first one has the hold.
+  **Then a different page (2026-10-04, 10:12 UTC, from `build-ab20b83`): every
+  TikTok video refused with TikTok's own "trouble playing this video" toast, and
+  the same proxy "works fine on laptop".** See *Every video refused, and the page
+  without its trail*. The header has the one element at `0x0 rs0 starved stuck`
+  with no element error after one `avc1` init segment, seven requests to the video
+  CDN that nothing of ours refused, and the proxy is `191.96.254.138:6185` — the
+  one that refused every load for eight minutes the day before, after which the
+  reels that played went through `198.23.243.226:6361`. The reading is the proxy
+  starving video, as *A failed load is an answer, not silence* read `rs1`/`rs2`,
+  and the page cannot prove it, because the page fetched while the app is open
+  carried no trail: the NUI report had never had a `this run` block for the trail
+  file, only `DiagLog`'s sixty lines, and every `mse:`/`media:`/`page error:` line
+  is trail-only. Fixed: `Breadcrumbs.Current` and the `this run (the trail so
+  far)` block, `trail write:` in the header. His hold is **off** by the menu row
+  and should go back on. **Waiting on:** TikTok through the other proxy (plays:
+  it is this proxy, nothing on our side), and the page from the new build while
+  TikTok is refusing, read by `page error:` (TikTok's words for the failed fetch),
+  the `mse:` lines (an audio buffer added or not), and the native output (no
+  `omxtzuhdvideodec` at all is an engine never handed a frame). The answer that
+  would be ours is `ERROR 3`/`ERROR 4` on the census after an `init #1`, and the
+  freeze question above is unchanged behind this one.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
