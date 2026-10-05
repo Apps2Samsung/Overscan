@@ -113,6 +113,35 @@ try {
   if (e.name !== 'TypeError') { fail('srcObject threw ' + e.name + ', not TypeError'); }
 }
 
+/* The three starts the 2026-10-05 trail showed the probe could not see. An
+   element whose source arrives through setAttribute while it is outside the
+   document: the property setter never runs, so the attribute wrap is the one line
+   it leaves, and the attribute and the property must both read back. */
+var attr = document.createElement('video');
+attr.setAttribute('src', 'https://example.invalid/attr/reel.mp4');
+if (attr.getAttribute('src') !== 'https://example.invalid/attr/reel.mp4') { fail('setAttribute wrap did not reach the attribute'); }
+if (attr.src !== 'https://example.invalid/attr/reel.mp4') { fail('after setAttribute, src does not read back: ' + attr.src); }
+
+/* new Audio(url): the constructor sets the source inside the engine, no setter, no
+   setAttribute, nothing in the document. It must still make the engine's own
+   element, with and without an argument. */
+var ctor = new Audio('https://example.invalid/ctor/sound.mp3');
+if (!(ctor instanceof HTMLAudioElement)) { fail('new Audio(url) no longer makes an HTMLAudioElement'); }
+if (Audio.prototype !== HTMLAudioElement.prototype) { fail('Audio.prototype changed'); }
+if (ctor.src !== 'https://example.invalid/ctor/sound.mp3') { fail('new Audio(url) lost its src: ' + ctor.src); }
+var bare = new Audio();
+if (!(bare instanceof HTMLAudioElement) || bare.getAttribute('src') !== null) { fail('new Audio() with no argument changed'); }
+
+/* play() on a detached element, the one call even a new Audio has to make. The
+   promise is the engine's own and rejects on the engine's terms (no source it
+   can load); the wrap must hand it back untouched. */
+var pr = det.play();
+if (!pr || typeof pr.then !== 'function') { fail('play() no longer returns a promise'); }
+pr.catch(function(){});
+var pr2 = ctor.play();
+if (!pr2 || typeof pr2.then !== 'function') { fail('play() on a new Audio no longer returns a promise'); }
+pr2.catch(function(){});
+
 /* Two frames, one ours and one not: the scene line has to tell them apart. */
 var same = document.createElement('iframe');
 same.src = 'about:blank';
@@ -216,7 +245,16 @@ function check(){
   if (has(/srcObject/)) { fail('a refused srcObject left a line'); }
   if (!has(/^with v\\d paused rs\\d ns\\d url example\\.invalid\\/detached, detached, last no event seen$/)) { fail('stall does not list the detached element'); }
   if (!has(/^with v\\d \\(audio\\) paused rs\\d ns\\d url example\\.invalid\\/audio, /)) { fail('stall does not list the audio element'); }
-  if (!has(/^scene: 3 video, 1 audio in the document, 1 detached known, 2 iframes \\(1 not ours\\)$/)) { fail('scene line wrong or missing: ' + mse.filter(function(l){ return /^scene/.test(l); })); }
+  if (!has(/^v\\d+ setAttribute src url example\\.invalid\\/attr, detached$/)) { fail('setAttribute src on a detached element not reported'); }
+  if (!has(/^v\\d+ \\(audio\\) new Audio\\(url example\\.invalid\\/ctor\\), detached$/)) { fail('new Audio(url) not reported'); }
+  if (!has(/^v\\d+ \\(audio\\) new Audio\\(\\), detached$/)) { fail('new Audio() not reported'); }
+  if (!has(/^v\\d+ play\\(\\) url example\\.invalid\\/detached, detached$/)) { fail('play() on a detached element not reported'); }
+  if (!has(/^v\\d+ \\(audio\\) play\\(\\) url example\\.invalid\\/ctor, detached$/)) { fail('play() on a new Audio not reported'); }
+  if (mse.filter(function(l){ return /^v\\d+ (\\(audio\\) )?play\\(\\)/.test(l); }).length !== 2) { fail('play() reported other than for the two detached elements: ' + mse.filter(function(l){ return /play\\(\\)/.test(l); })); }
+  if (!has(/^with v\\d+ paused rs\\d ns\\d url example\\.invalid\\/attr, detached, /)) { fail('stall does not list the setAttribute element'); }
+  if (!has(/^with v\\d+ \\(audio\\) paused rs\\d ns\\d url example\\.invalid\\/ctor, detached, /)) { fail('stall does not list the new Audio element'); }
+  if (!has(/^with 1 more not listed$/)) { fail('the seventh other element was not counted as not listed'); }
+  if (!has(/^scene: 3 video, 1 audio in the document, 4 detached known, 2 iframes \\(1 not ours\\)$/)) { fail('scene line wrong or missing: ' + mse.filter(function(l){ return /^scene/.test(l); })); }
   if (mse.filter(function(l){ return /^scene/.test(l); }).length !== 1) { fail('scene reported other than once with the one stall'); }
   if (has(/^stall/) && mse.filter(function(l){ return /^stall/.test(l); }).length !== 1) { fail('one stall reported more than once'); }
 

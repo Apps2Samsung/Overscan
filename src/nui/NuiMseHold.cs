@@ -33,8 +33,11 @@ namespace Overscan
     /// then, so the cost is the time to decode a first frame, not a download.
     ///
     /// The holds are precise about *when*: only while another video is playing, which
-    /// is the one state in which a second pipeline is harmful. An element that is
-    /// readied while nothing plays (the first reel, any single-player site) is untouched.
+    /// is the one state in which a second pipeline is harmful, or while another video
+    /// is itself held, which is the page's one tick between pausing a reel and playing
+    /// the next (the 2026-10-05 live-stream freeze was sourced in that tick). An
+    /// element that is readied while nothing plays and nothing is held (the first
+    /// reel, any single-player site) is untouched.
     /// An element with the <c>autoplay</c> attribute is untouched, because the engine
     /// starts that one without the page ever calling <c>play()</c>, and a held source
     /// would then never be released. A new source set on a held element replaces the
@@ -173,16 +176,29 @@ namespace Overscan
 
   /* Another <video> that is playing: paused is false the moment play() is called,
      whether or not a frame has shown yet, which is exactly when a second pipeline
-     starts to matter. */
+     starts to matter. Or another <video> that is held: the page has given it a
+     source while something played and has not played it yet, so it is the one
+     about to play. The 2026-10-05 trail (issue #100) is why the second clause is
+     there: at the swipe from a reel to a live stream TikTok paused the reel, set
+     the reel after the live stream on its spare element, and only then played the
+     live stream. For that one tick nothing was playing, the hold let the source
+     through, the engine built its pipeline a second and a half after the live
+     stream's, and the live stream froze. On 2026-10-03 the same gap was sourced
+     and the engine happened not to build early, and that live stream played.
+     With the held one counted the gap is closed; the chain of holds ends where
+     it always did, at the page playing or re-sourcing them. */
   function busy(v) {
+    var held = null;
     try {
       var vs = document.getElementsByTagName('video');
       for (var i = 0; i < vs.length; i++) {
         var o = vs[i];
-        if (o !== v && !o.paused && !o.ended) { return o; }
+        if (o === v) { continue; }
+        if (!o.paused && !o.ended) { return { el: o, why: 'plays' }; }
+        if (!held) { var s = state.get(o); if (s && isHeld(s)) { held = o; } }
       }
     } catch (e) {}
-    return null;
+    return held ? { el: held, why: 'is held' } : null;
   }
 
   var revoke = URL.revokeObjectURL;
@@ -256,7 +272,7 @@ namespace Overscan
     if (!o) { return false; }
     if (isSrc) { s.src = value; holdingUrl[value] = s; } else { s.obj = value; }
     s.since = Date.now();
-    report('hold ' + name(v) + ' ' + (isSrc ? 'blob' : 'srcObject') + ' while ' + name(o) + ' plays');
+    report('hold ' + name(v) + ' ' + (isSrc ? 'blob' : 'srcObject') + ' while ' + name(o.el) + ' ' + o.why);
     return true;
   }
 
@@ -272,6 +288,23 @@ namespace Overscan
       srcDesc.set.call(this, value);
     }
   });
+
+  /* currentSrc is what a player reads once it has stopped trusting src: the
+     engine's own answer, which while a source is held is the empty string.
+     TikTok's `[Preloader_TT] onPreloaderError PlayerError: empty src is invalid`
+     landed three times on the 2026-10-05 trail, each some seconds after a hold,
+     so it reads the held URL back too. */
+  var curDesc = Object.getOwnPropertyDescriptor(ME.prototype, 'currentSrc');
+  if (curDesc && curDesc.get && curDesc.configurable) {
+    Object.defineProperty(ME.prototype, 'currentSrc', {
+      configurable: true,
+      enumerable: curDesc.enumerable,
+      get: function () {
+        try { var s = state.get(this); if (s && s.src !== undefined) { return s.src; } } catch (e) {}
+        return curDesc.get.call(this);
+      }
+    });
+  }
 
   if (objDesc && objDesc.set && objDesc.get) {
     Object.defineProperty(ME.prototype, 'srcObject', {

@@ -136,7 +136,12 @@ the ftyp's brand list; and, since the first trail with the hold in and a freeze
 anyway, to naming an `<audio>` element, writing down a `src` or `load()` on a
 media element that is not in the document and listing it at a stall, a refused
 `srcObject` throwing the engine's own error and leaving no line, and the
-`scene:` line telling a frame of ours from another origin's.
+`scene:` line telling a frame of ours from another origin's. Since the
+2026-10-05 trail (the same freeze with all of that in and nothing stirring) it
+also holds the three starts those wraps never see — `play()` on a detached or
+audio element, `new Audio(url)` with and without an argument, `setAttribute('src')`
+outside the document — to leaving their line, passing the original's return and
+promise back, and being listed at the stall.
 
 ### The one-video harness
 
@@ -150,10 +155,12 @@ tools/msehold/run.sh
 
 It is the one script we inject that changes how a page loads video, so the
 harness drives real MediaSources on real elements and holds it to the contract:
-held while another `<video>` plays, applied on `play()`, read back as if set
-meanwhile, untouched when nothing plays, untouched on `autoplay`, dropped when
-the page takes the source away, a revoke of a held URL surviving to the release,
-`setAttribute` and `srcObject` held the same way. "Opened" means chromium fired
+held while another `<video>` plays or is itself held (the tick between pausing
+one reel and playing the next, the 2026-10-05 live-stream freeze), applied on
+`play()`, read back as if set meanwhile (`src`, the attribute and `currentSrc`),
+untouched when nothing plays and nothing is held, untouched on `autoplay`,
+dropped when the page takes the source away, a revoke of a held URL surviving to
+the release, `setAttribute` and `srcObject` held the same way. "Opened" means chromium fired
 `sourceopen`, which it only does once the engine has the source. It also carries
 a control case worth reading: chromium itself cannot open a source revoked in the
 same task as the set, so that is a shape no working page has.

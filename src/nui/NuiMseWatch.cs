@@ -490,6 +490,66 @@ namespace Overscan
     };
   }
 
+  /* --- the three ways a media element starts that the wrappers above never see ---
+
+     The 2026-10-05 trail (build-b019483, the first with the detached and audio
+     lines in) had the same freeze as 2026-10-03 to the second, and at the stall:
+     no `(audio)` line, no `detached` line, `scene: 2 video, 0 audio in the
+     document, 1 detached known, 0 iframes`. Yet the native output had the same
+     audio-only pipeline opening at that second. So the element exists and was
+     started by a call none of the above wraps: `new Audio(url)` (the constructor
+     sets the attribute inside the engine, no setter runs), `setAttribute('src')`
+     on an element outside the document (events reach nothing, and the setter
+     wrap is on the property, not the attribute), or `play()` on an element the
+     probe has never heard of. Each of the three is wrapped here the same way as
+     the rest: the original is called with the same this and arguments, its
+     return goes back, its throw reaches the page. A play() is written down only
+     for an element that is detached, an <audio>, or one this probe has no event
+     from yet; a reel's ordinary play() on an element it has been listening to
+     all along adds nothing a `playing` line does not say. */
+  if (ME && typeof ME.prototype.play === 'function') {
+    var playFn = ME.prototype.play;
+    ME.prototype.play = function () {
+      var r = playFn.apply(this, arguments);
+      try {
+        var v = this, g = tag(v);
+        remember(v);
+        if (!v.isConnected || v.tagName === 'AUDIO' || !g.ev) {
+          report(g.id + ' play() ' + origin(v) + ', ' + (v.isConnected ? onScreen(v) : 'detached'));
+        }
+      } catch (e) {}
+      return r;
+    };
+  }
+
+  if (typeof window.Audio === 'function' && window.Audio.prototype) {
+    var Aud = window.Audio;
+    var Wrapped = function Audio(src) {
+      var a = arguments.length ? new Aud(src) : new Aud();
+      try {
+        remember(a);
+        report(tag(a).id + ' new Audio(' + (arguments.length && src !== undefined && src !== null ? describe(src) : '') + '), detached');
+      } catch (e) {}
+      return a;
+    };
+    Wrapped.prototype = Aud.prototype;
+    window.Audio = Wrapped;
+  }
+
+  var EL = window.Element;
+  if (EL && typeof EL.prototype.setAttribute === 'function') {
+    var setAttr = EL.prototype.setAttribute;
+    EL.prototype.setAttribute = function (n, value) {
+      var r = setAttr.apply(this, arguments);
+      try {
+        if ((this.tagName === 'VIDEO' || this.tagName === 'AUDIO') && String(n).toLowerCase() === 'src') {
+          sourced(this, 'setAttribute src', describe(value));
+        }
+      } catch (e) {}
+      return r;
+    };
+  }
+
   function elements() {
     var out = [];
     try {
@@ -591,11 +651,11 @@ namespace Overscan
 
   /* One line per other element, because a stall line already runs near the
      trail's line length on its own: the document's media elements first, then
-     the detached ones that are known, four at most, and the scene line last. */
+     the detached ones that are known, six at most, and the scene line last. */
   function others(v) {
     try {
       var vs = elements();
-      for (var i = 0, n = 0; i < vs.length && n < 4; i++) {
+      for (var i = 0, n = 0; i < vs.length && n < 6; i++) {
         var o = vs[i];
         if (o === v) { continue; }
         n++;
@@ -605,7 +665,7 @@ namespace Overscan
                (o.isConnected ? onScreen(o) : 'detached') +
                ', last ' + (g.ev ? g.ev + ' ' + ago(g.at) : 'no event seen'));
       }
-      if (vs.length > 5) { report('with ' + (vs.length - 5) + ' more not listed'); }
+      if (vs.length > 7) { report('with ' + (vs.length - 7) + ' more not listed'); }
     } catch (e) {}
     scene();
   }

@@ -21,7 +21,12 @@
 # <audio> element, to writing down a src or load() on a media element that is
 # not in the document and listing it at a stall, to a refused srcObject throwing
 # the engine's own error and leaving no line, and to the scene line telling a
-# frame of ours from another origin's.
+# frame of ours from another origin's. Since the 2026-10-05 trail (that freeze
+# again, with all of it in and nothing stirring) it also holds the wraps of the
+# three starts none of that sees — play() on a detached or audio element,
+# new Audio(url), setAttribute('src') outside the document — to leaving their
+# line, handing the original's return and promise back, and the elements being
+# listed at the stall.
 #
 # The script is lifted out of src/nui/NuiMseWatch.cs rather than copied, for the
 # same reason as tools/msewatch: a harness that tests its own copy tests nothing.

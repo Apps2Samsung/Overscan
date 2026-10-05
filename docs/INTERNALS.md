@@ -2688,9 +2688,10 @@ Nothing else can happen first — a MediaSource only opens once it is attached, 
 there are no `addSourceBuffer`s and no appends to interfere with before that
 point. So the attach is what is held. While another `<video>` on the page is
 playing, a `blob:` or `srcObject` source set on a paused element is remembered
-instead of applied; the element reads it back as if it were set (TikTok's own
-preloader checks `src`, and its `[Preloader_TT] ... empty src is invalid` is what
-it says when it is not); and the moment the page calls `play()` on that element
+instead of applied; the element reads it back as if it were set — `src`,
+`getAttribute('src')` and, since the 2026-10-05 trail, `currentSrc` too (TikTok's
+own preloader checks them, and its `[Preloader_TT] ... empty src is invalid` is
+what it says when one is empty); and the moment the page calls `play()` on that element
 the source is applied for real and the play goes through. Everything after that
 is the page's own sequence — `sourceopen`, its appends, `loadedmetadata`,
 `playing` — on an element that is now the one the viewer is watching. TikTok has
@@ -2700,10 +2701,16 @@ a download.
 
 What it does **not** hold, and why, is the whole safety of it:
 
-- Nothing while no other video is playing. The first reel, and every
+- Nothing while no other video is playing or held. The first reel, and every
   single-player site, is untouched. "Playing" is `!paused && !ended` on another
   `<video>` in the document, which is true from the moment `play()` is called,
-  frame or no frame — exactly when a second pipeline starts to matter.
+  frame or no frame — exactly when a second pipeline starts to matter. "Held"
+  was added after the 2026-10-05 trail (see *The gap between two reels, and the
+  pipeline nobody asked for* below): TikTok's swipe onto a live stream pauses the
+  reel, sources the reel after the live stream, and only then plays the live
+  stream, and in that one tick nothing was playing. A held element is the one
+  about to play, so a source set while one exists is held too, and the line says
+  `while v5 is held` rather than `plays`.
 - Nothing with the `autoplay` attribute. The engine starts that one without the
   page ever calling `play()`, so a held source would never be released.
 - Nothing on a plain URL. The evidence is MSE on TikTok; the sites that work
@@ -2955,6 +2962,154 @@ What decides it, and none of it needs a build:
   `ERROR 3` on the census, or a `page error:` naming a `SourceBuffer` append.
   That is the engine refusing the stream, and the format on the `init` line is
   what to go to.
+
+### The gap between two reels, and the pipeline nobody asked for
+
+The page FUSIONOF posted on 2026-10-05 (09:40 UTC, a gist, 358 KB) is from
+`build-b019483` — the first with the `this run` trail, the `(audio)` and
+`detached` lines and the `scene:` line all in — and his comment closes the
+2026-10-04 complaint by itself: "That proxy died now using different proxy give no
+errors." The page was fetched at the next launch, so the `previous run` block
+(14:35:32–15:08:25 on the TV's clock, `OnTerminate — closing normally`) is the
+launch with the freeze, the hold on throughout (`hold:` lines beside every swipe),
+and the native output in full. It has two stalls, a minute apart, and they are not
+the same stall:
+
+```
+15:05:43  hold: release v4 after 135.4s (play)             the swipe onto reel v4 (avc1 1024x576, ms6)
+15:05:45  mse: v4 playing t 0.1 ; native: omxtzuhdvideodec21 + omxtzaudiodec21 + mmaudiosink21
+15:05:48  mse: asks mse video/mp4;codecs="avc1.64001f,mp4a.40.2" -> yes
+15:05:48.2 native: GstTZAppSrc -> omxtzaudiodec22 -> mmaudiosink22   NO video decoder
+15:05:50  media: 1024x576 rs4 stuck                       v4 stopped at t 2.3, about 15:05:47-48
+15:05:51  mse: asks hev1.1.6.L93.B0,mp4a.40.2 -> yes ; hold: hold v5 blob while v4 plays (twice: src set again)
+15:05:51  mse: stall v4 ms6 t 2.3 buf 0.1-51.2 | frames 0
+15:05:51  mse: with v5 paused rs0 ns0 ms10, off screen, last no event seen
+15:05:51  mse: with v1 paused rs4 ns1 ms5, detached, last pause 9.5s ago
+15:05:51  mse: scene: 2 video, 0 audio in the document, 1 detached known, 0 iframes (0 not ours)
+15:05:57  mse: still stalled 8s v4: frames +0, appends +0, buf 0.1-51.2
+15:06:00  mse: v1 src ms7, detached                        the reel AFTER the live stream, sourced
+15:06:01  media: playing=0 of 2 ; hold: release v5 after 10.5s (play)      nothing was playing at 15:06:00
+15:06:02  mse: v5 loadstart ms10 ; ms10 add video hev1 + add audio mp4a ; init hvc1 800x1000
+15:06:03  mse: v5 loadedmetadata 800x1000, dur inf ; v5 playing t 0.0 ; waiting t 5.8 ; 15:06:04 playing t 5.8
+15:06:03.4 native: GstTZAppSrc -> omxtzh265dec0 + omxtzaudiodec23 + mmaudiosink23      the live stream
+15:06:04  mse: v1 loadedmetadata 720x960, dur 299.0s, off screen
+15:06:04.9 native: GstTZAppSrc -> omxtzuhdvideodec22 + omxtzaudiodec24 + mmaudiosink24  v1's reel, unheld
+15:06:07  mse: stall v5 ms10 t 5.8 buf 0.1-13.8 | frames 0 ; v5 waiting t 10.0
+15:06:08  media: 800x1000 rs1 ... rs1 stuck                for forty seconds
+15:06:48  hold: hold v4 blob while v5 plays ; 15:06:49 v1 playing t 1.1    the swipe; v1 plays at once
+```
+
+**Stall A, the reel in front of the live stream (15:05:47), is the 2026-10-03
+freeze again, to the second.** Both days: a combined codec ask,
+`video/mp4;codecs="avc1.64001f,mp4a.40.2"`, which appears nowhere else in either
+trail; within half a second of it an appsrc pipeline with an audio decoder and no
+video decoder; the reel on screen stopped with the whole reel buffered, within a
+second before that pipeline's first native line; two to three seconds later the
+HEVC ask and the live element's source, held. A single string naming both tracks
+is what a player with one muxed buffer asks before it starts, and TikTok's reel
+player never asks it — its buffers are added one codec at a time — so the live
+player is what starts at that second. And the widened probe gives the answer it
+was sent for: no `(audio)` line, no `detached` line in the seconds around the
+stall, `scene: 2 video, 0 audio in the document, 1 detached known, 0 iframes`. The
+one detached element is the previous reel, paused ten seconds earlier and inert
+(`rs4 ns1`, it gets `load()` and a new source only after the stall). So the
+pipeline belongs to an element that was never in the document and never went
+through the `src` or `srcObject` setter or `load()`. Three constructions fit
+that and nothing else does: `new Audio(url)`, whose constructor sets the source
+inside the engine without a setter running; `setAttribute('src', …)` on an
+element outside the document, which the hold wraps for `<video>` and the probe
+did not wrap at all; and `play()` on an element the probe has never heard of.
+The in-document `<audio>` elements the probe *did* catch this run (15:00:46 and
+15:00:51, `v2 (audio)`/`v3 (audio) loadstart url v16m.tiktokcdn.com/…`) both
+failed on the spot with `audio error code 4` and opened no pipeline, which says
+the one at the freeze was made some other way. Whether the pipeline is the cause
+or a symptom the clocks cannot settle (the trail is to the second, the playhead
+to a quarter of one), but it is the one thing that moves at the freeze both
+days, and the way the 2026-10-01 freezes killed a reel without the newcomer ever
+playing says the harm is done when the pipeline is built, not when it plays.
+
+**Stall B, the live stream itself (15:06:04), is ours, and it is *Two videos,
+one decoder* through a hole in the hold.** At 15:06:00 TikTok set the reel after
+the live stream on its spare element. At that tick the frozen reel was paused and
+gone from the document, and the live stream had not yet been played — the release
+is at 15:06:01 — so `busy()` found no video playing and the source went through
+(`v1 src ms7, detached`, no `hold:` line). The engine built its pipeline at
+15:06:04.9, a second and a half after the live stream's, and the live stream never
+moved past 5.8 s: it had sought there to its live edge, resumed, and stopped,
+then sought again to 10.0 and sat at `rs1` for forty seconds until the swipe,
+after which v1 played instantly on the pipeline it already had. On 2026-10-03 the
+same tick was sourced the same way (`v1 loadstart blob not ours` at 13:57:29,
+`media: playing=0 of 2`), but the engine built nothing for that reel until the
+swipe onto it at 13:57:52, and that live stream played its twenty seconds. Why the
+engine built early on the 5th and late on the 3rd the trail cannot say — both
+were `preload auto`, off screen, with metadata — and it does not have to: a
+second pipeline next to the one on screen is the harm, and the hold exists to
+stop it being built.
+
+What this build changes, and what it only watches:
+
+- **The hold counts a held element as busy.** `busy()` returns another `<video>`
+  that is playing, as before, and otherwise another `<video>` that is held — the
+  page has given it a source while something played and has not played it yet,
+  so it is the one about to play. The line says which: `hold v1 blob while v5 is
+  held`. On the 5th that holds v1 at 15:06:00; it is released at 15:06:49 when
+  TikTok plays it, exactly as every other held reel was. The chain of holds still
+  only ever starts while a video is playing, and ends where it did: at the page
+  playing, re-sourcing or removing the source of each held element. A page where
+  nothing plays never enters it. The other closing of the gap that was weighed,
+  counting an element that paused within the last few seconds, needs a clock and
+  misses the case in hand (the paused reel had left the document, so no walk and
+  no `pause` event on the document reach it), so it was not built.
+- **`currentSrc` reads the held URL back.** `src` and `getAttribute('src')`
+  already did; `currentSrc` is the engine's own answer and was the empty string
+  while a source was held. TikTok's `[Preloader_TT] onPreloaderError PlayerError:
+  empty src is invalid` landed three times this run, each some seconds after a
+  hold, and that is the property a preloader reads once it stops trusting `src`.
+  Harmless so far — every held reel played — and now closed.
+- **The probe wraps the three starts it could not see**, read-only as ever:
+  `play()` on the media prototype (written down as `v9 play() url host/seg,
+  detached` only for an element that is detached, an `<audio>`, or one the probe
+  has no event from yet — a reel's ordinary `play()` on an element it has been
+  listening to adds nothing a `playing` line does not say); the `Audio`
+  constructor (`v3 (audio) new Audio(url host/seg), detached`, the element
+  remembered so a stall lists it, `Audio.prototype` left as the engine's); and
+  `setAttribute('src')` on a video or audio element outside the document
+  (`v2 setAttribute src url host/seg, detached`). A stall now lists six other
+  elements rather than four, so the detached ones are not pushed off the list by
+  the document's. `tools/msewatch/run.sh` holds all three to passing the
+  original's return and its promise back, `new Audio()` with and without an
+  argument still making an `HTMLAudioElement`, and the elements listed at the
+  stall; `tools/msehold/run.sh` holds the gap (a source set while nothing plays
+  and another element is held is held, released on `play()`, and a source set
+  while nothing plays and nothing is held is untouched) and `currentSrc`.
+
+What the next freeze's page decides, said here first:
+
+- **Stall B does not come back**: a live stream that starts after a reel plays
+  through, with `hold … while vN is held` in front of the reel that used to open
+  under it. If a live stream still stops after its first seconds with a *video*
+  decoder opening beside its own in the native output, the trail will name the
+  element that opened it, and the hold has another path to learn.
+- **Stall A, the reel in front of the live stream**: a `new Audio(…)`,
+  `setAttribute src … detached` or `play() … detached` line in the second or two
+  before the `stall` names the element. A `blob:` source on it is held already
+  (the hold is on the media prototype, audio included) — unless it is an
+  `<audio>`, which the hold's `take()` skips by tag; a plain URL means lifting the
+  plain-URL exemption for that element's kind. Either is a small change to the
+  hold, and the line says which.
+- **Still nothing stirring** with the three wraps in — then there is no element
+  of the page's behind that pipeline, it is the engine's own, and the fix is the
+  recovery set aside in *Two videos, one decoder*: pause and play the stalled
+  element once a stall has lasted a few seconds with nothing on the page to
+  explain it. With the freeze confined to a live stream next in the feed, a
+  hitch of a few seconds once in a session is a different trade from the stop on
+  every reel it was rejected for.
+
+Two smaller things from the same page. The first reel after the TikTok page
+opened stalled at 14:54:31 at `t 1.2 buf 0.1-1.0` — the buffer ends before the
+playhead — which is data not arriving, the proxy, and not the player; the same
+first-reel symptom the 2026-10-03 reading set apart. And the whole run is on a
+third proxy (`198.46.161.42:5092`), through which every other reel played.
 
 ## What the NUI build never asked the engine for
 
@@ -3944,6 +4099,25 @@ the one its report has to come from. The state is:
   `omxtzuhdvideodec` at all is an engine never handed a frame). The answer that
   would be ours is `ERROR 3`/`ERROR 4` on the census after an `init #1`, and the
   freeze question above is unchanged behind this one.
+  **Both answered on 2026-10-05 (09:40 UTC):** "That proxy died now using
+  different proxy give no errors" closes the refused-video page as the proxy, and
+  the attached page from `build-b019483` carries the live-stream freeze with the
+  hold on and every new line in — see *The gap between two reels, and the pipeline
+  nobody asked for* above for the whole reading. In two lines: the reel in front
+  of the live stream froze exactly as on the 3rd (the combined codec ask, the
+  audio-only pipeline, nothing in the document, nothing detached, no frame), so
+  that element starts by a call the probe did not wrap; and the live stream
+  itself froze because TikTok sourced the reel *after* it in the tick between
+  pausing the old reel and playing the live one, nothing was playing, the hold
+  let it through, and its pipeline opened beside the live stream's. The build
+  this bullet ships in closes the second (a held element counts as busy) and
+  reads `currentSrc` back, and wraps the three starts the probe could not see
+  (`play()`, `new Audio`, `setAttribute('src')`), read-only. **Waiting on:** the
+  next freeze's page from it. A live stream that plays through with `hold … while
+  vN is held` in front of it is the second fixed; a `new Audio`/`setAttribute
+  src`/`play() … detached` line before the first's `stall` names the element the
+  hold has to learn; nothing stirring with those in is the engine's own, and the
+  pause/play recovery ships.
 
 Five things about that set are settled and should not be re-derived: **key `5` is
 his, not ours** — the engine's overlay path is the only one that gives him a
