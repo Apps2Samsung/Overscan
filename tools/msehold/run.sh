@@ -13,9 +13,11 @@
 #
 # It is the one script we inject that changes how a page loads video, so the
 # harness holds it to the contract and to nothing else: held while another video
-# plays, applied on play(), the source read back as if set meanwhile, untouched
-# when nothing plays, untouched on autoplay, dropped when the page takes the
-# source away, and a revoke of a held URL surviving to the release. Every case
+# plays or is itself held (the tick between pausing one reel and playing the next,
+# where the 2026-10-05 live-stream freeze was sourced), applied on play(), the
+# source read back as if set meanwhile (src, the attribute, currentSrc), untouched
+# when nothing plays and nothing is held, untouched on autoplay, dropped when the
+# page takes the source away, and a revoke of a held URL surviving to the release. Every case
 # is a real MediaSource on a real element, and "opened" means chromium fired
 # sourceopen, which it only does once the engine has the element's source.
 #

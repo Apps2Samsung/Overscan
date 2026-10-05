@@ -73,6 +73,12 @@ var b = video('b'), B = source();
 b.src = B.url;
 if (b.src !== B.url) { fail('held element does not read its src back: ' + b.src); }
 if (b.getAttribute('src') !== B.url) { fail('held element does not read its src attribute back'); }
+if (b.currentSrc !== B.url) { fail('held element does not read its currentSrc back: ' + JSON.stringify(b.currentSrc)); }
+
+/* Q: held while A plays and never played by the page, so that at phase 3, with
+   nothing playing any more, it is the held element the gap rule keys on. */
+var q = video('q'), Q = source();
+q.src = Q.url;
 
 /* C: autoplay. The engine starts this one itself, so it must not be held. */
 var c = video('c'), C = source();
@@ -128,8 +134,25 @@ setTimeout(function(){
   phase3.B = B.opened; phase3.E = E.opened; phase3.F = F.opened; phase3.G = G.opened;
   phase3.H1 = H1.opened; phase3.H2 = H2.opened; phase3.sLoad = sLoad;
 
-  /* D: with nothing else playing, a source set on a paused element is untouched. */
   a.pause(); b.pause(); f.pause(); g.pause(); h.pause(); e.pause(); if (stream) { s.pause(); }
+
+  /* R: the gap. Nothing plays, but Q is still held, so a source set now is the
+     reel after the one about to play (TikTok's tick between pausing a reel and
+     playing the live stream, 2026-10-05) and must be held too. */
+  phase3.Qopened = Q.opened;
+  var r = video('r'), R = source();
+  r.src = R.url;
+  phase3.Rearly = R.opened;
+  window.R = R;
+  /* The page then takes Q's source away and plays R: R opens, and once R is
+     paused again nothing is playing and nothing is held. */
+  q.removeAttribute('src');
+  r.play();
+  r.pause();
+  window.Q = Q;
+
+  /* D: with nothing else playing and nothing held, a source set on a paused
+     element is untouched. */
   var d = video('d'), D = source();
   d.src = D.url;
   window.D = D;
@@ -172,7 +195,12 @@ function check(){
   if (stream && phase3.sLoad < 1) { fail('srcObject element did not start loading after play()'); }
   if (has(/FAILED/)) { fail('a release failed'); }
 
-  if (!window.D.opened) { fail('d was held with nothing playing'); }
+  if (phase3.Qopened) { fail('q opened although the page never played it'); }
+  if (phase3.Rearly) { fail('r opened at once: a source set while another element is held was not held'); }
+  if (!has(/^hold v\\d blob while v\\d is held$/)) { fail('the gap hold not reported with its reason'); }
+  if (!window.R.opened) { fail('r did not open after play()'); }
+  if (window.Q.opened) { fail('q opened after its source was removed'); }
+  if (!window.D.opened) { fail('d was held with nothing playing and nothing held'); }
   if (!window.L.opened) { fail('with nothing held, a source revoked a tick after the set did not open: F tests the wrong thing'); }
   info.push('control: chromium opens a source revoked right after the set, nothing held: ' + (window.K.opened ? 'yes' : 'no'));
 
