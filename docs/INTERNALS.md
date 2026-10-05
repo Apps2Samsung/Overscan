@@ -3046,7 +3046,7 @@ were `preload auto`, off screen, with metadata — and it does not have to: a
 second pipeline next to the one on screen is the harm, and the hold exists to
 stop it being built.
 
-What this build changes, and what it only watches:
+What `build-6201042` changes, and what it only watches:
 
 - **The hold counts a held element as busy.** `busy()` returns another `<video>`
   that is playing, as before, and otherwise another `<video>` that is held — the
@@ -4109,11 +4109,11 @@ the one its report has to come from. The state is:
   that element starts by a call the probe did not wrap; and the live stream
   itself froze because TikTok sourced the reel *after* it in the tick between
   pausing the old reel and playing the live one, nothing was playing, the hold
-  let it through, and its pipeline opened beside the live stream's. The build
-  this bullet ships in closes the second (a held element counts as busy) and
+  let it through, and its pipeline opened beside the live stream's.
+  `build-6201042` closes the second (a held element counts as busy) and
   reads `currentSrc` back, and wraps the three starts the probe could not see
   (`play()`, `new Audio`, `setAttribute('src')`), read-only. **Waiting on:** the
-  next freeze's page from it. A live stream that plays through with `hold … while
+  next freeze's page from `build-6201042`. A live stream that plays through with `hold … while
   vN is held` in front of it is the second fixed; a `new Audio`/`setAttribute
   src`/`play() … detached` line before the first's `stall` names the element the
   hold has to learn; nothing stirring with those in is the engine's own, and the
