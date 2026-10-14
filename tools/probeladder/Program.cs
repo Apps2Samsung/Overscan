@@ -102,6 +102,14 @@ namespace Overscan.Harness
             Expect(ledger.Contains("res/:header\t"), "so is the header read");
             Expect(ledger.Contains("res/:read\t"), "so is the readable mapping");
             Expect(ledger.Contains("res/:exec\t"), "so is the executable mapping");
+            Expect(ledger.Contains("control:memfd\t"),
+                   "the memfd was made — the one location that lives on no mount");
+            Expect(ledger.Contains("memfd:exec\t"),
+                   "and asked for the executable mapping, like every disk copy");
+            Expect(ledger.Contains("memfd:dlopen\t"),
+                   "and the loader was asked to take it");
+            Expect(NativeProbe.Dump().Contains("memfd dlopen:"),
+                   "so the report shows how the memfd answered");
             Expect(ledger.Contains("res/:labels\t"),
                    "and so is getxattr, the call this set has hung on twice");
             Expect(ledger.Contains("verdict\t" + NativeProbe.Summary),

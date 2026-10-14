@@ -585,11 +585,44 @@ new and worth having before the next 5.5 report:
   typeinfo symbol, and loads on the second pass. The second-pass rule in
   `EngineImports` is not an AU7200 quirk.
 
-The reading is the close branch, said in advance on #17 and #95: anonymous memory
-allowed, every location refused, the stub refused, nothing left in the package to
-try. The one outside lever is the same as the Q80's, a software update that ships a
-different `libchromium-impl.so`, and the reply asks that one question. The close
-itself is the "this set cannot run Overscan" signal and is Patrick's to send.
+The reading is the close branch as it stood on 2026-10-14: anonymous memory
+allowed, every *disk* location refused, the stub refused. But it surfaced the one
+shape the ladder had never asked, and that shape is worth a build before the close.
+
+**The memfd rung, and why #129 is not closed yet.** Every location the ladder
+walked is a file on a mount — `res/`, `bin/`, `lib/`, `data/`, and the copy in
+`data/` — and all five were refused `PROT_READ|PROT_EXEC`, which the SFD hook does
+to an unsigned ELF of ours on any mount. The anonymous-exec control is allowed,
+because the runtime's JIT needs it. Those two answers bracket a third the walk never
+tried: a `memfd`, an anonymous file in kernel memory with a real `/proc/self/fd`
+path the loader accepts, backed by no mount at all. A file of ours on disk is
+refused; plain anonymous memory is allowed; a memfd sits in the gap, and whether the
+hook inspects a mountless file is a thing only the set can say. If it maps and loads,
+a stub need never land on disk — the bytes are read out of our own readable package
+and handed to the loader from memory, and the whole close above reopens. If it is
+refused like the five disk copies, the gap is shut in one measured line rather than
+an inference, and *then* the close is final.
+
+`NativeProbe` asks it as a sixth location (`memfd` in the report), after the disk
+copies and under the same ledger, watchdog and two-strikes rule — created by
+`CreateMemfd`, which reads the `res/` bytes, writes them into a `memfd_create` fd
+(the glibc wrapper, or the raw syscall where 5.5's glibc predates it), and hands the
+walk the `/proc/self/fd` path. `tools/probeladder/run.sh` holds it off-device: on
+the dev box the memfd maps executable and `dlopen` loads it, and the `hang` scenario
+points a FIFO at the source so the create hits its deadline and the walk carries on
+without it. It ships in the tizen5 and tizen6 packages (both compile the probe) from
+the next build. How to read the `memfd` line:
+
+- `memfd maps executable and dlopen loaded it` — there is a place the stub can live
+  that this firmware does not gate, and the stub route is alive on 5.5 after all
+  (with the `libzone.so.5` catch below: it would take two stubs, eight no-ops).
+- `memfd` refused like the five disk copies — the gap is shut, nothing in the
+  package or out of it (short of a firmware update) is left, and the close is final.
+
+The one outside lever stays the same as the Q80's, a software update that ships a
+different `libchromium-impl.so`, and the reply asks that one question alongside the
+memfd build. The close itself, when it comes, is the "this set cannot run Overscan"
+signal and is Patrick's to send.
 
 **The same wall on a 2021 set, and the second close (issue #95, 2026-09-09).** A
 QE65Q70AA on Tizen 6.0 sent the whole diagnostics page for the tizen6 package

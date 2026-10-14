@@ -45,11 +45,20 @@ namespace Overscan
     /// `PROT_EXEC`. The runtime's own JIT does that on every launch, so it is known
     /// safe, and it separates "this kernel refuses executable memory" from "this
     /// kernel refuses <i>files we supply</i>". Only the second has a shim behind it,
-    /// and anonymous memory is no use to a shim: the dynamic loader resolves
+    /// and plain anonymous memory is no use to a shim: the dynamic loader resolves
     /// `DT_NEEDED` against its own link map, which nothing but `dlopen` writes to.
     ///
-    /// If every location refuses, that is the end of the idea rather than the end of
-    /// one attempt at it — see *What is left on the Q80* in `docs/INTERNALS.md`.
+    /// One location after the disk copies is neither of those two, and it is the only
+    /// idea left once every disk location is refused: a `memfd`, an anonymous file in
+    /// kernel memory with a real `/proc/self/fd` path the loader accepts. A file of
+    /// ours on a mount is refused and plain anonymous memory is allowed; a memfd sits
+    /// in the gap between them, a file the SFD hook may or may not inspect because it
+    /// is backed by no mount at all. If it maps and loads, a stub need never land on
+    /// disk — see <see cref="CreateMemfd"/>.
+    ///
+    /// If every location refuses, the memfd included, that is the end of the idea
+    /// rather than the end of one attempt at it — see *What is left on the Q80* in
+    /// `docs/INTERNALS.md`.
     ///
     /// Only the tizen5 package ships the library, because only the Q80 needs the
     /// answer and the object is built for one architecture. Everywhere else this
@@ -77,6 +86,35 @@ namespace Overscan
 
         /// <summary>`rwxr-xr-x`, for the copy in the writable directory.</summary>
         private const uint ExecutableMode = 0x1ED;
+
+        /// <summary>How it is named in the report: a file that lives on no mount at all.</summary>
+        private const string MemfdName = "memfd";
+
+        /// <summary>
+        /// The <c>memfd_create</c> syscall number, by architecture, for the firmwares
+        /// whose glibc has no wrapper. Linux ≥ 3.17 has the call on every TV kernel we
+        /// have seen; only the number moves. Arm is the TV, X64 is the off-device
+        /// harness; the rest are here so a future port answers rather than throwing.
+        /// </summary>
+        private static int MemfdSyscallNumber()
+        {
+            switch (RuntimeInformation.ProcessArchitecture)
+            {
+                case Architecture.Arm: return 385;
+                case Architecture.Arm64: return 279;
+                case Architecture.X64: return 319;
+                case Architecture.X86: return 356;
+                default: return -1;
+            }
+        }
+
+        /// <summary>
+        /// The memfd the <see cref="MemfdName"/> location is opened on, held for the
+        /// whole walk. The <c>/proc/self/fd</c> path only resolves while this fd is
+        /// open, so it is closed last, after the mounts and labels are read — see
+        /// <see cref="CloseMemfd"/>.
+        /// </summary>
+        private static int _memfd = -1;
 
         /// <summary>Where the ledger lives, in the one directory that survives a launch.</summary>
         private const string LedgerFile = "probe-ledger.txt";
@@ -134,6 +172,20 @@ namespace Overscan
 
         [DllImport("libc.so.6", SetLastError = true)]
         private static extern IntPtr read(int fd, byte[] buffer, IntPtr count);
+
+        [DllImport("libc.so.6", SetLastError = true)]
+        private static extern IntPtr write(int fd, byte[] buffer, IntPtr count);
+
+        // The anonymous in-memory file the memfd rung is built on. Present as a glibc
+        // wrapper since 2.27; on a firmware whose glibc predates that the wrapper is
+        // absent and binding it throws EntryPointNotFoundException at the call, caught
+        // below and retried through the raw syscall, whose number is the one thing that
+        // differs by architecture.
+        [DllImport("libc.so.6", EntryPoint = "memfd_create", SetLastError = true)]
+        private static extern int memfd_create(string name, uint flags);
+
+        [DllImport("libc.so.6", EntryPoint = "syscall", SetLastError = true)]
+        private static extern long syscall(long number, IntPtr arg1, uint arg2);
 
         [DllImport("libc.so.6", SetLastError = true)]
         private static extern IntPtr mmap(IntPtr address, IntPtr length, int protection,
@@ -1133,6 +1185,13 @@ namespace Overscan
                 Summary = "could not be asked: " + ex.GetType().Name + ": " + ex.Message;
                 Trace("  " + Summary);
             }
+            finally
+            {
+                // After the mounts and labels, which are read through the memfd's
+                // /proc/self/fd path while the fd is still open. A walk that returned
+                // early never made one, so this is a no-op there.
+                CloseMemfd();
+            }
         }
 
         /// <summary>
@@ -1389,6 +1448,15 @@ namespace Overscan
                 found.Add(new Location("data/", copied));
             }
 
+            // Last, and on no mount at all: the same bytes in an anonymous in-memory
+            // file. The one shape the five disk locations above cannot reach — see
+            // CreateMemfd. Its source is the res/ copy, which has already been read.
+            string memory = CreateMemfd(found[0].Path);
+            if (memory != null)
+            {
+                found.Add(new Location(MemfdName, memory));
+            }
+
             return found;
         }
 
@@ -1478,6 +1546,158 @@ namespace Overscan
             {
                 return "cannot copy — " + ex.GetType().Name + ": " + ex.Message;
             }
+        }
+
+        /// <summary>
+        /// The one shape the five disk locations do not cover, and the only one left
+        /// worth a build on a set that refused all five (issue #129, a second Tizen 5.5
+        /// set): a library of ours in an anonymous in-memory file.
+        ///
+        /// The Q80 and #129 gave two answers that bracket this exactly. A file of ours
+        /// on any mount is refused <c>PROT_READ|PROT_EXEC</c> — the SFD hook refusing to
+        /// map an unsigned ELF of ours. A page of plain anonymous memory is allowed —
+        /// the runtime's JIT needs it. A <c>memfd</c> is neither: it is a real file with
+        /// a real <c>/proc/self/fd</c> path the loader accepts, backed by memory rather
+        /// than any mount, so it sits in the gap the hook may or may not inspect. If it
+        /// maps and loads, a stub need never touch the disk — the bytes are read out of
+        /// our own readable package and handed to the loader from memory. If it is
+        /// refused like the disk copies, that is the gap closed in one line rather than
+        /// inferred, and the stub route is dead on this firmware for good.
+        ///
+        /// The bytes are the same object the disk locations ship; <paramref name="source"/>
+        /// is the readable <c>res/</c> copy. Ledgered and deadlined like
+        /// <see cref="CopyToData"/>, because reading the source and the two syscalls are
+        /// as able to hang this set as anything else it has hung on — and because a
+        /// launch it ends must not ask it again. On success the fd is parked in
+        /// <see cref="_memfd"/> for the walk and the <c>/proc/self/fd</c> path returned;
+        /// on failure, null, and the location is simply not added.
+        /// </summary>
+        private static string CreateMemfd(string source)
+        {
+            try
+            {
+                int created = -1;
+                string made = Ledger.Ask(
+                    "control:memfd",
+                    "  probe: write " + ProbeLibrary + " into a memfd",
+                    delegate { return MakeMemfd(source, out created); },
+                    true);
+
+                if (!Succeeded(made) || created < 0)
+                {
+                    return null;
+                }
+
+                _memfd = created;
+                return "/proc/self/fd/" + created.ToString(CultureInfo.InvariantCulture);
+            }
+            catch (Exception ex)
+            {
+                Trace("  probe: cannot make a memfd — " + ex.GetType().Name + ": " + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Creates the memfd, writes the whole library into it, and hands back the fd.
+        /// The read is of our own <c>res/</c> file — readable on every set — and runs
+        /// inside the delegate so a source that will not read (the harness points a FIFO
+        /// here, the shape a hung file has) is caught by the same deadline as the rest.
+        /// </summary>
+        private static string MakeMemfd(string source, out int fd)
+        {
+            fd = -1;
+
+            byte[] bytes = File.ReadAllBytes(source);
+            if (bytes.Length == 0)
+            {
+                return "nothing to write — source was empty";
+            }
+
+            int memfd;
+            try
+            {
+                memfd = memfd_create("ovprobe", 0);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                int number = MemfdSyscallNumber();
+                if (number < 0)
+                {
+                    return "no memfd_create wrapper and no syscall number for this architecture";
+                }
+
+                IntPtr name = Marshal.StringToHGlobalAnsi("ovprobe");
+                try
+                {
+                    memfd = (int)syscall(number, name, 0u);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(name);
+                }
+            }
+
+            if (memfd < 0)
+            {
+                return "memfd_create refused — " + Errno(Marshal.GetLastWin32Error());
+            }
+
+            // write() may take fewer bytes than asked, so a partial write is advanced
+            // from rather than retried whole. The marshaled buffer starts at the chunk's
+            // first byte, which is why a partial write copies the remainder into a fresh
+            // array rather than offsetting into the original.
+            int offset = 0;
+            while (offset < bytes.Length)
+            {
+                int remaining = bytes.Length - offset;
+                byte[] chunk;
+                if (offset == 0)
+                {
+                    chunk = bytes;
+                }
+                else
+                {
+                    chunk = new byte[remaining];
+                    Array.Copy(bytes, offset, chunk, 0, remaining);
+                }
+
+                long wrote = write(memfd, chunk, (IntPtr)remaining).ToInt64();
+                if (wrote <= 0)
+                {
+                    try { close(memfd); } catch (Exception) { }
+                    return "write refused — " + Errno(Marshal.GetLastWin32Error());
+                }
+
+                offset += (int)wrote;
+            }
+
+            fd = memfd;
+            return "ok";
+        }
+
+        /// <summary>
+        /// Closes the memfd, last of all. While it is open the <c>/proc/self/fd</c> path
+        /// the location was asked by resolves; once it is shut the file is gone, which is
+        /// the whole point of a memfd and the reason it leaves nothing on any mount.
+        /// </summary>
+        private static void CloseMemfd()
+        {
+            if (_memfd < 0)
+            {
+                return;
+            }
+
+            try
+            {
+                close(_memfd);
+            }
+            catch (Exception)
+            {
+                // Best-effort, like everything else in here.
+            }
+
+            _memfd = -1;
         }
 
         /// <summary>
