@@ -30,14 +30,25 @@ Requested in [tizen-community-packages#24](https://github.com/Apps2Samsung/tizen
 | Your TV | Download | Notes |
 | --- | --- | --- |
 | 2018 (Tizen 4.0) | `Overscan-tizen4.tpk` | The oldest TVs that can run this. Chromium 56, so expect real limits. Untested. |
-| 2019–2020 (Tizen 5.0–5.5) | `Overscan-tizen5.tpk` | Needs a **partner certificate** to sign — see below. Old engine, so expect some sites to misbehave. |
-| 2021–2023 (Tizen 6.0–7.0) | `Overscan-tizen6.tpk` | Not yet tested on hardware. |
+| 2019–2020 (Tizen 5.0–5.5) | `Overscan-tizen5.tpk` | Needs a **partner certificate** to sign — see below. Runs on the RU7020 (Tizen 5.0). Old engine, so expect some sites to misbehave. **Known to be refused on the Q80 (5.5, [#17](https://github.com/Apps2Samsung/Overscan/issues/17)) and another 5.5 set ([#129](https://github.com/Apps2Samsung/Overscan/issues/129))**: see the firmware note below. |
+| 2021–2023 (Tizen 6.0–7.0) | `Overscan-tizen6.tpk` | Runs on the AU7200 (Tizen 6.0, [#105](https://github.com/Apps2Samsung/Overscan/issues/105)). **Known to be refused on the Q70A (6.0, [#95](https://github.com/Apps2Samsung/Overscan/issues/95))**: see the firmware note below. |
 | 2024 (Tizen 8.0) | `Overscan-tizen8.tpk` | Not yet tested on hardware. |
 | 2025+ (Tizen 9.0–10.0) | `Overscan-nui.tpk` | Tested on the Tizen 10 emulator. Modern engine — sites generally just work. |
 
 **2017 and older sets (Tizen 3.0, 2.x) cannot run Overscan.** Samsung only added
 .NET to TVs with the 2018 range, so there is no runtime for the app to start in —
 this is a platform limit, not something a build can work around.
+
+**Some 2019 to 2021 firmwares refuse the TV's web engine to any app that is not
+Samsung's own.** The engine is the firmware's, and on those sets it will not start
+inside an app process, on any certificate. Overscan then shows a failure screen on
+first launch and the diagnostics page (`http://<TV-IP>:8081`) says exactly where it
+stopped. It is per firmware, not per Tizen version: two 5.5 sets refuse it and a
+5.0 set runs it, one 2021 set refuses it and another 2021 set runs it. The sets
+known either way are named in the table. If yours is a refused one, the only
+thing that can change the answer is a Samsung software update that ships a
+different engine; the issues linked above say what was tried and why nothing in
+the app can get past it.
 
 Pick the package for **your** platform, not a newer one: a TV refuses to install a
 package whose `api-version` is above its own platform version (you get
