@@ -546,6 +546,51 @@ mapping policy and the page would say so either way: `own code:` still refusing
 every location and `engine stub: refused` is the same close, and `Chromium
 initialized, refcount=1` is the set running Overscan.
 
+**2026-10-14, a second 5.5 set, and the first to answer with the stub in (issue
+#129).** A set on Tizen 5.5, firmware 2743, model not named, sent the whole page
+for `build-6201042`'s `Overscan-tizen5.tpk`, which carries the ladder, the census
+and the stub from `build-5cdc532` on. It is the Q80's close branch measured
+directly rather than inferred, on an install that had been launched six times
+(`ledger 3, launch 6`): anonymous `PROT_EXEC` `ok`, every one of the five locations
+`PROT_READ|PROT_EXEC: EPERM` and `dlopen: failed to map segment`, each re-asked
+through `/proc/self/fd` with the same answer, labels and mounts read afterwards
+without a stall, `took 2 launches`. The ledger said the engine had failed there, so
+the walk went first (verdict on the books, `not walking again`), the census went
+next (3162 ms), and the stub gate was reached for the first time on a 5.x set:
+
+```
+engine stub: loading /opt/usr/apps/org.apps2samsung.overscan/res/libprivileged-service-client.so (5148 bytes) RTLD_NOW|RTLD_GLOBAL
+engine stub: refused — /opt/usr/apps/org.apps2samsung.overscan/res/libprivileged-service-client.so: failed to map segment from shared object
+```
+
+The last of the five readings in *The census came back, and the stub ships*: the
+stub's `dlopen` refused for the same reason the ladder's was, and the launch
+carried on to the ordinary failure screen with the trail healthy (`105 lines on
+disk`), so a refused stub costs nothing but the line. Two things on that page are
+new and worth having before the next 5.5 report:
+
+- **On this firmware the wall has a second layer.** The census read `114 needed
+  (2 refused: libprivileged-service-client.so, libzone.so.5), 2492 imports, 8
+  unresolved`: the four `PS_` names the AU7200 showed, plus
+  `zone_support_web_isolation`, `zone_get_context`, `zone_attach_process` and
+  `zone_release_context`, all `FUNC`, from `libzone.so.5`, which the loader refused
+  with the same `Operation not permitted`. The AU7200's 6.0 engine has no
+  `DT_NEEDED` on `libzone`; this 5.5 engine does. So a 5.5 set that *did* map a
+  file of ours would still have shown the second reading in that list (`dlopen
+  failed:` naming `libzone.so.5`), and the stub route there is two stubs, eight
+  no-op C functions, not one. Academic on this set, since no file of ours maps,
+  but it is the first census from a 5.5 engine and it says the tizen5 stub as
+  shipped could never have been enough on its own.
+- **`libwgt-manifest-handlers.so.1` is held back on 5.5 too**, on the same C++
+  typeinfo symbol, and loads on the second pass. The second-pass rule in
+  `EngineImports` is not an AU7200 quirk.
+
+The reading is the close branch, said in advance on #17 and #95: anonymous memory
+allowed, every location refused, the stub refused, nothing left in the package to
+try. The one outside lever is the same as the Q80's, a software update that ships a
+different `libchromium-impl.so`, and the reply asks that one question. The close
+itself is the "this set cannot run Overscan" signal and is Patrick's to send.
+
 **The same wall on a 2021 set, and the second close (issue #95, 2026-09-09).** A
 QE65Q70AA on Tizen 6.0 sent the whole diagnostics page for the tizen6 package
 (`build-481d83c`), and it is the Q80's trail line for line: engine preloaded, nine
@@ -1481,6 +1526,9 @@ How to read the next report, said here first:
   its job and the wall has a second layer; the name on that line is the next
   question, and the census (now four names clean) says whether a second stub is a
   short list of C functions or not.
+  (On Tizen 5.5 it is: issue #129's census shows the 5.5 engine also needs
+  `libzone.so.5`, refused the same way, four more `FUNC` imports. See *What is left
+  on the Q80*, the 2026-10-14 paragraph.)
 - **`engine stub: loaded from …`, then the same `libprivileged-service-client.so:
   Operation not permitted`** — the loader went to `/usr/lib` regardless, so the
   soname match did not happen in this firmware's loader (an `RTLD_GLOBAL` handle in
