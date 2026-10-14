@@ -301,8 +301,14 @@ build, a ledger that never opens, a page loaded before the walk, an install whos
 ledger says the engine already failed there (the walk goes ahead of the engine), a
 clean run twice over (the second walk finds the verdict on the books and asks
 nothing — issue #105's set ended two launches on the first rung of a walk behind a
-verdict), and a walk started behind the early one on the same launch. It needs a C
-compiler for the stand-in library and nothing else.
+verdict), and a walk started behind the early one on the same launch. The `walk`
+scenario also holds the sixth location, the `memfd` rung (issue #129): a library of
+ours in an anonymous in-memory file rather than on a mount, the one shape between a
+disk file every 5.5 set refuses and the anonymous page they all allow, created and
+written under the same ledger and deadline as the disk copies — the `hang` scenario
+points its FIFO at the memfd's source too, so a source that will not read is written
+off and the walk carries on. It needs a C compiler for the stand-in library and
+nothing else.
 
 The ladder's only real property is that it converges — whatever one rung does, the
 rungs and locations behind it still get asked. Two builds have been spent finding out
