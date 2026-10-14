@@ -611,7 +611,7 @@ walk the `/proc/self/fd` path. `tools/probeladder/run.sh` holds it off-device: o
 the dev box the memfd maps executable and `dlopen` loads it, and the `hang` scenario
 points a FIFO at the source so the create hits its deadline and the walk carries on
 without it. It ships in the tizen5 and tizen6 packages (both compile the probe) from
-the next build. How to read the `memfd` line:
+`build-8d4fe0a` (2026-10-14). How to read the `memfd` line:
 
 - `memfd maps executable and dlopen loaded it` — there is a place the stub can live
   that this firmware does not gate, and the stub route is alive on 5.5 after all
@@ -623,6 +623,31 @@ The one outside lever stays the same as the Q80's, a software update that ships 
 different `libchromium-impl.so`, and the reply asks that one question alongside the
 memfd build. The close itself, when it comes, is the "this set cannot run Overscan"
 signal and is Patrick's to send.
+
+The reply quoting `build-8d4fe0a` went out on 2026-10-14, the day the page came
+in, with the odds stated up front (most likely refused, since all five disk
+locations sit on the same writable mount and a memfd is still a file-backed
+mapping), both readings of the `memfd:exec` line named, and the firmware
+question beside it. **Waiting on:** that page. Two things are decided in advance
+for the refused branch, so the close does not have to decide them:
+
+- **The hand-rolled loader is the last idea, and it stays unbuilt.** Anonymous
+  executable memory is allowed, so the stub *could* be mapped by hand: anonymous
+  pages, the ELF copied in, relocated by us. That yields code the CPU may run and
+  not a library the loader knows about; the engine's `DT_NEEDED` is matched against
+  glibc's own link map, which only a real `dlopen` writes, so satisfying it means
+  forging a `link_map` entry in that firmware's glibc, whose layout can be checked
+  nowhere but on a reporter's set. That is weeks of work aimed blind at a 2019 set,
+  with the brick shape the two-strikes rule exists for. Recorded here so the next
+  session does not rediscover it as new.
+- **A close does not pull a package.** The packages are per Tizen version and the
+  wall is per firmware: `Overscan-tizen5.tpk` runs on the RU7020 (5.0) and is
+  refused on the Q80 and #129's set (5.5); `Overscan-tizen6.tpk` runs on the AU7200
+  (#105) and is refused on the Q70A (#95), both 6.0. Pulling a package for the sets
+  it cannot run on removes it from the sets it runs on. What a close changes is the
+  README's *Will it work on my TV?* table, which names the sets each package is
+  known to run on and known to be refused on, so the next owner of one of those
+  sets reads it there before spending an evening on an install.
 
 **The same wall on a 2021 set, and the second close (issue #95, 2026-09-09).** A
 QE65Q70AA on Tizen 6.0 sent the whole diagnostics page for the tizen6 package
