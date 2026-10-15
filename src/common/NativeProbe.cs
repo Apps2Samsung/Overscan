@@ -128,8 +128,15 @@ namespace Overscan
         /// `ledger 3`: a bare step name no longer means <see cref="Killed"/> on its
         /// own — see <see cref="FatalAfter"/> — and every launch of the walk writes a
         /// <see cref="LaunchKey"/> line, which is now where the launch count comes from.
+        ///
+        /// `ledger 4`: the `memfd` rung was added to <see cref="Locate"/> in
+        /// build-8d4fe0a but the version was left at `ledger 3`, so every set that had
+        /// already reached a verdict replayed it and <see cref="Run"/> returned before
+        /// the new rung was ever walked (issue #129). Adding a rung is a change to the
+        /// ladder, so the version moves with it — otherwise the one set the new rung
+        /// was built to measure is the one set that never runs it.
         /// </summary>
-        private const string LedgerVersion = "ledger 3";
+        private const string LedgerVersion = "ledger 4";
 
         /// <summary>What a step's result reads as when the launch that ran it never came back.</summary>
         private const string Killed = "KILLED THE PROCESS";
