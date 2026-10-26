@@ -2,6 +2,12 @@
 
 # Overscan
 
+> [!IMPORTANT]
+> **Overscan is no longer being developed.** The existing releases stay up, but
+> there will be no new builds, fixes or answers on issues. You're welcome to fork
+> the repo and carry on the work; everything needed to build it is in
+> [CLAUDE.md](CLAUDE.md) and [docs/INTERNALS.md](docs/INTERNALS.md).
+
 A web browser you can sideload onto a Samsung TV — the one the TV should have
 shipped with.
 
